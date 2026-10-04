@@ -59,6 +59,10 @@ type World = {
   answer: 'USE' | 'KEEP' | 'DISMISS' | 'GATE'
   /** The router's questions as asked: text and option labels. */
   asked: { text: string; options: string[] }[]
+  /** Set: every model request reports this many output tokens (otherwise no usage). */
+  usage?: number
+  /** Paths `$.fs.write` wrote, in order. */
+  written: string[]
   /** Answers a GATE question with USE, KEEP or DISMISS. */
   release?: (answer: 'USE' | 'KEEP' | 'DISMISS') => void
 }
@@ -73,7 +77,7 @@ function worldOf(on: On, reply = BUG_REPLY, sources: Record<string, unknown> = {
   const clock = mock.clock(on)
   const world: World = {
     sent: [], efforts: [], lines: [], debug: [], classifierCalls: 0, reply, messages: [], prompts: [], toasts: [], clock, callsAtSubmit: [],
-    subagentReply: SEARCH_REPLY, subagentReads: [], spawned: [], files: {}, answer: 'USE', asked: [],
+    subagentReply: SEARCH_REPLY, subagentReads: [], spawned: [], files: {}, answer: 'USE', asked: [], written: [],
   }
   mock.store(on)
   mock.env(on, env)
@@ -86,6 +90,11 @@ function worldOf(on: On, reply = BUG_REPLY, sources: Record<string, unknown> = {
   on('fs.read', ($, e) => {
     const text = world.files[slashed(e.path)]
     return text === undefined ? { deny: 'ENOENT' } : { value: text }
+  })
+  on('fs.write', ($, e) => {
+    world.files[slashed(e.path)] = e.text
+    world.written.push(slashed(e.path))
+    return { value: undefined }
   })
   on('fs.list', ($, e) => {
     const dir = `${slashed(e.path).replace(/\/$/, '')}/`
@@ -123,7 +132,8 @@ function worldOf(on: On, reply = BUG_REPLY, sources: Record<string, unknown> = {
   })
   on('turn.step', async function* ($, e) {
     world.sent.push(e.effort)
-    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
+    const usage = world.usage === undefined ? null : { input_tokens: 10, output_tokens: world.usage, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: e.model }
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage }
   })
   on('turn.complete', ($, e) => ({ text: e.answer }))
   on('agent.spawn', ($, e) => {
@@ -915,6 +925,65 @@ describe('effort-router', () => {
       await $.session.start(STARTED)
       await spawn($, { subagentType: 'subagent-probe:probe-low', prompt: 'search for X' })
       expect(world.subagentReads).toHaveLength(1)
+    })
+  })
+
+  // --- the spend report -----------------------------------------------------------------
+
+  describe('the spend report', () => {
+    const HOME = { HOME: '/home/t', USERPROFILE: '/home/t' }
+    const LEDGER = '/home/t/.claude/effort-router/spend/session-1.json'
+    const complete = ($: Engine) => $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+
+    test('records each request with the level it arrived at and went out at, and the router reads; saved when a turn ends', async ($, on) => {
+      const world = worldOf(on, BUG_REPLY, {}, { ...HOME, ...AUTO })
+      world.usage = 1000
+      await $.session.start(STARTED)
+      await submit($, 'fix the crash in the parser') // auto: high 🔒
+      await step($, 0) // arrives medium (the picker), goes out high
+      const id = await spawn($, { description: 'Find usages', prompt: 'find every caller of parseConfig' })
+      await step($, 0, id) // arrives medium, the brief says low
+      expect(world.sent).toEqual(['high', 'low'])
+      const report = await route($, 'report session')
+      expect(report).toContain('Effort spend for this session: 2 requests, 2.0k output tokens.')
+      expect(report).toContain('  main thread, medium → high: 1 request, 1.0k output (avg 1.0k)')
+      expect(report).toContain('  subagents, medium → low: 1 request, 1.0k output (avg 1.0k)')
+      expect(report).toContain("The router's own reads: 2 calls")
+      expect(world.written).toEqual([])
+      await complete($)
+      expect(world.written).toEqual([LEDGER])
+      const saved = JSON.parse(world.files[LEDGER] ?? '{}')
+      expect(saved.rows.map((r: { caller: string; from: string; to: string; requests: number }) => `${r.caller} ${r.from}→${r.to} ×${r.requests}`)).toEqual(['main medium→high ×1', 'subagent medium→low ×1'])
+      await complete($)
+      expect(world.written).toHaveLength(1) // nothing new: not written again
+    })
+
+    test('a session carries on from its saved ledger; the week reads every saved session', async ($, on) => {
+      const world = worldOf(on, '{"decision":"undecided"}', {}, HOME)
+      world.usage = 100
+      const today = new Date(world.clock.now()).toISOString().slice(0, 10)
+      const row = (from: string, to: string, output: number) => ({ day: today, caller: 'main', from, to, requests: 1, output, input: 0 })
+      world.files[LEDGER] = JSON.stringify({ version: 1, session: 'session-1', repo: 'mods', rows: [row('medium', 'medium', 500)], reads: [] })
+      world.files['/home/t/.claude/effort-router/spend/session-2.json'] = JSON.stringify({ version: 1, session: 'session-2', repo: 'employment', rows: [row('high', 'high', 2000)], reads: [] })
+      world.files['/home/t/.claude/effort-router/spend/notes.txt'] = 'not a ledger'
+      await $.session.start(STARTED)
+      await step($, 0)
+      expect(world.sent).toEqual(['medium'])
+      const week = await route($, 'report')
+      expect(week).toContain('3 requests in 2 sessions, 2.6k output tokens.')
+      expect(week).toContain('  medium: 2 requests, 600 output (avg 300 a request)')
+      expect(week).toContain('By repo (output): employment 2.0k · mods 600.')
+      expect(await route($, 'report session')).toContain('Effort spend for this session: 2 requests, 600 output tokens.')
+    })
+
+    test('no home directory: still reported for the session, nothing written', async ($, on) => {
+      const world = worldOf(on, '{"decision":"undecided"}')
+      world.usage = 10
+      await $.session.start(STARTED)
+      await step($, 0)
+      await complete($)
+      expect(world.written).toEqual([])
+      expect(await route($, 'report')).toContain('1 request in 1 session, 10 output tokens.')
     })
   })
 })

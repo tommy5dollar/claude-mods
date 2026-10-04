@@ -56,6 +56,14 @@ import {
   subagentReport,
   subagentSystem,
   type TranscriptMessage,
+  dayOf,
+  emptyLedger,
+  parseLedger,
+  spendReport,
+  tokens,
+  withRead,
+  withSpend,
+  type SpendLedger,
 } from '../hooks/policy'
 
 describe('trimTranscript', () => {
@@ -264,6 +272,11 @@ describe('parseRoute', () => {
     ['rules are strict here', { kind: 'suggest', hint: 'rules are strict here' }],
     // removed: reset and fix are now plain hints
     ['reset', { kind: 'suggest', hint: 'reset' }],
+    ['report', { kind: 'report', period: 'week' }],
+    ['report session', { kind: 'report', period: 'session' }],
+    ['report MONTH', { kind: 'report', period: 'month' }],
+    ['report all', { kind: 'report', period: 'all' }],
+    ['report the bug in checkout', { kind: 'suggest', hint: 'report the bug in checkout' }],
   ]
   for (const [args, expected] of cases) {
     test(`/route ${args}`, () => expect(parseRoute(args)).toEqual(expected))
@@ -647,5 +660,86 @@ describe('agent definitions that set their own effort', () => {
     const provisional = lockedAt(freshState(), 'high', 'router: bug fix')
     expect(parentLevel(provisional, agents, 'a')).toBe('low')
     expect(parentLevel(provisional, agents, 'b')).toBe('high')
+  })
+})
+
+describe('the spend ledger', () => {
+  const usage = (output: number, input = 100) => ({ input_tokens: input, output_tokens: output, cache_read_input_tokens: 1000, cache_creation_input_tokens: 10 })
+  const add = (ledger: SpendLedger, day: string, caller: 'main' | 'subagent', from: string, to: string, output: number, times = 1, byDefinition = false) => {
+    let out = ledger
+    for (let i = 0; i < times; i++) out = withSpend(out, { day, caller, from, to, byDefinition, usage: usage(output) })
+    return out
+  }
+
+  test('requests sum into one row per day, caller and pair of levels; input counts cache reads and writes', () => {
+    let ledger = emptyLedger('s1', 'mods')
+    ledger = add(ledger, '2026-10-04', 'main', 'medium', 'high', 500, 2)
+    ledger = add(ledger, '2026-10-04', 'subagent', 'medium', 'high', 50)
+    ledger = add(ledger, '2026-10-05', 'main', 'medium', 'high', 7)
+    ledger = add(ledger, '2026-10-05', 'subagent', 'low', 'low', 9, 1, true)
+    ledger = withSpend(ledger, { day: '2026-10-05', caller: 'main', from: undefined, to: undefined, usage: usage(3) })
+    expect(ledger.rows).toEqual([
+      { day: '2026-10-04', caller: 'main', from: 'medium', to: 'high', requests: 2, output: 1000, input: 2220 },
+      { day: '2026-10-04', caller: 'subagent', from: 'medium', to: 'high', requests: 1, output: 50, input: 1110 },
+      { day: '2026-10-05', caller: 'main', from: 'medium', to: 'high', requests: 1, output: 7, input: 1110 },
+      { day: '2026-10-05', caller: 'subagent', from: 'low', to: 'low', byDefinition: true, requests: 1, output: 9, input: 1110 },
+      { day: '2026-10-05', caller: 'main', from: 'none', to: 'none', requests: 1, output: 3, input: 1110 },
+    ])
+    ledger = withRead(withRead(ledger, '2026-10-05', usage(40, 2000)), '2026-10-05', usage(60, 2000))
+    expect(ledger.reads).toEqual([{ day: '2026-10-05', calls: 2, output: 100, input: 6020 }])
+  })
+
+  test('a saved ledger round-trips; junk is refused and bad rows are dropped', () => {
+    const ledger = withRead(add(emptyLedger('s1', 'mods'), '2026-10-04', 'main', 'medium', 'high', 5), '2026-10-04', usage(1))
+    expect(parseLedger(JSON.stringify(ledger))).toEqual(ledger)
+    expect(parseLedger('not json')).toBeUndefined()
+    expect(parseLedger('{"version":2,"session":"s"}')).toBeUndefined()
+    const bad = { ...ledger, repo: 7, rows: [...ledger.rows, { day: '2026-10-04', caller: 'main', from: 'low', to: 'low', requests: -1, output: 0, input: 0 }, null] }
+    expect(parseLedger(JSON.stringify(bad))).toEqual({ ...ledger, repo: 'unknown' })
+  })
+
+  test('token counts read short; days are UTC', () => {
+    expect([950, 1234, 12_345, 450_000, 1_234_567].map(tokens)).toEqual(['950', '1.2k', '12k', '450k', '1.23M'])
+    expect(dayOf(Date.parse('2026-10-04T23:30:00Z'))).toBe('2026-10-04')
+  })
+
+  test('nothing recorded: says so and where records go', () => {
+    expect(spendReport([emptyLedger('s1', 'mods')], 'week', { today: '2026-10-04', session: 's1' })).toBe(
+      'effort spend for the last 7 days (since 2026-09-28, UTC): no requests recorded. The router records every request from 0.9.0 on (~/.claude/effort-router/spend/).',
+    )
+  })
+
+  test('the report: by level, what the router moved beside requests left at that level, definitions, reads, repos', () => {
+    let a = emptyLedger('s1', 'mods')
+    a = add(a, '2026-10-04', 'main', 'medium', 'medium', 1000, 4) // left at medium: avg 1.0k
+    a = add(a, '2026-10-04', 'subagent', 'medium', 'low', 200, 10)
+    a = add(a, '2026-10-04', 'main', 'medium', 'high', 3000, 2)
+    a = add(a, '2026-10-04', 'subagent', 'medium', 'low', 300, 1, true)
+    a = withRead(a, '2026-10-04', usage(50, 3000))
+    let b = emptyLedger('s2', 'employment')
+    b = add(b, '2026-10-01', 'main', 'high', 'high', 2000, 1)
+    b = add(b, '2026-09-20', 'main', 'high', 'high', 9999, 5) // outside the week
+    const report = spendReport([a, b], 'week', { today: '2026-10-04', session: 's1' })
+    expect(report.split('\n')).toEqual([
+      'Effort spend for the last 7 days (since 2026-09-28, UTC): 18 requests in 2 sessions, 14k output tokens.',
+      'By level (output tokens are thinking plus the answer, the part effort changes most):',
+      '  low: 11 requests, 2.3k output (avg 209 a request)',
+      '  medium: 4 requests, 4.0k output (avg 1.0k a request)',
+      '  high: 3 requests, 8.0k output (avg 2.7k a request)',
+      'The router moved 12 requests off the level they arrived at:',
+      '  subagents, medium → low: 10 requests, 2.0k output (avg 200; requests left at medium averaged 1.0k)',
+      '  main thread, medium → high: 2 requests, 6.0k output (avg 3.0k; requests left at medium averaged 1.0k)',
+      'Agent definitions set their own level for 1 request (low 1).',
+      "The router's own reads: 1 call, 50 output and 4.0k input tokens on the classifier model.",
+      'By repo (output): mods 12k · employment 2.0k.',
+      'Measured, not estimated. There is no "saved" figure: the router lowers easy tasks and raises hard ones, so the averages above cannot say what a moved request would have cost at its old level.',
+    ])
+    const session = spendReport([a, b], 'session', { today: '2026-10-04', session: 's2' })
+    expect(session.split('\n')[0]).toBe('Effort spend for this session: 6 requests, 52k output tokens.')
+    expect(session).toContain('The router moved no requests off the level they arrived at.')
+    expect(session).not.toContain('By repo')
+    expect(spendReport([a, b], 'all', { today: '2026-10-04', session: 's1' }).split('\n')[0]).toBe(
+      'Effort spend for every session recorded: 23 requests in 2 sessions, 64k output tokens.',
+    )
   })
 })

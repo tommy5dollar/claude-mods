@@ -12,6 +12,9 @@ import {
   type Proposal,
   type RoutedAgent,
   type RouterState,
+  type SpendLedger,
+  type SpendPeriod,
+  type SpendUsage,
   type SubagentStatus,
   LEVEL_COLOR,
   STARTER_RULES,
@@ -23,6 +26,8 @@ import {
   composeRules,
   consentOf,
   critiquePrompt,
+  dayOf,
+  emptyLedger,
   definitionFor,
   footerLabel,
   bandActions,
@@ -34,6 +39,7 @@ import {
   lockReason,
   lockedAt,
   parseDecision,
+  parseLedger,
   parseRoute,
   parentLevel,
   parseSubagentReply,
@@ -45,6 +51,7 @@ import {
   ruleLayers,
   settingsAgentDefinitions,
   settingsRulesOf,
+  spendReport,
   stepDecision,
   renderTranscript,
   firstSighting,
@@ -55,7 +62,9 @@ import {
   wantsRead,
   withVerdict,
   withQuestionAnswer,
+  withRead,
   withSaved,
+  withSpend,
 } from './policy'
 
 /**
@@ -126,7 +135,12 @@ type Session = {
   agents: Map<string, RoutedAgent>
   /** The user's and project's agent definitions, scanned once per session. */
   definitions?: Promise<AgentDefinition[]>
+  /** This session's spend ledger, loaded from its file on first use. */
+  spend?: Promise<Spend>
 }
+
+/** A session's spend ledger, where it is saved, and whether it changed since. */
+type Spend = { path?: string; ledger: SpendLedger; dirty: boolean; writing: Promise<void> }
 
 /** What one read sees beyond the stored transcript. */
 type ReadInput = {
@@ -416,6 +430,7 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
       effort: 'low',
       timeoutMs: settings.classifyTimeoutMs,
     })
+    recordRead($, reply.usage)
     if (!reply.isAnswered) {
       session.error = { at: await now(), text: `classifier gave no answer (${reply.reason})` }
       $.ui.log(`effort-router: ${session.error.text}`, { to: 'debug' })
@@ -668,6 +683,7 @@ async function routeSpawn($: EngineInterface, settings: Settings, session: Sessi
   })
   if (!result) return fallback('read failed')
   if (!result.ok) return fallback('read timed out')
+  recordRead($, result.value.usage)
   if (!result.value.isAnswered) return fallback(`no answer (${result.value.reason})`)
   $.ui.log(`effort-router: subagent classifier said ${result.value.text.trim().slice(0, 200)}`, { to: 'debug' })
   return parseSubagentReply(result.value.text) ?? fallback('unusable reply')
@@ -681,6 +697,86 @@ function remember(session: Session, agentId: string, agent: RoutedAgent): void {
     if (session.agents.size <= MAX_ROUTED_AGENTS) break
     session.agents.delete(oldest)
   }
+}
+
+// --- the spend ledger ----------------------------------------------------------------
+
+/** Where ledgers are kept: ~/.claude/effort-router/spend (undefined with no home directory). */
+async function spendDir($: EngineInterface): Promise<{ dir?: string; sep: string }> {
+  const { sep, homeDir } = await homeOf($)
+  return { dir: homeDir ? `${homeDir}${sep}.claude${sep}effort-router${sep}spend` : undefined, sep }
+}
+
+/** The session's repository, as a short name: its owner/name when known, else its root folder's name. */
+async function repoName($: EngineInterface): Promise<string> {
+  const repo = await $.session.repo().catch(() => null)
+  if (repo?.name) return repo.name
+  const root = repo?.root ?? (await $.session.root().catch(() => undefined))
+  return root?.split(/[\\/]/).filter(Boolean).pop() ?? 'unknown'
+}
+
+/** This session's ledger, loaded once from its file so a resume or a reload carries on from it. */
+function spendOf($: EngineInterface, id: string, session: Session): Promise<Spend> {
+  session.spend ??= (async () => {
+    const { dir, sep } = await spendDir($)
+    const path = dir ? `${dir}${sep}${id}.json` : undefined
+    const text = path ? await readText($, path) : undefined
+    const saved = text === undefined ? undefined : parseLedger(text)
+    return { path, ledger: saved?.session === id ? saved : emptyLedger(id, await repoName($)), dirty: false, writing: Promise.resolve() }
+  })()
+  return session.spend
+}
+
+/** Adds a change to the ledger (in memory; `saveSpend` writes it). Best effort. */
+async function recordSpend($: EngineInterface, change: (ledger: SpendLedger, day: string) => SpendLedger): Promise<void> {
+  try {
+    const { id, session } = await sessionOf($)
+    const spend = await spendOf($, id, session)
+    const day = dayOf(await $.clock.now().catch(() => Date.now()))
+    spend.ledger = change(spend.ledger, day)
+    spend.dirty = true
+  } catch (error) {
+    $.ui.log(`effort-router: spend not recorded: ${String(error)}`, { to: 'debug' })
+  }
+}
+
+/** One of the router's own reads, when the reply carried usage. */
+function recordRead($: EngineInterface, usage: SpendUsage | undefined): void {
+  if (usage) void recordSpend($, (ledger, day) => withRead(ledger, day, usage))
+}
+
+/** Writes the ledger when it changed, one write at a time, each with the newest rows. */
+async function saveSpend($: EngineInterface, session: Session): Promise<void> {
+  const spend = await session.spend
+  if (!spend?.path || !spend.dirty) return
+  const path = spend.path
+  spend.dirty = false
+  spend.writing = spend.writing
+    .then(() => $.fs.write(path, JSON.stringify(spend.ledger)))
+    .catch((error: unknown) => {
+      spend.dirty = true
+      $.ui.log(`effort-router: spend not saved: ${String(error)}`, { to: 'debug' })
+    })
+  await spend.writing
+}
+
+/** `/route report`: this session's ledger (in memory, the newest) and, beyond it, every saved ledger touched in the period. */
+async function spendReportFor($: EngineInterface, id: string, session: Session, period: SpendPeriod): Promise<string> {
+  const spend = await spendOf($, id, session)
+  const now = await $.clock.now().catch(() => Date.now())
+  const others: SpendLedger[] = []
+  const { dir, sep } = await spendDir($)
+  if (period !== 'session' && dir) {
+    const oldest = period === 'all' ? 0 : now - (period === 'week' ? 8 : 31) * 86_400_000
+    const entries = await $.fs.list(dir).catch(() => [])
+    const files = entries.filter(f => f.kind === 'file' && /\.json$/i.test(f.name) && f.name !== `${id}.json` && (f.mtimeMs === 0 || f.mtimeMs >= oldest))
+    const texts = await Promise.all(files.map(f => readText($, `${dir}${sep}${f.name}`)))
+    for (const text of texts) {
+      const ledger = text === undefined ? undefined : parseLedger(text)
+      if (ledger) others.push(ledger)
+    }
+  }
+  return spendReport([spend.ledger, ...others], period, { today: dayOf(now), session: id })
 }
 
 // --- the band ------------------------------------------------------------------------
@@ -752,6 +848,8 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
   switch (command.kind) {
     case 'suggest':
       return suggestNow($, id, session, settings, command.hint)
+    case 'report':
+      return spendReportFor($, id, session, command.period)
     case 'status':
       return routeReport(session.state, settings.decideWithin, session.lastSent, {
         now: await $.clock.now().catch(() => Date.now()),
@@ -911,6 +1009,7 @@ export function register(on: On, options: PluginOptions): void {
   // subagents the router did not route) the locked level, or untouched.
   on('turn.step', async function* ($, e, next) {
     let effort = e.effort
+    let byDefinition = false
     try {
       const { id, session } = await sessionOf($)
       if (e.agentId === undefined) {
@@ -918,6 +1017,7 @@ export function register(on: On, options: PluginOptions): void {
         if (session.state.pending) await decideAtStep($, id, session, settings, e.effort)
       }
       const own = e.agentId !== undefined && subagentRouting(settings, session) === 'on' ? session.agents.get(e.agentId) : undefined
+      byDefinition = own?.byDefinition === true
       const level = own ? (own.byDefinition ? undefined : own.level) : appliedLevel(session.state)
       if (e.agentId === undefined && session.baseline === undefined && isLevel(e.effort) && session.pendingSync === undefined && level === undefined) {
         session.baseline = e.effort
@@ -934,17 +1034,24 @@ export function register(on: On, options: PluginOptions): void {
     } catch {
       effort = e.effort
     }
-    return yield* next(effort === e.effort ? e : { ...e, effort })
+    const result = yield* next(effort === e.effort ? e : { ...e, effort })
+    const usage = result?.usage
+    if (usage) {
+      const entry = { caller: e.agentId === undefined ? ('main' as const) : ('subagent' as const), from: e.effort, to: effort, byDefinition, usage }
+      await recordSpend($, (ledger, day) => withSpend(ledger, { ...entry, day })) // awaited: turn.complete saves it
+    }
+    return result
   })
 
-  // The session is between turns: run a pending /effort so the picker matches.
+  // A loop's turn ended. The main thread is between turns: run a pending
+  // /effort so the picker matches. Any loop (a subagent's too): save the spend
+  // ledger if it changed.
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
     try {
-      if (e.agentId === undefined) {
-        const { session } = await sessionOf($)
-        if (settings.syncPicker) flushSync($, session)
-      }
+      const { session } = await sessionOf($)
+      if (e.agentId === undefined && settings.syncPicker) flushSync($, session)
+      await saveSpend($, session)
     } catch {
       // best effort
     }

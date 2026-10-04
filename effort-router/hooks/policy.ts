@@ -629,9 +629,10 @@ export type RouteCommand =
   | { kind: 'rules' }
   | { kind: 'rules-init'; scope: 'user' | 'project' }
   | { kind: 'rules-critique' }
+  | { kind: 'report'; period: SpendPeriod }
 
 export const ROUTE_USAGE =
-  'usage: /route [hint] | /route status | /route off | /route on | /route rules [init [user|project] | critique]'
+  'usage: /route [hint] | /route status | /route report [session|week|month|all] | /route off | /route on | /route rules [init [user|project] | critique]'
 
 /**
  * `/route` arguments. Bare `/route` runs the router now; any other text that
@@ -650,6 +651,9 @@ export function parseRoute(args: string): RouteCommand {
     if (verb === 'decide') return { kind: 'suggest' }
     if (verb === 'rules') return { kind: 'rules' }
   }
+  if (verb === 'report' && extra === undefined && (arg === undefined || isSpendPeriod(arg))) {
+    return { kind: 'report', period: arg ?? 'week' }
+  }
   if (verb === 'rules') {
     if (arg === 'critique' && extra === undefined) return { kind: 'rules-critique' }
     if (arg === 'init' && more === undefined && (extra === undefined || extra === 'user' || extra === 'project')) {
@@ -657,6 +661,212 @@ export function parseRoute(args: string): RouteCommand {
     }
   }
   return { kind: 'suggest', hint: text }
+}
+
+// --- the spend ledger -------------------------------------------------------------
+
+/**
+ * What the router records about each model request, so `/route report` can
+ * say where the effort went: the level the request arrived at (the picker's,
+ * or the level a subagent would have inherited), the level it went out at,
+ * and what it cost as the API reported it. Requests are summed into rows per
+ * UTC day and pair of levels. One file per session, written by that session.
+ */
+export type SpendRow = {
+  /** UTC day, YYYY-MM-DD. */
+  day: string
+  caller: 'main' | 'subagent'
+  /** The level the request arrived at: what it would have run at without the router. `none` for a model without effort. */
+  from: string
+  /** The level it went out at. */
+  to: string
+  /** A subagent whose own definition set its level (the router left it alone). */
+  byDefinition?: true
+  requests: number
+  /** Output tokens: thinking and the answer, the part effort changes most. */
+  output: number
+  /** Input tokens, cached and uncached. */
+  input: number
+}
+
+/** The router's own reads (the classifier model), per UTC day. */
+export type ReadRow = { day: string; calls: number; output: number; input: number }
+
+export type SpendLedger = { version: 1; session: string; repo: string; rows: SpendRow[]; reads: ReadRow[] }
+
+/** A request's usage, in the API's spelling. */
+export type SpendUsage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
+
+export type SpendPeriod = 'session' | 'week' | 'month' | 'all'
+
+export const isSpendPeriod = (value: unknown): value is SpendPeriod =>
+  value === 'session' || value === 'week' || value === 'month' || value === 'all'
+
+export const emptyLedger = (session: string, repo: string): SpendLedger => ({ version: 1, session, repo, rows: [], reads: [] })
+
+/** The UTC day of a time in epoch ms, YYYY-MM-DD. */
+export const dayOf = (ms: number): string => new Date(ms).toISOString().slice(0, 10)
+
+const inputOf = (usage: SpendUsage): number =>
+  usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
+
+const levelName = (value: unknown): string => (value === undefined || value === null ? 'none' : String(value))
+
+export type SpendEntry = { day: string; caller: 'main' | 'subagent'; from: unknown; to: unknown; byDefinition?: boolean; usage: SpendUsage }
+
+/** Adds one request to its row. */
+export function withSpend(ledger: SpendLedger, entry: SpendEntry): SpendLedger {
+  const from = levelName(entry.from)
+  const to = levelName(entry.to)
+  const byDefinition = entry.byDefinition ? (true as const) : undefined
+  const at = ledger.rows.findIndex(
+    r => r.day === entry.day && r.caller === entry.caller && r.from === from && r.to === to && r.byDefinition === byDefinition,
+  )
+  const old: SpendRow = ledger.rows[at] ?? { day: entry.day, caller: entry.caller, from, to, ...(byDefinition ? { byDefinition } : {}), requests: 0, output: 0, input: 0 }
+  const row = { ...old, requests: old.requests + 1, output: old.output + entry.usage.output_tokens, input: old.input + inputOf(entry.usage) }
+  return { ...ledger, rows: at >= 0 ? ledger.rows.map((r, i) => (i === at ? row : r)) : [...ledger.rows, row] }
+}
+
+/** Adds one of the router's own reads. */
+export function withRead(ledger: SpendLedger, day: string, usage: SpendUsage): SpendLedger {
+  const at = ledger.reads.findIndex(r => r.day === day)
+  const old: ReadRow = ledger.reads[at] ?? { day, calls: 0, output: 0, input: 0 }
+  const row = { day, calls: old.calls + 1, output: old.output + usage.output_tokens, input: old.input + inputOf(usage) }
+  return { ...ledger, reads: at >= 0 ? ledger.reads.map((r, i) => (i === at ? row : r)) : [...ledger.reads, row] }
+}
+
+const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
+
+/** A ledger file's text, checked; rows that do not fit the shape are dropped. Undefined when it is not a ledger. */
+export function parseLedger(text: string): SpendLedger | undefined {
+  let raw: unknown
+  try {
+    raw = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const value = raw as Record<string, unknown>
+  if (value.version !== 1 || typeof value.session !== 'string') return undefined
+  const rows = (Array.isArray(value.rows) ? value.rows : []).filter(
+    (r): r is SpendRow =>
+      typeof r === 'object' && r !== null &&
+      typeof r.day === 'string' && (r.caller === 'main' || r.caller === 'subagent') &&
+      typeof r.from === 'string' && typeof r.to === 'string' &&
+      (r.byDefinition === undefined || r.byDefinition === true) &&
+      isCount(r.requests) && isCount(r.output) && isCount(r.input),
+  )
+  const reads = (Array.isArray(value.reads) ? value.reads : []).filter(
+    (r): r is ReadRow => typeof r === 'object' && r !== null && typeof r.day === 'string' && isCount(r.calls) && isCount(r.output) && isCount(r.input),
+  )
+  return { version: 1, session: value.session, repo: typeof value.repo === 'string' ? value.repo : 'unknown', rows, reads }
+}
+
+/** A token count in a few characters: 950, 12.3k, 450k, 1.23M. */
+export function tokens(n: number): string {
+  if (n < 1000) return String(Math.round(n))
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}k`
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`
+  return `${(n / 1_000_000).toFixed(2)}M`
+}
+
+const PERIOD_DAYS: Record<Exclude<SpendPeriod, 'session' | 'all'>, number> = { week: 7, month: 30 }
+
+const periodLabel = (period: SpendPeriod, since?: string): string =>
+  period === 'session' ? 'this session'
+  : period === 'all' ? 'every session recorded'
+  : `the last ${PERIOD_DAYS[period]} days (since ${since}, UTC)`
+
+/** Levels first in their order, then anything else (numbers, none). */
+const byLevelOrder = (a: string, b: string): number => {
+  const rankOf = (s: string) => (isLevel(s) ? rank(s) : LEVELS.length)
+  return rankOf(a) - rankOf(b) || a.localeCompare(b)
+}
+
+const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
+
+/**
+ * `/route report`: where the effort went over a period, measured. Requests and
+ * output tokens per level; the requests the router moved off the level they
+ * arrived at, with the average size of requests left at that level beside
+ * them; agent definitions' own levels; the router's own reads; and, beyond
+ * one session, the split by repo. No "saved" figure (see the last line).
+ */
+export function spendReport(ledgers: readonly SpendLedger[], period: SpendPeriod, at: { today: string; session: string }): string {
+  const since = period === 'week' || period === 'month'
+    ? dayOf(Date.parse(`${at.today}T00:00:00Z`) - (PERIOD_DAYS[period] - 1) * 86_400_000)
+    : undefined
+  const inPeriod = (day: string) => since === undefined || day >= since
+  const chosen = (period === 'session' ? ledgers.filter(l => l.session === at.session) : ledgers).map(l => ({
+    ...l,
+    rows: l.rows.filter(r => inPeriod(r.day)),
+    reads: l.reads.filter(r => inPeriod(r.day)),
+  }))
+  const rows = chosen.flatMap(l => l.rows)
+  const label = periodLabel(period, since)
+  if (rows.length === 0) {
+    return `effort spend for ${label}: no requests recorded. The router records every request from 0.9.0 on (~/.claude/effort-router/spend/).`
+  }
+  const sum = (list: readonly SpendRow[]) => list.reduce((t, r) => ({ requests: t.requests + r.requests, output: t.output + r.output }), { requests: 0, output: 0 })
+  const avg = (t: { requests: number; output: number }) => tokens(t.output / Math.max(1, t.requests))
+  const group = <K extends string>(list: readonly SpendRow[], key: (r: SpendRow) => K): Map<K, SpendRow[]> => {
+    const out = new Map<K, SpendRow[]>()
+    for (const r of list) out.set(key(r), [...(out.get(key(r)) ?? []), r])
+    return out
+  }
+  const all = sum(rows)
+  const sessions = chosen.filter(l => l.rows.length > 0).length
+  const lines = [`Effort spend for ${label}: ${plural(all.requests, 'request')}${period === 'session' ? '' : ` in ${plural(sessions, 'session')}`}, ${tokens(all.output)} output tokens.`]
+
+  lines.push('By level (output tokens are thinking plus the answer, the part effort changes most):')
+  for (const [level, list] of [...group(rows, r => r.to)].sort(([a], [b]) => byLevelOrder(a, b))) {
+    const t = sum(list)
+    lines.push(`  ${level}: ${plural(t.requests, 'request')}, ${tokens(t.output)} output (avg ${avg(t)} a request)`)
+  }
+
+  const unmoved = group(rows.filter(r => !r.byDefinition && r.from === r.to), r => r.to)
+  const moved = rows.filter(r => !r.byDefinition && r.from !== r.to)
+  if (moved.length === 0) {
+    lines.push('The router moved no requests off the level they arrived at.')
+  } else {
+    lines.push(`The router moved ${plural(sum(moved).requests, 'request')} off the level they arrived at:`)
+    const groups = [...group(moved, r => `${r.caller}|${r.from}|${r.to}`)].map(([key, list]) => {
+      const [caller, from, to] = key.split('|') as [string, string, string]
+      return { caller, from, to, t: sum(list) }
+    })
+    for (const { caller, from, to, t } of groups.sort((a, b) => b.t.requests - a.t.requests)) {
+      const left = unmoved.get(from)
+      const beside = left ? `; requests left at ${from} averaged ${avg(sum(left))}` : ''
+      lines.push(`  ${caller === 'main' ? 'main thread' : 'subagents'}, ${from} → ${to}: ${plural(t.requests, 'request')}, ${tokens(t.output)} output (avg ${avg(t)}${beside})`)
+    }
+  }
+
+  const defined = rows.filter(r => r.byDefinition)
+  if (defined.length > 0) {
+    const levels = [...group(defined, r => r.to)].sort(([a], [b]) => byLevelOrder(a, b)).map(([level, list]) => `${level} ${sum(list).requests}`)
+    lines.push(`Agent definitions set their own level for ${plural(sum(defined).requests, 'request')} (${levels.join(', ')}).`)
+  }
+
+  const reads = chosen.flatMap(l => l.reads)
+  if (reads.length > 0) {
+    const r = reads.reduce((t, x) => ({ calls: t.calls + x.calls, output: t.output + x.output, input: t.input + x.input }), { calls: 0, output: 0, input: 0 })
+    lines.push(`The router's own reads: ${plural(r.calls, 'call')}, ${tokens(r.output)} output and ${tokens(r.input)} input tokens on the classifier model.`)
+  }
+
+  if (period !== 'session') {
+    const byRepo = new Map<string, number>()
+    for (const l of chosen) if (l.rows.length > 0) byRepo.set(l.repo, (byRepo.get(l.repo) ?? 0) + sum(l.rows).output)
+    const repos = [...byRepo].sort(([, a], [, b]) => b - a)
+    if (repos.length > 1) {
+      const shown = repos.slice(0, 6).map(([repo, output]) => `${repo} ${tokens(output)}`)
+      lines.push(`By repo (output): ${shown.join(' · ')}${repos.length > 6 ? ` · ${repos.length - 6} more` : ''}.`)
+    }
+  }
+
+  lines.push(
+    'Measured, not estimated. There is no "saved" figure: the router lowers easy tasks and raises hard ones, so the averages above cannot say what a moved request would have cost at its old level.',
+  )
+  return lines.join('\n')
 }
 
 // --- state and what the mod shows -------------------------------------------------

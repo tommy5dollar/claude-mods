@@ -15,6 +15,7 @@ too unless its agent definition fixes one. A parent can't choose a subagent's ef
 - **Subagents.** Each subagent gets its own level from the brief its parent wrote, before it starts: web lookups and
   searches run low, implementation, debugging and review run high. An agent whose definition sets its own `effort:`
   is left alone.
+- **Where it went.** `/route report` shows the requests and output tokens at each level, by session, week or month, and what the router moved, measured from every request (main thread and subagents) and kept on your machine.
 - **Your rules.** Routing rules can be extended or replaced per user, per project and per organisation (managed
   settings can enforce them).
 

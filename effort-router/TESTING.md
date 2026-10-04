@@ -3,7 +3,7 @@
 ## Automated
 
 ```
-bun test                            # 74 tests: trimming (incl. the last assistant message kept long and AskUserQuestion
+bun test                            # 84 tests: trimming (incl. the last assistant message kept long and AskUserQuestion
                                     # questions and answers kept), the classifier input cap (first prompt, then human lines
                                     # before assistant text), reply parsing (incl. fenced json), the classifier frame,
                                     # $defaults layering, settings layers, /route grammar and hints, state: consent names
@@ -14,8 +14,11 @@ bun test                            # 74 tests: trimming (incl. the last assista
                                     # subagents: the frame and contract, the brief prompt and its head-and-tail cap, reply
                                     # parsing (no undecided), the parent's level, user-off vs router-off, the status list;
                                     # agent definitions: frontmatter, effort values, name over file name, settings agents,
-                                    # first definition wins, plugin agents skipped
-claude plugin test .                # 46 tests in the engine's kit, among them, for the main thread: undecided runs at the
+                                    # first definition wins, plugin agents skipped;
+                                    # the spend ledger: rows per day, caller and pair of levels (input counts cache), reads,
+                                    # a saved file round-trips and bad rows are dropped, token counts, the report (by level,
+                                    # what was moved beside requests left at that level, definitions, reads, repos, periods)
+claude plugin test .                # 49 tests in the engine's kit, among them, for the main thread: undecided runs at the
                                     # picker level with no question; the picker's level locks with no question and reading
                                     # stops; a different level holds the request on the question, Use locks it and syncs
                                     # /effort, Keep locks the picker level; the footer reads high? while the request waits;
@@ -34,8 +37,12 @@ claude plugin test .                # 46 tests in the engine's kit, among them, 
                                     # /route off stops it (and /route on brings it back); org routeSubagents false; a denied
                                     # spawn is not kept; a user definition with effort gets no read and its requests are left
                                     # alone; a project definition wins over a user one; a definition without effort is routed;
-                                    # a file is matched by its name: (not file name); settings agents; plugin agents routed
-"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 46 under Desktop's engine
+                                    # a file is matched by its name: (not file name); settings agents; plugin agents routed;
+                                    # spend: each request recorded with the level it arrived at and went out at, main and
+                                    # subagent, plus the router's reads; the file written when a turn ends and not again
+                                    # with nothing new; a session carries on from its saved file; the week reads every saved
+                                    # session (a stray non-ledger file skipped) and splits by repo; no home: reported, not saved
+"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 49 under Desktop's engine
 claude plugin validate . --strict
 bun run eval -- --runs 3            # opt-in, real model: 22 session fixtures and 14 subagent briefs, see below
 ```
@@ -59,6 +66,25 @@ Read 100% with care. The fixtures were written alongside the subagent frame, sev
 The kit passes a `Select` in the SessionMode footer on both surfaces, but the real Desktop app (2.1.286) silently drops it, so the footer is a `Button`. Footer and band rendering on Desktop has to be checked live (steps 1, 3 and 8 below).
 
 ## Live, headless
+
+### 0.9.0: the spend ledger (verified 2026-10-04, CLI 2.1.289)
+
+In a scratch folder with two package.json files, consent auto, one prompt that names a bug and asks for an Explore subagent:
+
+```
+EFFORT_ROUTER_CONSENT=auto claude -p --model sonnet --permission-mode bypassPermissions --output-format json --debug-file r1.log "There's an off-by-one bug somewhere in our pagination code that drops the last item on each page; before fixing anything, use the Agent tool to launch one Explore subagent that lists every package.json file under this directory. Then reply with the list in one line and stop."
+cat ~/.claude/effort-router/spend/<session_id>.json
+MSYS_NO_PATHCONV=1 claude -p --resume <session_id> "/route report session"   # Git Bash rewrites a leading /route into a path without MSYS_NO_PATHCONV
+MSYS_NO_PATHCONV=1 claude -p --no-session-persistence "/route report"
+```
+
+The ledger, verbatim:
+
+```
+{"version":1,"session":"ec4092af-…","repo":"live","rows":[{"day":"2026-10-04","caller":"main","from":"medium","to":"high","requests":2,"output":319,"input":101822},{"day":"2026-10-04","caller":"subagent","from":"medium","to":"low","requests":2,"output":282,"input":45176}],"reads":[{"day":"2026-10-04","calls":2,"output":51,"input":2899}]}
+```
+
+The transcript agrees: the main thread's two responses carry `perTurnEffort: high` and 277 + 42 output tokens, the subagent's two `low` and 138 + 144. `$.fs.write` ran at each turn end (two lines in the debug log). The resumed run carried on from the file (3 main requests after its own turn), and `/route report` in a new session read it from disk. The debug log of the first run also showed the routing as before: `effort medium -> high` on the main thread and `-> low (recursive file search and listing)` for the Explore subagent.
 
 ### 0.6.0: the read happens before the turn (verified 2026-10-04, CLI 2.1.289)
 
@@ -95,7 +121,7 @@ grep "effort-router: \|effort locked" r*.log
 
 Expected: r1 `classifier said {"decision":"undecided"}` and `medium -> medium`. r2 `classifier said {"decision":"lock","level":"high",...}` and `effort locked: high 🔒 (router: ...)`; under 0.6.0 its `step index=0` already logs `medium -> high`. r3 (a resumed session) `step index=0 ... medium -> high` with no classifier call.
 
-## Live, Desktop (0.8.0, still to run by hand)
+## Live, Desktop (0.8.0 and 0.9.0, still to run by hand)
 
 Install the dev build in the Desktop Code tab, set the effort picker to Medium, and start a fresh session in a scratch repo. With a debug log, `grep "effort-router: " <log>` shows each read, each step as `effort <arrived> -> <sent>`, and each question.
 
@@ -115,6 +141,7 @@ Install the dev build in the Desktop Code tab, set the effort picker to Medium, 
 13. Budget: in a fresh session send six filler prompts. The footer reads `off`, and `/route status` says `no clear task after 6 prompts — /route to ask again`.
 14. Rules: `/route rules init project`, add a line after `$defaults`, run `/route rules`. It lists `spliced: <path>` and shows your line.
 15. Terminal: repeat 4 in the terminal. After `Use high`, a `/effort high` line appears when the turn ends and the terminal picker label follows.
+16. Spend report: after a few routed turns, run `/route report session` and `/route report`. The output is several lines; check the Desktop transcript keeps the line breaks and the two-space indents (unverified in Desktop: the -p output above is plain text).
 
 ## Org layer
 

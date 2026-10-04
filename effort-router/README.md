@@ -71,6 +71,28 @@ Each subagent gets its own level, read from the brief its parent wrote for it.
 
 Claude can't set a subagent's effort itself today: the Agent tool takes a model but no effort, so without the router every subagent runs at the session's level unless its agent definition sets one. Set `routeSubagents` to `false` to go back to that (the main thread's level in use, as before 0.7.0).
 
+## Where the effort went
+
+`/route report` shows what your requests spent at each level over the last 7 days. `/route report session`, `month` or `all` cover other spans. For example:
+
+```
+Effort spend for the last 7 days (since 2026-09-28, UTC): 412 requests in 9 sessions, 610k output tokens.
+By level (output tokens are thinking plus the answer, the part effort changes most):
+  low: 120 requests, 31k output (avg 258 a request)
+  medium: 260 requests, 410k output (avg 1.6k a request)
+  high: 32 requests, 169k output (avg 5.3k a request)
+The router moved 74 requests off the level they arrived at:
+  subagents, medium → low: 44 requests, 9.9k output (avg 225; requests left at medium averaged 1.6k)
+  main thread, medium → high: 30 requests, 160k output (avg 5.3k; requests left at medium averaged 1.6k)
+The router's own reads: 61 calls, 3.1k output and 1.20M input tokens on the classifier model.
+By repo (output): payments 400k · web 210k.
+```
+
+- **What it records.** Every model request in every session with the router installed (0.9.0 on), on the main thread and in subagents, with the router on or off. For each one it keeps the level the request arrived at (your picker's, or the level a subagent would have inherited), the level it went out at, and its tokens as the API reported them. Requests are summed per day into one small JSON file per session, in `~/.claude/effort-router/spend/`. The file is written when a turn ends, and nothing leaves your machine.
+- **What it shows.** Requests and output tokens per level, with the average per request. The requests the router moved, by thread and direction, each beside the average request left at the level it came from. Requests whose agent definition set their level. The router's own Haiku reads, so its cost is in the same report. Over more than one session, output by repo.
+- **Why output tokens.** Output (thinking plus the answer) is what effort changes most. Input is recorded too.
+- **Why there is no "saved" figure.** The router lowers easy tasks and raises hard ones. A lowered request is small partly because its task was small, so comparing it with the average medium request would overstate the saving, and the same comparison would overstate what a raised request cost extra. Only running the same task at both levels can say what a request would have cost at its old level. The report gives the measured numbers side by side and leaves that estimate out.
+
 ## Policy
 
 The shipped rules are in [`rules/default.md`](rules/default.md). In short:
@@ -92,6 +114,7 @@ xhigh earns its place because the article's own worked examples (the HTML saniti
 | `/route` | Runs the router now over the whole conversation, in any state, and asks if its level differs |
 | `/route <hint>` | The same, with a hint for the classifier (`/route this is a security review`) |
 | `/route status` | Shows the state and why, the consent mode, automatic reads used of the budget, classifier calls and how long the last read took, how much transcript it sent, the last verdict (with the raw reply and when), the last error, and this session's routed subagents |
+| `/route report [session\|week\|month\|all]` | Shows [where the effort went](#where-the-effort-went): requests and output tokens per level, what the router moved, its own reads, and output by repo. The last 7 days by default |
 | `/route off` | Turns the router off and restores the picker's earlier level |
 | `/route on` | Turns the router back on: deciding over the whole conversation, with a fresh budget |
 | `/route rules` | Prints the effective rules and which layers contributed |
@@ -185,13 +208,14 @@ For development, run `claude --plugin-dir ./effort-router`.
 - Workflow agents that don't launch through the Agent tool raise no `agent.spawn`, so they keep the main thread's level.
 - Subagent levels are kept in memory only. After a restart or resume, a subagent still running from before takes the main thread's level.
 - The router adds no note about the chosen level to the system prompt, because changing a cached prompt section would break the prompt cache. The `/effort` echo tells the model instead, and it is appended to the transcript, so the cache holds.
+- The spend report starts at 0.9.0: sessions from before it aren't in it. A request with no reported usage (failed or interrupted) isn't counted. Days are UTC.
 - The band and footer draw in the terminal and the Desktop app. VS Code and `-p` run the hooks without the UI. Under `ask` in `-p` the question has no one to answer, so requests stay at the picker's level; set `consent` (or `EFFORT_ROUTER_CONSENT`) to `auto` there.
 
 ## Development
 
 ```
-bun test                            # pure policy: trimming, parsing, rule layering, /route grammar, subagent reads
-claude plugin test .                # engine kit: band, buttons, footer button, turn.step, /route, org layers, agent.spawn
+bun test                            # pure policy: trimming, parsing, rule layering, /route grammar, subagent reads, the spend ledger and report
+claude plugin test .                # engine kit: band, buttons, footer button, turn.step, /route, org layers, agent.spawn, the ledger saved and reported
 claude plugin validate . --strict
 bun run eval                        # opt-in: the real classifier over eval/fixtures.ts (see below)
 ```

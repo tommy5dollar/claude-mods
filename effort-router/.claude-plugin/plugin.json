@@ -1,7 +1,7 @@
 {
   "name": "effort-router",
-  "version": "0.8.0",
-  "description": "Reads the conversation before each prompt runs until the task is clear (a Haiku read against Anthropic's 'Spending your effort' guidance and your own rules). If its level matches your effort picker the turn just runs and that level is kept; if it differs, the turn waits on one question (Use high / Keep medium) and your answer is kept. /route asks on demand, optionally with a hint. Each subagent gets its own level from a read of its brief at spawn. The footer shows the state (deciding, high? while asking, high 🔒, off) and is a button that opens the router's band above the prompt.",
+  "version": "0.9.0",
+  "description": "Reads the conversation before each prompt runs until the task is clear (a Haiku read against Anthropic's 'Spending your effort' guidance and your own rules). If its level matches your effort picker the turn just runs and that level is kept; if it differs, the turn waits on one question (Use high / Keep medium) and your answer is kept. /route asks on demand, optionally with a hint. Each subagent gets its own level from a read of its brief at spawn. The footer shows the state (deciding, high? while asking, high 🔒, off) and is a button that opens the router's band above the prompt. /route report shows where the effort went: requests and output tokens per level, and what the router moved.",
   "author": {
     "name": "Tommy Long"
   },
