@@ -12,7 +12,7 @@ Your effort picker's level is the default, and the router only changes it with y
 
 - **No clear task yet:** the turn runs at your picker's level. Nothing is asked.
 - **The router names your picker's level:** the turn runs, nothing is asked, and that level is kept for the session.
-- **The router names a different level:** the turn waits, and Claude's own question card asks: "Effort router: Multi-platform finance integration. Use high instead of medium?" `Use high` runs the turn at high and keeps high. `Keep medium` runs it at medium and keeps medium. Either way the session is decided and the router stops reading.
+- **The router names a different level:** the turn waits, and Claude's own question card asks: "Effort router: Multi-platform finance integration. Use high effort instead of medium?" `Use high` runs the turn at high and keeps high. `Keep medium` runs it at medium and keeps medium. Either way the session is decided and the router stops reading.
 
 The reason is simple: a prompt run at the wrong effort can do a lot of work that has to be thrown away and redone, so it is worth one question before the turn starts. If you dismiss the question, the turn runs at your picker's level, the router stays undecided, and a later prompt can ask again.
 
@@ -22,17 +22,17 @@ The footer, right beside the native model and effort pickers, shows the router's
 
 | Footer | What it means | Band buttons (press the footer) |
 | --- | --- | --- |
-| `deciding` (dim) | The router is reading your prompts. Requests run at the picker's level | `Suggest now`, `Turn off` |
-| `high?` | The question is open: the turn waits for your answer | `Suggest now`, `Turn off` |
-| `high 🔒` | Decided: every main-thread request runs at high | `Suggest now`, `Turn off` |
+| `deciding` (dim) | The router is reading your prompts. Requests run at the picker's level | `Check now`, `Turn off` |
+| `high?` | The question is open: the turn waits for your answer | `Check now`, `Turn off` |
+| `high 🔒` | Decided: every main-thread request runs at high | `Check now`, `Turn off` |
 | `off` (dim) | The router does nothing; the picker is in charge | `Turn on` |
 
 <!-- screenshot: footer showing "deciding" beside the gauge and the native pickers -->
-<!-- screenshot: the question card "Effort router: ... Use high instead of medium?" with the footer reading "high?" -->
+<!-- screenshot: the question card "Effort router: ... Use high effort instead of medium?" with the footer reading "high?" -->
 
-The footer state is a plain button. Pressing it opens the router's band above the prompt: one line such as `Effort router: high 🔒 — router: bug fix in existing code`, then the buttons and `Close` (hotkey `x`). The buttons are numbered `1`, `2`. Any action closes the band, and pressing the footer again closes it too. With consent `ask` (the default) the band never opens by itself: the question card is where you agree.
+The footer state is a plain button. Pressing it opens the router's band above the prompt: one line such as `Effort router: high 🔒 for this session (bug fix in existing code)`, then the buttons and `Close` (hotkey `x`). The buttons are numbered `1`, `2`. Any action closes the band, and pressing the footer again closes it too. With consent `ask` (the default) the band never opens by itself: the question card is where you agree.
 
-With consent `auto` the router doesn't ask. When it locks a level that differs from your picker's, the band opens by itself once, reading `Using high — <reason>` with `Revert to picker` (router off, back to the picker's level) and `Close` (keep high). Pressing the footer shows the same band as under `ask`.
+With consent `auto` the router doesn't ask. When it locks a level that differs from your picker's, the band opens by itself once, reading `Effort router: using high for this session (<reason>)` with `Undo` (router off, back to your effort setting) and `Close` (keep high). Pressing the footer shows the same band as under `ask`.
 
 The footer is a button, not a dropdown, because the Desktop app silently drops a `Select` in the footer: it is not drawn, and nothing reports an error (verified live on the 2.1.286 app; the test kit accepts it, so the kit cannot catch this). The footer truncates with `…` when space runs out, so the label stays short.
 
@@ -53,9 +53,9 @@ A `turn.step` hook that waits on an ordinary promise is abandoned after about 10
 - **Undecided only before there is a task.** The model answers "undecided" only for opening filler: greetings, housekeeping such as "pull the latest code", or questions before any work. Once you state a real task it picks the level that task most likely needs, even while the details are open ("implement a finance solution pulling from several accountancy platforms" gets `high` straight away). The prompt carries ten worked examples on top of the [routing rules](#customising-the-rules).
 - **The latest exchange counts most.** A later clarification overrides an earlier ask, and a short reply is read against the question it answers. If you dismissed the question for "refactor the payment retry logic" and then answer Claude's "1. full rewrite or 2. just extract the constant?" with "2", the next read names low.
 - **Decided is decided.** Once a level is kept, every later main-thread request runs at it and the router stops reading. Subagents get their own level ([below](#subagents)). When the kept level isn't the picker's, the terminal also runs `/effort <level>` once the session is idle, so the native picker label matches. In the Desktop app the picker belongs to the app, so its label stays where you set it; trust the footer. A kept level survives `claude --resume`. Choosing `Keep medium` keeps medium even if you move the picker later; `/route off` hands control back to the picker.
-- **It stops after `decideWithin` prompts** (6 by default), counted from the start of the session. If nothing is decided by then, the router turns off with the reason `no clear task after 6 prompts — /route to ask again`, after asking any question still waiting. It never calls the model again on its own.
-- **Existing sessions are left alone.** The first time the router sees a session that already has `decideWithin` or more prompts in it (a long chat from before the router was installed, say), it starts `off` with the reason `existing session — /route to ask`: no question, no model calls. Fewer earlier prompts count toward the budget. A resumed session with saved router state keeps that state.
-- **`/route` asks now.** It reads the whole conversation in any state, ignoring the budget. If the answer is the level already in use, it says so and changes nothing. If it is your picker's level while a different one is kept, it keeps the picker's level without asking. Otherwise the question card opens straight away ("Use low instead of medium?", always naming your picker's level), and your answer is kept. Add a hint to steer it: `/route this is a security review`, `/route keep it quick`. The hint is weighed strongly and kept for later reads until a level is kept. The band's `Suggest now` is the same as bare `/route`.
+- **It stops after `decideWithin` prompts** (6 by default), counted from the start of the session. If nothing is decided by then, the router turns off with the reason `no clear task after 6 prompts`, after asking any question still waiting. It never calls the model again on its own.
+- **Existing sessions are left alone.** The first time the router sees a session that already has `decideWithin` or more prompts in it (a long chat from before the router was installed, say), it starts `off` with the reason `session started before the router`: no question, no model calls. Fewer earlier prompts count toward the budget. A resumed session with saved router state keeps that state.
+- **`/route` asks now.** It reads the whole conversation in any state, ignoring the budget. If the answer is the level already in use, it says so and changes nothing. If it is your picker's level while a different one is kept, it keeps the picker's level without asking. Otherwise the question card opens straight away ("Use low effort instead of medium?", always naming your picker's level), and your answer is kept. Add a hint to steer it: `/route this is a security review`, `/route keep it quick`. The hint is weighed strongly and kept for later reads until a level is kept. The band's `Check now` is the same as bare `/route`.
 - **Consent `auto`.** For headless runs, or if you trust the router: its level is kept at once, without a question (shown once in the band when it differs from your picker's). Set it in `/config`, or with `EFFORT_ROUTER_CONSENT=auto`.
 
 ## Subagents
@@ -64,9 +64,9 @@ Each subagent gets its own level, read from the brief its parent wrote for it.
 
 - **One read at launch.** When Claude launches a subagent, the launch waits for one Haiku read of the agent's type, description and brief (capped at `classifierMaxChars`). Then the subagent starts, and every request it makes carries that level. The read takes about a second, on an agent that usually runs for minutes in the background.
 - **Its own framing.** A subagent has no user in the loop, which favours higher effort for open-ended judgement: implementing, debugging, code review, security work and design. Mechanical work and tight specs stay low with or without a user: searching code or the web, lookups, listing files, tabulating, running a given command and summarising text it was given. The brief is the whole task, so the read decides from it alone and always picks a level. Your rules and your organisation's [rules](#customising-the-rules) apply here too.
-- **An agent's own `effort:` wins.** If the agent's definition sets an effort, the router doesn't read its brief and leaves its requests alone, so the engine applies the definition's level. It looks for the definition by its frontmatter `name:` in the project's `.claude/agents/*.md`, then your `~/.claude/agents/*.md`, and in the `agents` key of policy, project and user settings. The first definition with that name decides, as it does for the engine: a project definition without `effort:` still beats a user one with it. Definitions are scanned once per session. `/route status` shows such an agent as `low (set by its definition)`.
+- **An agent's own `effort:` wins.** If the agent's definition sets an effort, the router doesn't read its brief and leaves its requests alone, so the engine applies the definition's level. It looks for the definition by its frontmatter `name:` in the project's `.claude/agents/*.md`, then your `~/.claude/agents/*.md`, and in the `agents` key of policy, project and user settings. The first definition with that name decides, as it does for the engine: a project definition without `effort:` still beats a user one with it. Definitions are scanned once per session. `/route status` shows such an agent as `low: <description> (set by its agent definition)`.
 - **Forks and failures take the parent's level.** A fork shares its parent's context, so it skips the read. If a read fails, times out (`classifyTimeoutMs`) or returns something unusable, the subagent also takes its parent's level. That is the main thread's level in use, or for a subagent launched by another subagent, that subagent's level. With no level anywhere, its requests are left alone.
-- **It runs even when the main thread is left alone.** In an existing session the router leaves the main thread alone, but each new subagent brief is a fresh, whole task, so subagents are still routed. The same holds after the router turns itself off with no clear task. When you turn the router off yourself (`/route off`, `Revert to picker`, `Turn off`), subagents go back to the picker's level too, and `/route on` brings their routed levels back.
+- **It runs even when the main thread is left alone.** In an existing session the router leaves the main thread alone, but each new subagent brief is a fresh, whole task, so subagents are still routed. The same holds after the router turns itself off with no clear task. When you turn the router off yourself (`/route off`, `Undo`, `Turn off`), subagents go back to the picker's level too, and `/route on` brings their routed levels back.
 - **Seeing it.** `/route status` lists this session's routed subagents, newest first (the last 10), with level, description, agent type and why. The debug log has one line per routed launch. Nothing is added to the footer or to the parent's conversation.
 
 Claude can't set a subagent's effort itself today: the Agent tool takes a model but no effort, so without the router every subagent runs at the session's level unless its agent definition sets one. Set `routeSubagents` to `false` to go back to that (the main thread's level in use, as before 0.7.0).
@@ -76,16 +76,17 @@ Claude can't set a subagent's effort itself today: the Agent tool takes a model 
 `/route report` shows what your requests spent at each level over the last 7 days. `/route report session`, `month` or `all` cover other spans. For example:
 
 ```
-Effort spend for the last 7 days (since 2026-09-28, UTC): 412 requests in 9 sessions, 610k output tokens.
-By level (output tokens are thinking plus the answer, the part effort changes most):
-  low: 120 requests, 31k output (avg 258 a request)
-  medium: 260 requests, 410k output (avg 1.6k a request)
-  high: 32 requests, 169k output (avg 5.3k a request)
-The router moved 74 requests off the level they arrived at:
-  subagents, medium → low: 44 requests, 9.9k output (avg 225; requests left at medium averaged 1.6k)
-  main thread, medium → high: 30 requests, 160k output (avg 5.3k; requests left at medium averaged 1.6k)
-The router's own reads: 61 calls, 3.1k output and 1.20M input tokens on the classifier model.
-By repo (output): payments 400k · web 210k.
+Effort for the last 7 days (since 2026-09-28): 412 requests in 9 sessions, 610k output tokens.
+By level:
+  low: 120 requests, 31k output tokens (avg 258)
+  medium: 260 requests, 410k output tokens (avg 1.6k)
+  high: 32 requests, 169k output tokens (avg 5.3k)
+Changed by the router: 74 requests
+  subagents, medium → low: 44 requests, 9.9k output tokens (avg 225, vs 1.6k for those left at medium)
+  main conversation, medium → high: 30 requests, 160k output tokens (avg 5.3k, vs 1.6k for those left at medium)
+The router's own checks: 61, using 3.1k output and 1.20M input tokens.
+By repo (output tokens): payments 400k, web 210k.
+No "saved" figure: the router lowers easy tasks and raises hard ones, so these averages can't show what a changed request would have cost.
 ```
 
 - **What it records.** Every model request in every session with the router installed (0.9.0 on), on the main thread and in subagents, with the router on or off. For each one it keeps the level the request arrived at (your picker's, or the level a subagent would have inherited), the level it went out at, and its tokens as the API reported them. Requests are summed per day into one small JSON file per session, in `~/.claude/effort-router/spend/`. The file is written when a turn ends, and nothing leaves your machine.
@@ -129,7 +130,7 @@ Set them in `/config`, or under `pluginConfigs["effort-router@tommy-mods"].optio
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `consent` | `ask` | When the router wants a different level from your picker: `ask` holds the turn and asks (Use the router's level or Keep yours). `auto` uses the router's level without asking and shows it once in the band, with Revert to picker. A value saved by an older version reads as unset, so `ask` |
+| `consent` | `ask` | When the router wants a different level from your picker: `ask` holds the turn and asks (Use the router's level or Keep yours). `auto` uses the router's level without asking and shows it once in the band, with Undo. A value saved by an older version reads as unset, so `ask` |
 | `decideWithin` | 6 | Prompts (and answered questions) the router reads automatically, counted from the session's start |
 | `classifyTimeoutMs` | 8000 | How long a prompt waits for the read before it runs anyway |
 | `classifierMaxChars` | 24000 | Most transcript characters one read sends |
@@ -181,7 +182,7 @@ An organisation can set routing rules centrally in managed settings (`managed-se
 - `rulesMode: "extend"` (the default) layers the org rules over the shipped defaults. Users and projects can add to them with `$defaults`, or replace them.
 - `rulesMode: "enforce"` makes the org layer final. Personal and project rules are ignored, and `/route rules init` says so.
 - `routeSubagents: false` turns subagent routing off for everyone, whatever their own setting.
-- `allowOff: false` stops users turning the router off, so the organisation's routing always applies. `/route off` refuses, the band has no `Turn off` or `Revert to picker`, and a session saved as off comes back deciding. When the budget runs out with nothing suggested, the router idles as `deciding` (no more reads) instead of turning off. `/route` still works.
+- `allowOff: false` stops users turning the router off, so the organisation's routing always applies. `/route off` refuses, the band has no `Turn off` or `Undo`, and a session saved as off comes back deciding. When the budget runs out with nothing suggested, the router idles as `deciding` (no more reads) instead of turning off. `/route` still works.
 
 A top-level `"effortRouter": { "rules": ..., "rulesMode": ..., "allowOff": ..., "routeSubagents": ... }` object works too. The router reads these four settings only from the policy source, so a user cannot claim `enforce` for themselves.
 
@@ -202,7 +203,7 @@ For development, run `claude --plugin-dir ./effort-router`.
 - A request whose picker level is a number rather than a named level, or a model that takes no effort, can't be compared, so the waiting verdict waits for the next request that can.
 - The router changes effort only, never the model. A request to a model that takes no effort is left alone.
 - Each automatic read is one Haiku call per prompt while deciding, for at most `decideWithin` prompts, of at most `classifierMaxChars` of transcript. Nothing more is spent once a level is locked or the budget is spent, except when you run `/route`.
-- Once decided, the router does not notice a change of phase on its own (for example "now verify it" after an implementation). Run `/route` (or the footer's Suggest now), optionally with a hint, to be asked again.
+- Once decided, the router does not notice a change of phase on its own (for example "now verify it" after an implementation). Run `/route` (or the band's Check now), optionally with a hint, to be asked again.
 - A definition's `effort:` is respected for user and project agent files and for the `agents` key in settings, not for plugin agents (`<plugin>:<name>`), which can't be located reliably. Those are routed from their brief, which replaces any effort their definition sets. A mod's `$.agent.register({ effort })` is ignored by the engine itself (an engine bug), and the router routes those agents too.
 - An agent file added or edited mid-session is seen from the next session: definitions are scanned once per session.
 - Workflow agents that don't launch through the Agent tool raise no `agent.spawn`, so they keep the main thread's level.

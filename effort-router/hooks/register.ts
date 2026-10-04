@@ -252,7 +252,7 @@ async function lock($: EngineInterface, id: string, session: Session, settings: 
   await commit($, id, session, lockedAt(session.state, level, reason))
   if (settings.syncPicker && session.picker !== level) session.pendingSync = level
   try {
-    $.ui.log(`effort locked: ${level} 🔒 (${reason}) · /route status`)
+    $.ui.log(`Effort router: ${level} for the rest of this session (${reason}).`)
   } catch {
     // headless
   }
@@ -261,8 +261,8 @@ async function lock($: EngineInterface, id: string, session: Session, settings: 
 
 /**
  * Consent `auto`: locks the router's level without a question. When it is not
- * the picker's level, the band opens by itself once (`Using high — <reason>`,
- * with Revert to picker).
+ * the picker's level, the band opens by itself once (`Effort router: using high
+ * for this session (<reason>)`, with Undo).
  */
 async function lockAuto($: EngineInterface, id: string, session: Session, settings: Settings, proposal: Proposal): Promise<void> {
   await lock($, id, session, settings, proposal.level, lockReason.router(proposal))
@@ -300,7 +300,7 @@ async function askAndLock(
   }
   session.state = { ...session.state, asking: undefined }
   if (answer === question.options[0]) {
-    await lock($, id, session, settings, proposal.level, lockReason.router(proposal))
+    await lock($, id, session, settings, proposal.level, lockReason.chosen(proposal))
     return 'use'
   }
   if (picker && answer === question.options[1]) {
@@ -432,7 +432,7 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
     })
     recordRead($, reply.usage)
     if (!reply.isAnswered) {
-      session.error = { at: await now(), text: `classifier gave no answer (${reply.reason})` }
+      session.error = { at: await now(), text: `the check got no answer (${reply.reason})` }
       $.ui.log(`effort-router: ${session.error.text}`, { to: 'debug' })
       return undefined
     }
@@ -502,7 +502,7 @@ async function readAfter($: EngineInterface, id: string, session: Session, setti
     const result = await timed($, settings.classifyTimeoutMs, classifyNow($, settings, session, { ...input, hint: session.state.hint }))
     if (!result.ok) {
       outcome = 'timed out'
-      session.error = { at: await $.clock.now().catch(() => Date.now()), text: `classifier timed out after ${settings.classifyTimeoutMs} ms; the turn went ahead at the current level` }
+      session.error = { at: await $.clock.now().catch(() => Date.now()), text: `the check timed out after ${settings.classifyTimeoutMs} ms, so the prompt ran at your setting` }
     } else {
       outcome = result.value ? `${result.value.level} (${result.value.reason})` : 'undecided'
       await afterRead($, id, session, settings, consent, result.value)
@@ -539,7 +539,7 @@ async function decideAtStep($: EngineInterface, id: string, session: Session, se
 }
 
 /**
- * A manual run (`/route [hint]`, the band's Suggest now): reads the whole
+ * A manual run (`/route [hint]`, the band's Check now): reads the whole
  * conversation now, in any state, ignoring the budget, within the timeout.
  * The same as the level in use: nothing changes. The same as the picker's
  * (while locked elsewhere): locked there, no question. Otherwise it asks at
@@ -547,14 +547,14 @@ async function decideAtStep($: EngineInterface, id: string, session: Session, se
  * changes nothing.
  */
 async function suggestNow($: EngineInterface, id: string, session: Session, settings: Settings, hint: string | undefined): Promise<string> {
-  if (session.reading) return 'the router is already reading; try again in a moment.'
+  if (session.reading) return 'Already checking. Try again in a moment.'
   session.reading = true
   let proposal: Proposal | undefined
   try {
     const result = await timed($, settings.classifyTimeoutMs, classifyNow($, settings, session, { hint, trigger: hint ? 'manual /route with a hint' : 'manual /route' }))
     if (!result.ok) {
-      session.error = { at: await $.clock.now().catch(() => Date.now()), text: `classifier timed out after ${settings.classifyTimeoutMs} ms` }
-      return `the classifier timed out after ${settings.classifyTimeoutMs} ms; nothing changed (${footerLabel(session.state).text}).`
+      session.error = { at: await $.clock.now().catch(() => Date.now()), text: `the check timed out after ${settings.classifyTimeoutMs} ms` }
+      return 'The check timed out. Nothing changed.'
     }
     proposal = result.value
   } finally {
@@ -568,26 +568,26 @@ async function suggestNow($: EngineInterface, id: string, session: Session, sett
     }
     return text
   }
-  if (!proposal) return say(`no clear task yet${hint ? ', even with your hint' : ''}; nothing changed (${footerLabel(session.state).text}).`)
+  if (!proposal) return say(`No clear task yet${hint ? ', even with your hint' : ''}. Nothing changed.`)
   const picker = isLevel(session.picker) ? session.picker : undefined
   const locked = appliedLevel(session.state)
   if (proposal.level === (locked ?? picker)) {
     if (session.state.pending) await commit($, id, session, { ...session.state, pending: undefined })
-    return say(`confirmed: ${proposal.level}${locked ? ' 🔒' : ''} still fits (${proposal.reason}); nothing changed.`)
+    return say(`${proposal.level} still fits (${proposal.reason}). Nothing changed.`)
   }
   if (hint && session.state.phase !== 'locked') session.state = { ...session.state, hint }
   if ((await consentFor($, settings)) === 'auto') {
     await lockAuto($, id, session, settings, proposal)
-    return `${proposal.level} 🔒 (${proposal.reason}).`
+    return `${proposal.level} for this session (${proposal.reason}).`
   }
   if (proposal.level === picker) {
     await lock($, id, session, settings, proposal.level, lockReason.agreed(proposal))
-    return `${proposal.level} 🔒 (${proposal.reason}): the router agrees with the picker, so it no longer overrides it.`
+    return `${proposal.level} for this session (${proposal.reason}), the same as your setting.`
   }
   const chosen = await askAndLock($, id, session, settings, proposal, picker)
-  if (chosen === 'use') return `${proposal.level} 🔒 (${proposal.reason}).`
-  if (chosen === 'keep') return `${picker} 🔒: you kept the picker's level.`
-  return `no answer; nothing changed (${footerLabel(session.state).text}).`
+  if (chosen === 'use') return `${proposal.level} for this session.`
+  if (chosen === 'keep') return `${picker} for this session.`
+  return 'No answer. Nothing changed.'
 }
 
 // --- subagents -----------------------------------------------------------------------
@@ -664,10 +664,10 @@ async function routeSpawn($: EngineInterface, settings: Settings, session: Sessi
   const rules = await loadRules($) // also learns the org's routeSubagents
   if (!rules.routeSubagents) return undefined
   const inherited = parentLevel(session.state, session.agents, e.parentAgentId)
-  const fallback = (why: string): Proposal | undefined => (inherited ? { level: inherited, reason: `${why}: the parent's level` } : undefined)
-  if (e.fork) return fallback('fork')
+  const fallback = (why: string): Proposal | undefined => (inherited ? { level: inherited, reason: `same as its parent: ${why}` } : undefined)
+  if (e.fork) return fallback("it's a fork")
   const definition = definitionFor(e.subagentType, await definitionsOf($, session))
-  if (definition?.effort !== undefined) return { level: definition.effort, reason: `effort in ${definition.source}`, byDefinition: true }
+  if (definition?.effort !== undefined) return { level: definition.effort, reason: `from ${definition.source}`, byDefinition: true }
   const read = async () =>
     $.model.complete({
       model: settings.classifierModel,
@@ -681,12 +681,12 @@ async function routeSpawn($: EngineInterface, settings: Settings, session: Sessi
     $.ui.log(`effort-router: subagent read failed: ${String(error)}`, { to: 'debug' })
     return undefined
   })
-  if (!result) return fallback('read failed')
-  if (!result.ok) return fallback('read timed out')
+  if (!result) return fallback('the check failed')
+  if (!result.ok) return fallback('the check timed out')
   recordRead($, result.value.usage)
-  if (!result.value.isAnswered) return fallback(`no answer (${result.value.reason})`)
+  if (!result.value.isAnswered) return fallback('the check got no answer')
   $.ui.log(`effort-router: subagent classifier said ${result.value.text.trim().slice(0, 200)}`, { to: 'debug' })
-  return parseSubagentReply(result.value.text) ?? fallback('unusable reply')
+  return parseSubagentReply(result.value.text) ?? fallback('the check gave no level')
 }
 
 /** Keeps a routed subagent, dropping the oldest past `MAX_ROUTED_AGENTS`. */
@@ -853,7 +853,7 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
     case 'status':
       return routeReport(session.state, settings.decideWithin, session.lastSent, {
         now: await $.clock.now().catch(() => Date.now()),
-        calls: session.calls,
+        calls: Math.max(session.calls, (await spendOf($, id, session)).ledger.reads.reduce((n, r) => n + r.calls, 0)), // the ledger survives a resume
         verdict: session.verdict,
         error: session.error,
         consent: await consentFor($, settings),
@@ -862,35 +862,37 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
         subagents: { routing: subagentRouting(settings, session), agents: [...session.agents.values()] },
       })
     case 'off': {
-      if (!(await loadRules($)).allowOff) return "your organisation's settings keep the router on (allowOff: false)."
+      if (!(await loadRules($)).allowOff) return 'Your organisation keeps the router on.'
       await turnOff($, id, session, settings)
-      return `router off: effort is the picker's${session.baseline ? ` (restored to ${session.baseline})` : ''}. /route on turns it back on.`
+      return `Router off. Your effort setting${session.baseline ? ` (${session.baseline})` : ''} applies again. /route on turns it back on.`
     }
     case 'on': {
-      if (session.state.mode !== 'picker' && !session.state.gaveUp) return `the router is already on (${footerLabel(session.state).text}).`
+      if (session.state.mode !== 'picker' && !session.state.gaveUp) return 'The router is already on.'
       await commit($, id, session, turnedOn(session.state))
-      return `router on: deciding, over the whole conversation, for up to ${settings.decideWithin} prompts.`
+      return `Router on. It checks your next ${settings.decideWithin} prompts until the task is clear.`
     }
     case 'rules': {
       const { composed, enforced } = await loadRules($)
-      const from = composed.contributors.map(c => `  ${c.how}: ${c.source}`).join('\n')
-      const note = enforced ? '\n(your organisation enforces its rules: personal and project layers are ignored)' : ''
-      return `effective routing rules, from:\n${from}${note}\n\n${composed.text}`
+      const from = composed.contributors
+        .map(c => (c.how === 'base' ? `  ${c.source}` : c.how === 'spliced' ? `  + ${c.source}` : `  ${c.source} (replaces the rules above)`))
+        .join('\n')
+      const note = enforced ? "\n(Your organisation's rules are final, so personal and project rules are ignored.)" : ''
+      return `Routing rules in use:\n${from}${note}\n\n${composed.text}`
     }
     case 'rules-init': {
-      if ((await loadRules($)).enforced) return 'your organisation enforces its routing rules (rulesMode: enforce); a personal or project file would be ignored. /route rules shows them.'
+      if ((await loadRules($)).enforced) return "Your organisation's routing rules are final, so a personal or project file would be ignored. /route rules shows them."
       const paths = await rulePaths($)
       const path = command.scope === 'project' ? paths.project : paths.user
-      if (!path) return `cannot place the ${command.scope} rules file here.`
-      if (await $.fs.exists(path)) return `${path} already exists; edit it directly.`
+      if (!path) return `Can't place the ${command.scope} rules file: no ${command.scope === 'project' ? 'project root' : 'home directory'} found.`
+      if (await $.fs.exists(path)) return `${path} already exists. Edit it there.`
       await $.fs.write(path, STARTER_RULES(command.scope))
-      return `wrote ${path}. It keeps the defaults ($defaults) and holds a commented example.`
+      return `Created ${path}. Add your rules after the $defaults line.`
     }
     case 'rules-critique': {
       const { composed, defaults } = await loadRules($)
-      if (composed.contributors.length <= 1) return 'no custom rules: only the shipped defaults apply. /route rules init to start some.'
+      if (composed.contributors.length <= 1) return 'You have no custom rules yet. /route rules init creates a file.'
       const reply = await $.model.complete({ model: 'sonnet', prompt: critiquePrompt(defaults, composed), maxTokens: 800, timeoutMs: 60000 })
-      return reply.isAnswered ? reply.text.trim() : `critique failed (${reply.reason}).`
+      return reply.isAnswered ? reply.text.trim() : `The critique failed (${reply.reason}).`
     }
   }
 }
@@ -906,8 +908,8 @@ export function register(on: On, options: PluginOptions): void {
     try {
       await $.command.register({
         name: 'route',
-        description: 'Effort router: suggest a level now (optionally with a hint), status, off/on, or edit the rules',
-        argumentHint: '[hint] | status | off | on | rules [init|critique]',
+        description: 'Effort router: check the effort for this task now (add a hint if you like), or status, report, off, on, rules',
+        argumentHint: '[hint] | status | report [session|week|month|all] | off | on | rules [init|critique]',
       })
       const { session } = await sessionOf($)
       if (session.lastSent === undefined) {
@@ -928,7 +930,7 @@ export function register(on: On, options: PluginOptions): void {
     try {
       return { text: await route($, e.args ?? '', settings) }
     } catch (error) {
-      return { text: `effort-router: ${String(error)}` }
+      return { text: `/route failed: ${String(error)}` }
     }
   })
 
@@ -1074,7 +1076,7 @@ export function register(on: On, options: PluginOptions): void {
 
   // The band above the prompt: opened from the footer (the state, then Suggest
   // now / Turn off or Turn on), or by itself once after consent auto locked a
-  // level other than the picker's (Using <level>, then Revert to picker). Close.
+  // level other than the picker's (using <level>, then Undo). Close.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const { id, session } = await sessionOf($)
     if (!bandShown(session) || e.props.hasSurvey) return next(e)

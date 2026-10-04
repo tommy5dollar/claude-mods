@@ -354,11 +354,11 @@ describe('state', () => {
 
   test('the question: one line with the reason, Use <level> / Keep <picker>; Not now when the picker is unknown', () => {
     expect(effortQuestion(P_HIGH, 'medium')).toEqual({
-      text: 'Effort router: Bug fix in existing code. Use high instead of medium?',
+      text: 'Effort router: Bug fix in existing code. Use high effort instead of medium?',
       options: ['Use high', 'Keep medium'],
       header: 'Effort',
     })
-    expect(effortQuestion(P_LOW, undefined)).toEqual({ text: 'Effort router: Minimal patch. Use low?', options: ['Use low', 'Not now'], header: 'Effort' })
+    expect(effortQuestion(P_LOW, undefined)).toEqual({ text: 'Effort router: Minimal patch. Use low effort?', options: ['Use low', 'Not now'], header: 'Effort' })
   })
 
   test('a lock stops reading and clears what was waiting; its reason says who chose', () => {
@@ -367,8 +367,9 @@ describe('state', () => {
     expect(locked.pending).toBeUndefined()
     expect(locked.asking).toBeUndefined()
     expect(locked.hint).toBeUndefined()
-    expect(locked.reason).toBe("you kept medium over the router's high (bug fix in existing code)")
-    expect(lockReason.agreed(P_HIGH)).toBe('router: bug fix in existing code, same as the picker')
+    expect(locked.reason).toBe('your choice')
+    expect(lockReason.agreed(P_HIGH)).toBe('bug fix in existing code')
+    expect(lockReason.chosen(P_HIGH)).toBe('bug fix in existing code')
     expect(wantsRead({ ...locked, prompts: 1 }, 6)).toBe(false)
     expect(appliedLevel(LOCKED)).toBe('high')
     expect(appliedLevel(OFF)).toBeUndefined()
@@ -378,7 +379,7 @@ describe('state', () => {
   test('first sighting: earlier prompts count; past the budget the router is left off', () => {
     expect(firstSighting(0, 6, true)).toEqual(freshState())
     expect(firstSighting(4, 6, true)).toEqual({ ...freshState(), prompts: 4 })
-    expect(firstSighting(10, 6, true)).toMatchObject({ mode: 'picker', gaveUp: true, offReason: 'existing session — /route to ask' })
+    expect(firstSighting(10, 6, true)).toMatchObject({ mode: 'picker', gaveUp: true, offReason: 'session started before the router' })
     expect(footerLabel(firstSighting(10, 6, true)).text).toBe('off')
     expect(firstSighting(10, 6, false)).toMatchObject({ mode: 'auto', phase: 'undecided', gaveUp: true })
     expect(wantsRead({ ...firstSighting(10, 6, false), prompts: 11 }, 6)).toBe(false)
@@ -404,7 +405,7 @@ describe('state', () => {
 
     expect(afterBudget({ ...DECIDING, prompts: 5 }, 6, true)).toEqual({ ...DECIDING, prompts: 5 })
     const off = afterBudget({ ...DECIDING, prompts: 6 }, 6, true)
-    expect(off).toMatchObject({ mode: 'picker', gaveUp: true, offReason: 'no clear task after 6 prompts — /route to ask again' })
+    expect(off).toMatchObject({ mode: 'picker', gaveUp: true, offReason: 'no clear task after 6 prompts' })
     expect(footerLabel(off).text).toBe('off')
     const idle = afterBudget({ ...DECIDING, prompts: 6 }, 6, false)
     expect(idle).toMatchObject({ mode: 'auto', phase: 'undecided', gaveUp: true })
@@ -433,30 +434,31 @@ describe('state', () => {
     expect(footerLabel(OFF)).toEqual({ text: 'off', dim: true })
   })
 
-  test('the band: headline per state; Suggest now / Turn off, or Turn on; the auto notice with Revert', () => {
+  test('the band: headline per state; Check now / Turn off, or Turn on; the auto notice with Undo', () => {
     const labels = (state: typeof DECIDING, allowOff = true) => bandActions(state, allowOff).map(a => a.label)
-    expect(labels(DECIDING)).toEqual(['Suggest now', 'Turn off'])
-    expect(labels(LOCKED)).toEqual(['Suggest now', 'Turn off'])
+    expect(labels(DECIDING)).toEqual(['Check now', 'Turn off'])
+    expect(labels(LOCKED)).toEqual(['Check now', 'Turn off'])
     expect(labels(OFF)).toEqual(['Turn on'])
-    expect(labels(DECIDING, false)).toEqual(['Suggest now'])
+    expect(labels(DECIDING, false)).toEqual(['Check now'])
 
-    expect(bandHeadline(LOCKED)).toBe('Effort router: high 🔒 — router: bug fix in existing code')
-    expect(bandHeadline(ASKING)).toBe('Effort router: high? — asking: use high instead of medium?')
-    expect(bandHeadline(OFF)).toBe('Effort router: off — the effort picker decides')
-    expect(bandHeadline(DECIDING)).toStartWith('Effort router: deciding — ')
-    expect(bandHeadline({ ...DECIDING, gaveUp: true })).toBe('Effort router: deciding — stopped reading; Suggest now asks again')
+    expect(bandHeadline(LOCKED)).toBe('Effort router: high 🔒 for this session (bug fix in existing code)')
+    expect(bandHeadline(ASKING)).toBe('Effort router: high? Waiting for your answer.')
+    expect(bandHeadline(OFF)).toBe('Effort router: off. Your effort setting applies.')
+    expect(bandHeadline(DECIDING)).toBe('Effort router: deciding. Your effort setting applies until the task is clear.')
+    expect(bandHeadline({ ...DECIDING, gaveUp: true })).toBe('Effort router: stopped checking (no clear task yet). Your effort setting applies.')
 
-    expect(noticeHeadline(P_HIGH)).toBe('Using high — bug fix in existing code')
-    expect(noticeActions().map(a => a.label)).toEqual(['Revert to picker'])
+    expect(noticeHeadline(P_HIGH)).toBe('Effort router: using high for this session (bug fix in existing code)')
+    expect(noticeActions().map(a => a.label)).toEqual(['Undo'])
     expect(noticeActions(false)).toEqual([])
   })
 
   test('reasons and status', () => {
-    expect(routeReport(afterBudget({ ...DECIDING, prompts: 6 }, 6, true), 6)).toStartWith('off (no clear task after 6 prompts — /route to ask again).')
-    expect(routeReport(LOCKED, 6)).toStartWith('high 🔒 (router: bug fix in existing code). Every request and subagent runs at high.')
-    expect(routeReport(ASKING, 6)).toStartWith('high? Asking whether to use high instead of medium (bug fix in existing code)')
-    expect(routeReport(PENDING, 6, 'medium')).toStartWith('deciding. The last read suggests high (bug fix in existing code); the next request compares it')
-    expect(routeReport({ ...DECIDING, prompts: 2 }, 6, 'medium')).toContain('Automatic reads: 2 of 6 used.')
+    expect(routeReport(afterBudget({ ...DECIDING, prompts: 6 }, 6, true), 6)).toStartWith('Off (no clear task after 6 prompts), so your effort setting applies. /route on turns it back on.')
+    expect(afterBudget({ ...DECIDING, prompts: 1 }, 1, true).offReason).toBe('no clear task after 1 prompt')
+    expect(routeReport(LOCKED, 6)).toStartWith('high 🔒 for this session (bug fix in existing code). Subagents use it too.')
+    expect(routeReport(ASKING, 6)).toStartWith('high? Waiting for your answer: use high effort instead of medium (bug fix in existing code)?')
+    expect(routeReport(PENDING, 6, 'medium')).toStartWith("Deciding. The last check suggested high (bug fix in existing code). If that isn't your setting, you'll be asked before Claude carries on.")
+    expect(routeReport({ ...DECIDING, prompts: 2 }, 6, 'medium')).toContain('Prompts checked: 2 of up to 6.')
     const report = routeReport({ ...DECIDING, prompts: 2 }, 6, 'medium', {
       now: 100_000,
       calls: 3,
@@ -466,19 +468,19 @@ describe('state', () => {
       error: { at: 100_000 - 5 * 60_000, text: 'Error: timeout' },
       sent: { sentChars: 23_900, fullChars: 91_000, maxChars: 24_000, omitted: 210 },
     })
-    expect(report).toContain('Consent: ask.')
-    expect(report).toContain('Classifier calls this session: 3. Last read took 1240 ms.')
-    expect(report).toContain('Last verdict (after a prompt, 12s ago): undecided. Raw: ```json {"decision":"undecided"} ```')
+    expect(report).toContain('If it disagrees with your setting, it asks you (consent: ask).')
+    expect(report).toContain('Checks this session: 3.')
+    expect(report).toContain('Last check (after a prompt, 12s ago, took 1.2s): no clear task yet.')
     expect(report).toContain('Last error (5m ago): Error: timeout')
-    expect(report).toContain('Last read sent 23900 of 91000 transcript chars (cap 24000; 210 messages left out).')
-    expect(routeReport(DECIDING, 6, 'medium', { now: 0, calls: 1, sent: { sentChars: 80, fullChars: 80, maxChars: 24_000, omitted: 0 } })).toContain('Last read sent the whole transcript: 80 chars (cap 24000).')
+    expect(report).toContain("It read 23900 of the conversation's 91000 characters (limit 24000).")
+    expect(routeReport(DECIDING, 6, 'medium', { now: 0, calls: 1, sent: { sentChars: 80, fullChars: 80, maxChars: 24_000, omitted: 0 } })).not.toContain('It read')
     expect(ago(0, 2 * 3600_000)).toBe('0s ago')
     expect(ago(3 * 3600_000, 0)).toBe('3h ago')
-    expect(routeReport({ ...DECIDING, hint: 'keep it quick' }, 6)).toContain('Hint: keep it quick')
+    expect(routeReport({ ...DECIDING, hint: 'keep it quick' }, 6)).toContain('Your hint: keep it quick')
   })
 
   test('saved state: a lock and off round-trip; a waiting verdict is not kept; old provisional and proposed come back deciding', () => {
-    expect(restored(withSaved(undefined, 's1', LOCKED, 1).s1)).toMatchObject({ mode: 'auto', phase: 'locked', level: 'high', reason: 'router: bug fix in existing code' })
+    expect(restored(withSaved(undefined, 's1', LOCKED, 1).s1)).toMatchObject({ mode: 'auto', phase: 'locked', level: 'high', reason: 'bug fix in existing code' })
     const saved = restored(withSaved(undefined, 's2', ASKING, 1).s2)
     expect(saved).toEqual(freshState())
     const gaveUp = afterBudget({ ...DECIDING, prompts: 6 }, 6, true)
@@ -575,24 +577,24 @@ describe('subagent reads', () => {
     expect(routesSubagents(turnedOff(lockedAt(freshState(), 'high', 'router: r')))).toBe(false) // /route off, Revert, Turn off
     expect(routesSubagents(turnedOn(turnedOff(freshState())))).toBe(true)
     expect(routesSubagents(restored({ mode: 'picker' }))).toBe(false)
-    expect(routesSubagents(restored({ mode: 'picker', offReason: 'existing session — /route to ask' }))).toBe(true)
+    expect(routesSubagents(restored({ mode: 'picker', offReason: 'session started before the router' }))).toBe(true)
   })
 
   test('/route status lists routed subagents, newest first, at most 10', () => {
     const agents = Array.from({ length: 12 }, (_, i) => ({ level: 'low' as const, reason: `reason ${i}`, subagentType: 'Explore', description: `task ${i}` }))
     const lines = subagentReport({ routing: 'on', agents })
-    expect(lines[0]).toBe('Subagents: routed from their own briefs at spawn.')
-    expect(lines[1]).toBe('Routed subagents this session: 12 (newest 10 shown).')
-    expect(lines[2]).toBe('  low: task 11 (Explore) — reason 11')
+    expect(lines[0]).toBe('Subagents: each gets its own level from its task.')
+    expect(lines[1]).toBe('Recent subagents (12, newest 10 shown):')
+    expect(lines[2]).toBe('  low: task 11 (reason 11)')
     expect(lines).toHaveLength(12)
-    expect(lines.at(-1)).toBe('  low: task 2 (Explore) — reason 2')
-    expect(subagentReport({ routing: 'setting', agents: [] })).toEqual(['Subagents: not routed (routeSubagents is off); they run at the main level.'])
-    expect(subagentReport({ routing: 'user-off', agents: [] })[0]).toContain("they run at the picker's level")
+    expect(lines.at(-1)).toBe('  low: task 2 (reason 2)')
+    expect(subagentReport({ routing: 'setting', agents: [] })).toEqual(['Subagents: not routed (routeSubagents is off), so they use the session level.'])
+    expect(subagentReport({ routing: 'user-off', agents: [] })[0]).toContain('they use your effort setting')
 
     const locked = lockedAt(freshState(), 'high', 'router: bug fix')
     expect(routeReport(locked, 6, 'high', { now: 0, calls: 1, subagents: { routing: 'on', agents: [] } }))
-      .toStartWith('high 🔒 (router: bug fix). Every request runs at high; subagents get their own level from their briefs.')
-    expect(routeReport(locked, 6)).toContain('Every request and subagent runs at high.')
+      .toStartWith('high 🔒 for this session (router: bug fix). Subagents get their own level.')
+    expect(routeReport(locked, 6)).toContain('Subagents use it too.')
   })
 
   test("the organisation's routeSubagents is read from settings", () => {
@@ -651,8 +653,8 @@ describe('agent definitions that set their own effort', () => {
   })
 
   test('status marks a level set by a definition; a nested spawn inherits only a level', () => {
-    const lines = subagentReport({ routing: 'on', agents: [{ level: 'low', reason: 'effort in u/probe.md', subagentType: 'probe', description: 'Probe', byDefinition: true }] })
-    expect(lines.at(-1)).toBe('  low (set by its definition): Probe (probe) — effort in u/probe.md')
+    const lines = subagentReport({ routing: 'on', agents: [{ level: 'low', reason: 'from u/probe.md', subagentType: 'probe', description: 'Probe', byDefinition: true }] })
+    expect(lines.at(-1)).toBe('  low: Probe (set by its agent definition)')
     const agents = new Map([
       ['a', { level: 'low' as const, reason: 'r', subagentType: 't', description: 'd', byDefinition: true }],
       ['b', { level: 32000, reason: 'r', subagentType: 't', description: 'd', byDefinition: true }],
@@ -705,7 +707,7 @@ describe('the spend ledger', () => {
 
   test('nothing recorded: says so and where records go', () => {
     expect(spendReport([emptyLedger('s1', 'mods')], 'week', { today: '2026-10-04', session: 's1' })).toBe(
-      'effort spend for the last 7 days (since 2026-09-28, UTC): no requests recorded. The router records every request from 0.9.0 on (~/.claude/effort-router/spend/).',
+      'Nothing recorded for the last 7 days (since 2026-09-28). Recording started with version 0.9.0.',
     )
   })
 
@@ -721,25 +723,25 @@ describe('the spend ledger', () => {
     b = add(b, '2026-09-20', 'main', 'high', 'high', 9999, 5) // outside the week
     const report = spendReport([a, b], 'week', { today: '2026-10-04', session: 's1' })
     expect(report.split('\n')).toEqual([
-      'Effort spend for the last 7 days (since 2026-09-28, UTC): 18 requests in 2 sessions, 14k output tokens.',
-      'By level (output tokens are thinking plus the answer, the part effort changes most):',
-      '  low: 11 requests, 2.3k output (avg 209 a request)',
-      '  medium: 4 requests, 4.0k output (avg 1.0k a request)',
-      '  high: 3 requests, 8.0k output (avg 2.7k a request)',
-      'The router moved 12 requests off the level they arrived at:',
-      '  subagents, medium → low: 10 requests, 2.0k output (avg 200; requests left at medium averaged 1.0k)',
-      '  main thread, medium → high: 2 requests, 6.0k output (avg 3.0k; requests left at medium averaged 1.0k)',
-      'Agent definitions set their own level for 1 request (low 1).',
-      "The router's own reads: 1 call, 50 output and 4.0k input tokens on the classifier model.",
-      'By repo (output): mods 12k · employment 2.0k.',
-      'Measured, not estimated. There is no "saved" figure: the router lowers easy tasks and raises hard ones, so the averages above cannot say what a moved request would have cost at its old level.',
+      'Effort for the last 7 days (since 2026-09-28): 18 requests in 2 sessions, 14k output tokens.',
+      'By level:',
+      '  low: 11 requests, 2.3k output tokens (avg 209)',
+      '  medium: 4 requests, 4.0k output tokens (avg 1.0k)',
+      '  high: 3 requests, 8.0k output tokens (avg 2.7k)',
+      'Changed by the router: 12 requests',
+      '  subagents, medium → low: 10 requests, 2.0k output tokens (avg 200, vs 1.0k for those left at medium)',
+      '  main conversation, medium → high: 2 requests, 6.0k output tokens (avg 3.0k, vs 1.0k for those left at medium)',
+      'Set by agent definitions: 1 request (low 1).',
+      "The router's own checks: 1, using 50 output and 4.0k input tokens.",
+      'By repo (output tokens): mods 12k, employment 2.0k.',
+      'No "saved" figure: the router lowers easy tasks and raises hard ones, so these averages can\'t show what a changed request would have cost.',
     ])
     const session = spendReport([a, b], 'session', { today: '2026-10-04', session: 's2' })
-    expect(session.split('\n')[0]).toBe('Effort spend for this session: 6 requests, 52k output tokens.')
-    expect(session).toContain('The router moved no requests off the level they arrived at.')
+    expect(session.split('\n')[0]).toBe('Effort for this session: 6 requests, 52k output tokens.')
+    expect(session).toContain('Changed by the router: none.')
     expect(session).not.toContain('By repo')
     expect(spendReport([a, b], 'all', { today: '2026-10-04', session: 's1' }).split('\n')[0]).toBe(
-      'Effort spend for every session recorded: 23 requests in 2 sessions, 64k output tokens.',
+      'Effort for all recorded sessions: 23 requests in 2 sessions, 64k output tokens.',
     )
   })
 })

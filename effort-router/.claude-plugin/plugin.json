@@ -1,7 +1,7 @@
 {
   "name": "effort-router",
-  "version": "0.9.0",
-  "description": "Reads the conversation before each prompt runs until the task is clear (a Haiku read against Anthropic's 'Spending your effort' guidance and your own rules). If its level matches your effort picker the turn just runs and that level is kept; if it differs, the turn waits on one question (Use high / Keep medium) and your answer is kept. /route asks on demand, optionally with a hint. Each subagent gets its own level from a read of its brief at spawn. The footer shows the state (deciding, high? while asking, high 🔒, off) and is a button that opens the router's band above the prompt. /route report shows where the effort went: requests and output tokens per level, and what the router moved.",
+  "version": "0.9.1",
+  "description": "Picks the reasoning effort each task needs, following Anthropic's 'Spending your effort' guidance. When it disagrees with your effort setting, it asks before the task runs. Subagents get their own level. /route report shows where your effort went.",
   "author": {
     "name": "Tommy Long"
   },
@@ -11,8 +11,8 @@
   "userConfig": {
     "consent": {
       "type": "string",
-      "title": "When the router wants a different level",
-      "description": "When the router wants a different level from your effort picker: \"ask\" (default) holds the turn and asks you (Use the router's level, or Keep yours); \"auto\" uses the router's level without asking and shows it above the prompt with Revert to picker. Either way the choice is kept for the session.",
+      "title": "When the router disagrees with your effort setting",
+      "description": "\"ask\" (default): pause and ask which level to use. \"auto\": switch without asking, with an Undo button.",
       "required": false,
       "default": "ask",
       "options": [
@@ -22,57 +22,57 @@
     },
     "classifyTimeoutMs": {
       "type": "number",
-      "title": "Classifier timeout (ms)",
-      "description": "How long a prompt waits for the router's read before it runs anyway at the current level. The read usually takes 1-2 seconds.",
+      "title": "Check timeout (ms)",
+      "description": "How long a prompt waits for the router's check (usually 1-2 seconds) before running at your setting.",
       "required": false,
       "default": 8000
     },
     "classifierMaxChars": {
       "type": "number",
-      "title": "Classifier input cap (chars)",
-      "description": "Most transcript characters one read sends. The first prompt is always kept, then the newest lines, your prompts and answers before Claude's replies.",
+      "title": "Check size (characters)",
+      "description": "The most conversation text one check reads. Your first prompt and the latest messages are always included.",
       "required": false,
       "default": 24000
     },
     "decideWithin": {
       "type": "number",
-      "title": "Decide within (prompts)",
-      "description": "How many of your prompts (and answered questions) the router reads automatically. If nothing is locked by then it stops reading: a level in use is locked, a pending suggestion stays pending, otherwise the router turns off. /route asks again at any time.",
+      "title": "Prompts to check",
+      "description": "How many prompts the router checks before it gives up on a session with no clear task. /route checks again at any time.",
       "required": false,
       "default": 6
     },
     "classifierModel": {
       "type": "string",
-      "title": "Classifier model",
-      "description": "Alias or id of the model that reads the transcript.",
+      "title": "Check model",
+      "description": "The model that runs the checks.",
       "required": false,
       "default": "haiku"
     },
     "syncPicker": {
       "type": "boolean",
-      "title": "Sync the effort picker",
-      "description": "Run /effort <level> when a level is fixed so the terminal's picker label matches (its echo also tells the model). The Desktop picker is app-owned and does not move.",
+      "title": "Update the terminal's effort label",
+      "description": "In the terminal, run /effort so the label shows the router's level. The Desktop app's label can't be changed.",
       "required": false,
       "default": true
     },
     "rules": {
       "type": "string",
       "title": "Routing rules",
-      "description": "Extra routing rules in plain words. Include a line that is exactly $defaults to keep the rules beneath (shipped defaults, then your organisation's); without it these rules replace them. A ~/.claude/effort-router.md file takes precedence over this option.",
+      "description": "Your own routing rules in plain words. Keep a line that is exactly $defaults to build on the built-in rules, or leave it out to replace them. A ~/.claude/effort-router.md file overrides this.",
       "required": false,
       "default": ""
     },
     "routeSubagents": {
       "type": "boolean",
       "title": "Route subagents",
-      "description": "Give each subagent its own level from a read of its brief when it starts (searches and lookups low, implementing, debugging and review high); a fork, or a failed read, takes the parent's level. An agent whose own definition (a user or project agents file, or settings) sets an effort keeps it. Off: subagents run at the session's level. /route off also stops it.",
+      "description": "Give each subagent its own effort level based on its task (searches low, coding and review high). An agent whose definition sets an effort keeps it. Off: subagents use the session level.",
       "required": false,
       "default": true
     },
     "footerControl": {
       "type": "string",
-      "title": "Footer control",
-      "description": "\"button\" (default): the footer state is a button that opens the router's band above the prompt. \"label\": plain text only; use /route to change the state.",
+      "title": "Footer",
+      "description": "\"button\" (default): the router's state in the footer opens its controls. \"label\": plain text, and /route is the control.",
       "required": false,
       "default": "button",
       "options": [

@@ -10,12 +10,14 @@ too unless its agent definition fixes one. A parent can't choose a subagent's ef
 [Spending your effort](https://claude.dev/blog/spending-your-effort/) guidance.
 
 - **Your session.** A quick Haiku read of the conversation decides what the task needs. If that matches your effort
-  picker, nothing changes. If it doesn't, the turn waits and Claude's own question card asks: "Use high instead of
-  medium?" Nothing runs at a level you didn't agree to. Prefer not to be asked? Set consent to `auto`.
+  picker, nothing changes. If it doesn't, the turn waits and Claude's own question card asks: "Use high effort
+  instead of medium?" Nothing runs at a level you didn't agree to. Prefer not to be asked? Set consent to `auto`.
 - **Subagents.** Each subagent gets its own level from the brief its parent wrote, before it starts: web lookups and
   searches run low, implementation, debugging and review run high. An agent whose definition sets its own `effort:`
   is left alone.
-- **Where it went.** `/route report` shows the requests and output tokens at each level, by session, week or month, and what the router moved, measured from every request (main thread and subagents) and kept on your machine.
+- **Where it went.** `/route report` shows the requests and output tokens at each level, by session, week or
+  month, and what the router changed. It's measured from every request, subagents included, and stays on your
+  machine.
 - **Your rules.** Routing rules can be extended or replaced per user, per project and per organisation (managed
   settings can enforce them).
 

@@ -173,7 +173,7 @@ async function footerOf(footer: Mounted) {
 
 /** The router's band: its headline (undefined when not drawn) and button labels. */
 async function bandOf(band: Mounted) {
-  const headline = (await band.find({ type: 'Text', text: /^(Effort router: |Using )/ }))?.text
+  const headline = (await band.find({ type: 'Text', text: /^Effort router: / }))?.text
   const buttons = (await band.findAll({ type: 'Button' })).map(b => b.props.label as string)
   return { headline, buttons }
 }
@@ -239,7 +239,7 @@ describe('effort-router', () => {
     expect(world.asked).toEqual([])
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
     expect((await footerOf(footer)).shown).toBe('medium 🔒')
-    expect(world.lines).toContain('effort locked: medium 🔒 (router: regular feature work, same as the picker) · /route status')
+    expect(world.lines).toContain('Effort router: medium for the rest of this session (regular feature work).')
     await submit($, 'and the settings page too')
     expect(world.classifierCalls).toBe(1)
     await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
@@ -253,7 +253,7 @@ describe('effort-router', () => {
     await submit($, 'the checkout total is wrong when a coupon expires mid-session, fix it')
     expect(world.sent).toEqual([]) // nothing asked or sent yet: the verdict waits for the request
     await step($, 0)
-    expect(world.asked).toEqual([{ text: 'Effort router: Bug fix in existing code. Use high instead of medium?', options: ['Use high', 'Keep medium'] }])
+    expect(world.asked).toEqual([{ text: 'Effort router: Bug fix in existing code. Use high effort instead of medium?', options: ['Use high', 'Keep medium'] }])
     expect(world.sent).toEqual(['high']) // the request went out after the answer, at the chosen level
     await step($, 1)
     expect(world.sent).toEqual(['high', 'high'])
@@ -276,7 +276,7 @@ describe('effort-router', () => {
     expect(world.sent).toEqual(['medium'])
     await step($, 1)
     expect(world.sent).toEqual(['medium', 'medium'])
-    expect(await route($, 'status')).toStartWith("medium 🔒 (you kept medium over the router's high (bug fix in existing code))")
+    expect(await route($, 'status')).toStartWith('medium 🔒 for this session (your choice).')
     await submit($, 'and the lexer')
     expect(world.classifierCalls).toBe(1)
   })
@@ -292,7 +292,7 @@ describe('effort-router', () => {
     expect(world.asked).toHaveLength(1)
     expect(world.sent).toEqual([]) // held
     expect((await footerOf(footer)).shown).toBe('high?')
-    expect(await route($, 'status')).toStartWith('high? Asking whether to use high instead of medium')
+    expect(await route($, 'status')).toStartWith('high? Waiting for your answer: use high effort instead of medium')
     world.release?.('USE')
     await stepping
     expect(world.sent).toEqual(['high'])
@@ -329,7 +329,7 @@ describe('effort-router', () => {
     await settle($)
     expect(world.sent).toEqual(['medium'])
     expect(world.efforts).toEqual([])
-    expect(await route($, 'status')).toStartWith('deciding.')
+    expect(await route($, 'status')).toStartWith('Deciding.')
   })
 
   test('answered AskUserQuestion questions: read before the answers return, then asked at the next request (a later index)', { options: { decideWithin: 3 } }, async ($, on) => {
@@ -352,16 +352,16 @@ describe('effort-router', () => {
     expect(prompt).toContain('ASSISTANT asked: Which platforms? [options: Xero | QuickBooks]')
     expect(prompt).toContain('USER answered: User has answered your questions: "Which platforms?"="Xero, QuickBooks"')
     await step($, 3)
-    expect(world.asked).toEqual([{ text: 'Effort router: Multi-platform finance integration. Use high instead of medium?', options: ['Use high', 'Keep medium'] }])
+    expect(world.asked).toEqual([{ text: 'Effort router: Multi-platform finance integration. Use high effort instead of medium?', options: ['Use high', 'Keep medium'] }])
     expect(world.sent).toEqual(['medium', 'high'])
 
     await $.tool.call({ tool: 'AskUserQuestion', tool_use_id: 'q2', agentId: 'agent-1', ...QUESTIONS } as never)
     expect(world.classifierCalls).toBe(2) // a subagent's question is not the user's turn
 
     const status = await route($, 'status')
-    expect(status).toContain('Consent: ask.')
-    expect(status).toMatch(/Classifier calls this session: 2\. Last read took \d+ ms\./)
-    expect(status).toMatch(/Last verdict \(after answered questions, \d+s ago\): high \(multi-platform finance integration\)\. Raw: \{"decision":"lock"/)
+    expect(status).toContain('If it disagrees with your setting, it asks you (consent: ask).')
+    expect(status).toMatch(/Checks this session: 2\./)
+    expect(status).toMatch(/Last check \(after answered questions, \d+s ago, took [\d.]+s\): high \(multi-platform finance integration\)\./)
   })
 
   test('a verdict waiting when the budget runs out is still asked; dismissed, the router then turns off', { options: { decideWithin: 1 } }, async ($, on) => {
@@ -371,7 +371,7 @@ describe('effort-router', () => {
     await submit($, 'fix the crash in the parser')
     await step($, 0)
     expect(world.asked).toHaveLength(1)
-    expect(await route($, 'status')).toContain('off (no clear task after 1 prompts')
+    expect(await route($, 'status')).toContain('Off (no clear task after 1 prompt)')
   })
 
   // --- /route and the band --------------------------------------------------------------
@@ -383,8 +383,8 @@ describe('effort-router', () => {
     await step($, 0)
     world.messages = [{ role: 'user', text: 'fix the crash in the parser', toolUses: [] }]
     world.reply = BUG_REPLY
-    expect(await route($)).toBe('high 🔒 (bug fix in existing code).')
-    expect(world.asked).toEqual([{ text: 'Effort router: Bug fix in existing code. Use high instead of medium?', options: ['Use high', 'Keep medium'] }])
+    expect(await route($)).toBe('high for this session.')
+    expect(world.asked).toEqual([{ text: 'Effort router: Bug fix in existing code. Use high effort instead of medium?', options: ['Use high', 'Keep medium'] }])
     await step($, 1)
     expect(world.sent.at(-1)).toBe('high')
   })
@@ -398,8 +398,8 @@ describe('effort-router', () => {
     expect(world.sent).toEqual(['high', 'high'])
     world.reply = '{"decision":"lock","level":"low","reason":"quick follow-up"}'
     world.answer = 'KEEP'
-    expect(await route($, 'keep it quick')).toBe("medium 🔒: you kept the picker's level.")
-    expect(world.asked.at(-1)).toEqual({ text: 'Effort router: Quick follow-up. Use low instead of medium?', options: ['Use low', 'Keep medium'] })
+    expect(await route($, 'keep it quick')).toBe('medium for this session.')
+    expect(world.asked.at(-1)).toEqual({ text: 'Effort router: Quick follow-up. Use low effort instead of medium?', options: ['Use low', 'Keep medium'] })
     await step($, 2)
     expect(world.sent.at(-1)).toBe('medium')
   })
@@ -410,10 +410,10 @@ describe('effort-router', () => {
     await submit($, 'fix the crash in the parser')
     await step($, 0) // locked high
     world.messages = [{ role: 'user', text: 'fix the crash in the parser', toolUses: [] }]
-    expect(await route($)).toBe('confirmed: high 🔒 still fits (bug fix in existing code); nothing changed.')
+    expect(await route($)).toBe('high still fits (bug fix in existing code). Nothing changed.')
     expect(world.asked).toHaveLength(1)
     world.reply = '{"decision":"lock","level":"medium","reason":"regular feature work"}'
-    expect(await route($)).toContain('medium 🔒 (regular feature work): the router agrees with the picker')
+    expect(await route($)).toContain('medium for this session (regular feature work), the same as your setting.')
     expect(world.asked).toHaveLength(1)
   })
 
@@ -421,20 +421,20 @@ describe('effort-router', () => {
     const world = worldOf(on, '{"decision":"undecided"}')
     await $.session.start(STARTED)
     await submit($, 'hi')
-    expect(await route($, 'status')).toContain('off (no clear task after 1 prompts')
+    expect(await route($, 'status')).toContain('Off (no clear task after 1 prompt)')
 
-    expect(await route($, 'not sure yet')).toContain('no clear task yet, even with your hint')
-    expect(world.toasts.at(-1)).toContain('no clear task yet')
-    expect(await route($, 'status')).toStartWith('off')
+    expect(await route($, 'not sure yet')).toContain('No clear task yet, even with your hint')
+    expect(world.toasts.at(-1)).toContain('No clear task yet')
+    expect(await route($, 'status')).toStartWith('Off')
 
     world.reply = '{"decision":"lock","level":"max","reason":"security review"}'
-    expect(await route($, 'this is a security review')).toBe('max 🔒 (security review).')
+    expect(await route($, 'this is a security review')).toBe('max for this session.')
     expect(world.prompts.at(-1)).toContain('<user_hint>\nthis is a security review\n</user_hint>')
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
     expect((await footerOf(footer)).shown).toBe('max 🔒')
   })
 
-  test("footer: a plain button that opens the band with the state's actions; Suggest now asks", async ($, on) => {
+  test("footer: a plain button that opens the band with the state's actions; Check now asks", async ($, on) => {
     const world = worldOf(on)
     await $.session.start({ ...STARTED, surface: 'desktop' })
     world.messages = [{ role: 'user', text: 'fix the crash in the parser', toolUses: [] }]
@@ -451,8 +451,8 @@ describe('effort-router', () => {
     expect((await bandOf(band)).headline).toBeUndefined()
 
     await footer.press({ key: 'route-state' })
-    expect(await bandOf(band)).toMatchObject({ buttons: ['Suggest now', 'Turn off', 'Close'] })
-    expect((await bandOf(band)).headline).toStartWith('Effort router: deciding — ')
+    expect(await bandOf(band)).toMatchObject({ buttons: ['Check now', 'Turn off', 'Close'] })
+    expect((await bandOf(band)).headline).toBe('Effort router: deciding. Your effort setting applies until the task is clear.')
     await footer.press({ key: 'route-state' })
     expect((await bandOf(band)).headline).toBeUndefined()
 
@@ -463,14 +463,14 @@ describe('effort-router', () => {
     expect((await bandOf(band)).headline).toBeUndefined() // the band closed; it does not open by itself under ask
     expect((await footerOf(footer)).shown).toBe('high 🔒')
     await footer.press({ key: 'route-state' })
-    expect(await bandOf(band)).toEqual({ headline: 'Effort router: high 🔒 — router: bug fix in existing code', buttons: ['Suggest now', 'Turn off', 'Close'] })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: high 🔒 for this session (bug fix in existing code)', buttons: ['Check now', 'Turn off', 'Close'] })
 
     await band.press({ key: 'off' })
     await step($, 0)
     expect(world.sent.at(-1)).toBe('medium')
     expect((await footerOf(footer)).shown).toBe('off')
     await footer.press({ key: 'route-state' })
-    expect(await bandOf(band)).toEqual({ headline: 'Effort router: off — the effort picker decides', buttons: ['Turn on', 'Close'] })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: off. Your effort setting applies.', buttons: ['Turn on', 'Close'] })
     await band.press({ key: 'on' })
     expect((await footerOf(footer)).shown).toBe('deciding')
   })
@@ -485,7 +485,7 @@ describe('effort-router', () => {
 
   // --- consent auto -----------------------------------------------------------------------
 
-  test('auto: locked at once without a question; the band opens once with Revert to picker', async ($, on) => {
+  test('auto: locked at once without a question; the band opens once with Undo', async ($, on) => {
     const world = worldOf(on, BUG_REPLY, {}, AUTO)
     await $.session.start(STARTED)
     await submit($, 'fix the crash in the parser')
@@ -493,7 +493,7 @@ describe('effort-router', () => {
     expect(world.sent).toEqual(['high'])
     expect(world.asked).toEqual([])
     const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
-    expect(await bandOf(band)).toEqual({ headline: 'Using high — bug fix in existing code', buttons: ['Revert to picker', 'Close'] })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: using high for this session (bug fix in existing code)', buttons: ['Undo', 'Close'] })
     await band.press({ key: 'revert' })
     expect((await bandOf(band)).headline).toBeUndefined()
     await step($, 1)
@@ -512,8 +512,8 @@ describe('effort-router', () => {
     world.reply = BUG_REPLY
     world.messages = [{ role: 'user', text: 'fix the crash in the parser', toolUses: [] }]
     await route($, 'on') // already on: no change
-    expect(await route($)).toBe('high 🔒 (bug fix in existing code).') // /route under auto: locked without a question
-    expect((await bandOf(band)).headline).toBe('Using high — bug fix in existing code')
+    expect(await route($)).toBe('high for this session (bug fix in existing code).') // /route under auto: locked without a question
+    expect((await bandOf(band)).headline).toBe('Effort router: using high for this session (bug fix in existing code)')
     await band.press({ key: 'close' })
     await step($, 0)
     expect(world.sent).toEqual(['high'])
@@ -522,7 +522,7 @@ describe('effort-router', () => {
   test('EFFORT_ROUTER_CONSENT: the old names map to ask and auto', async ($, on) => {
     const world = worldOf(on, BUG_REPLY, {}, { EFFORT_ROUTER_CONSENT: 'apply' })
     await $.session.start(STARTED)
-    expect(await route($, 'status')).toContain('Consent: auto.')
+    expect(await route($, 'status')).toContain('it switches without asking (consent: auto).')
     await submit($, 'fix the crash in the parser')
     await step($, 0)
     expect(world.sent).toEqual(['high'])
@@ -532,7 +532,7 @@ describe('effort-router', () => {
   test('EFFORT_ROUTER_CONSENT=band (the 0.5 confirm) means ask', async ($, on) => {
     const world = worldOf(on, BUG_REPLY, {}, { EFFORT_ROUTER_CONSENT: 'band' })
     await $.session.start(STARTED)
-    expect(await route($, 'status')).toContain('Consent: ask.')
+    expect(await route($, 'status')).toContain('it asks you (consent: ask).')
     await submit($, 'fix the crash in the parser')
     await step($, 0)
     expect(world.asked).toHaveLength(1)
@@ -548,7 +548,7 @@ describe('effort-router', () => {
     await submitting
     await step($, 0)
     expect(world.sent).toEqual(['medium'])
-    expect(await route($, 'status')).toContain('classifier timed out after 8000 ms; the turn went ahead at the current level')
+    expect(await route($, 'status')).toContain('the check timed out after 8000 ms, so the prompt ran at your setting')
     await world.clock.advance(60_000) // the late answer is ignored
     await settle($)
     await step($, 1)
@@ -563,7 +563,7 @@ describe('effort-router', () => {
     expect(world.classifierCalls).toBe(3)
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
     expect((await footerOf(footer)).shown).toBe('off')
-    expect(await route($, 'status')).toContain('no clear task after 3 prompts — /route to ask again')
+    expect(await route($, 'status')).toContain('Off (no clear task after 3 prompts)')
     for (const text of ['more', 'and more']) await submit($, text)
     expect(world.classifierCalls).toBe(3)
   })
@@ -581,8 +581,8 @@ describe('effort-router', () => {
     expect(world.asked).toEqual([])
     expect((await bandOf(band)).headline).toBeUndefined()
     expect(world.toasts).toEqual([])
-    expect(await route($, 'status')).toStartWith('off (existing session — /route to ask)')
-    expect(await route($)).toBe('high 🔒 (bug fix in existing code).')
+    expect(await route($, 'status')).toStartWith('Off (session started before the router)')
+    expect(await route($)).toBe('high for this session.')
     expect(world.classifierCalls).toBe(1)
   })
 
@@ -609,7 +609,7 @@ describe('effort-router', () => {
     expect(sent).toContain('USER: THE ORIGINAL TASK')
     expect(sent).toContain('USER: LATEST')
     expect(sent.length).toBeLessThan(2400)
-    expect(await route($, 'status')).toMatch(/Last read sent \d+ of \d+ transcript chars \(cap 2000; \d+ messages left out\)\./)
+    expect(await route($, 'status')).toMatch(/It read \d+ of the conversation's \d+ characters \(limit 2000\)\./)
   })
 
   test('status reports the last error; a throwing classifier fails open', async ($, on) => {
@@ -626,16 +626,16 @@ describe('effort-router', () => {
     const world = worldOf(on, '{"decision":"undecided"}')
     await $.session.start(STARTED)
     world.messages = [{ role: 'user', text: 'hi', toolUses: [] }]
-    expect(await route($, 'status')).toContain('deciding.')
-    expect(await route($, 'off')).toContain('router off')
+    expect(await route($, 'status')).toContain('Deciding.')
+    expect(await route($, 'off')).toContain('Router off')
     await step($, 0)
     expect(world.sent).toEqual(['medium'])
-    expect(await route($, 'on')).toContain('router on: deciding')
+    expect(await route($, 'on')).toContain('Router on.')
     expect(await route($, 'on')).toContain('already on')
     const calls = world.classifierCalls
-    expect(await route($, 'decide')).toContain('no clear task yet;')
+    expect(await route($, 'decide')).toContain('No clear task yet.')
     expect(world.classifierCalls).toBe(calls + 1)
-    expect(await route($, 'rules')).toContain('base: shipped defaults')
+    expect(await route($, 'rules')).toContain('  built-in defaults')
   })
 
   test('org layer: enforce is final; allowOff false hides Turn off and Revert; a spent budget idles as deciding', { options: { decideWithin: 1 } }, async ($, on) => {
@@ -646,23 +646,23 @@ describe('effort-router', () => {
     const world = worldOf(on, '{"decision":"undecided"}', sources)
     await $.session.start(STARTED)
     const rules = await route($, 'rules')
-    expect(rules).toContain('spliced: policy settings (managed)')
+    expect(rules).toContain('  + policy settings (managed)')
     expect(rules).toContain('ORG: payments code, never below high')
     expect(rules).not.toContain('USER REPLACES')
-    expect(rules).toContain('organisation enforces')
-    expect(await route($, 'off')).toContain('allowOff: false')
-    expect(await route($, 'rules init')).toContain('enforces its routing rules')
+    expect(rules).toContain("organisation's rules are final")
+    expect(await route($, 'off')).toContain('Your organisation keeps the router on.')
+    expect(await route($, 'rules init')).toContain("routing rules are final")
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
     const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
     await footer.press({ key: 'route-state' })
-    expect((await bandOf(band)).buttons).toEqual(['Suggest now', 'Close'])
+    expect((await bandOf(band)).buttons).toEqual(['Check now', 'Close'])
     await band.press({ key: 'close' })
 
     await submit($, 'hi')
     await submit($, 'hello?')
     expect(world.classifierCalls).toBe(1)
     expect((await footerOf(footer)).shown).toBe('deciding')
-    expect(await route($, 'status')).toContain('Automatic reads stopped')
+    expect(await route($, 'status')).toContain('Stopped checking')
   })
 
   test('org allowOff false under auto: the band that opens by itself has no Revert', async ($, on) => {
@@ -671,7 +671,7 @@ describe('effort-router', () => {
     await $.session.start(STARTED)
     await submit($, 'fix the crash in the parser')
     const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
-    expect(await bandOf(band)).toEqual({ headline: 'Using high — bug fix in existing code', buttons: ['Close'] })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: using high for this session (bug fix in existing code)', buttons: ['Close'] })
   })
 
   test('without enforce, a user settings option layers over the org', async ($, on) => {
@@ -683,7 +683,7 @@ describe('effort-router', () => {
     await $.session.start(STARTED)
     const rules = await route($, 'rules')
     expect(rules).toMatch(/ORG\nUSER$/)
-    expect(rules).toContain('spliced: user settings (pluginConfigs option)')
+    expect(rules).toContain('  + user settings (pluginConfigs option)')
   })
 
   describe('subagents', () => {
@@ -709,9 +709,9 @@ describe('effort-router', () => {
       expect(world.debug.some(line => /subagent agent-1 \(Explore: Find parser call sites\) -> low \(codebase search\) in \d+ ms/.test(line))).toBe(true)
 
       const status = await route($, 'status')
-      expect(status).toContain('Subagents: routed from their own briefs at spawn.')
-      expect(status).toContain('Routed subagents this session: 1.')
-      expect(status).toContain('  low: Find parser call sites (Explore) — codebase search')
+      expect(status).toContain('Subagents: each gets its own level from its task.')
+      expect(status).toContain('Recent subagents (1):')
+      expect(status).toContain('  low: Find parser call sites (codebase search)')
     })
 
     test('the brief is capped by classifierMaxChars', { options: { classifierMaxChars: 2000 } }, async ($, on) => {
@@ -736,7 +736,7 @@ describe('effort-router', () => {
       await step($, 0, fork)
       await step($, 0, nested)
       expect(world.sent).toEqual(['high', 'low'])
-      expect(await route($, 'status')).toContain("high: a task (fork) — fork: the parent's level")
+      expect(await route($, 'status')).toContain("high: a task (same as its parent: it's a fork)")
     })
 
     test("a read that fails, hangs or answers nothing usable falls back to the parent's level", async ($, on) => {
@@ -756,9 +756,9 @@ describe('effort-router', () => {
       for (const id of [failed, unusable, late]) await step($, 0, id)
       expect(world.sent).toEqual(['high', 'high', 'high'])
       const status = await route($, 'status')
-      expect(status).toContain("— read failed: the parent's level")
-      expect(status).toContain("— unusable reply: the parent's level")
-      expect(status).toContain("— read timed out: the parent's level")
+      expect(status).toContain('same as its parent: the check failed)')
+      expect(status).toContain('same as its parent: the check gave no level)')
+      expect(status).toContain('same as its parent: the check timed out)')
     })
 
     test("a nested spawn whose read fails takes its parent subagent's level (parentAgentId)", async ($, on) => {
@@ -782,7 +782,7 @@ describe('effort-router', () => {
       const id = await spawn($, { prompt: 'look into it' })
       await step($, 0, id)
       expect(world.sent).toEqual(['medium'])
-      expect(await route($, 'status')).not.toContain('Routed subagents')
+      expect(await route($, 'status')).not.toContain('Recent subagents')
     })
 
     test('routeSubagents false: no read; subagents run at the main level as before', { options: { routeSubagents: false } }, async ($, on) => {
@@ -821,7 +821,7 @@ describe('effort-router', () => {
       await step($, 1, before)
       await step($, 0, after)
       expect(world.sent.slice(1)).toEqual(['medium', 'medium'])
-      expect(await route($, 'status')).toContain("Subagents: not routed while the router is off; they run at the picker's level.")
+      expect(await route($, 'status')).toContain('Subagents: not routed while the router is off, so they use your effort setting.')
 
       await route($, 'on')
       await step($, 2, before)
@@ -837,7 +837,7 @@ describe('effort-router', () => {
       expect(world.subagentReads).toHaveLength(0)
       await step($, 0, id)
       expect(world.sent).toEqual(['high'])
-      expect(await route($, 'status')).toContain("not routed (your organisation's settings turn it off)")
+      expect(await route($, 'status')).toContain('not routed (turned off by your organisation)')
     })
 
     test('a denied spawn is not kept', async ($, on) => {
@@ -847,7 +847,7 @@ describe('effort-router', () => {
       const result = await $.agent.spawn({ tool_use_id: 't', prompt: 'search', description: 'd', subagentType: 'Explore', parentModel: 'm', background: true, fork: false } as never)
       expect(result.deny).toBe('no agents here')
       expect(world.subagentReads).toHaveLength(1)
-      expect(await route($, 'status')).not.toContain('Routed subagents')
+      expect(await route($, 'status')).not.toContain('Recent subagents')
     })
   })
 
@@ -867,7 +867,7 @@ describe('effort-router', () => {
       await step($, 0)
       expect(world.sent).toEqual(['medium', 'high']) // untouched (the engine applies low); the main thread keeps high
       const status = await route($, 'status')
-      expect(status).toContain('  low (set by its definition): Probe (effort-probe-low) — effort in /home/t')
+      expect(status).toContain('  low: Probe (set by its agent definition)')
       expect(world.debug.some(line => /subagent agent-1 \(effort-probe-low: Probe\) -> low set by its definition, left alone/.test(line))).toBe(true)
     })
 
@@ -880,7 +880,7 @@ describe('effort-router', () => {
       await $.session.start(STARTED)
       await spawn($, { subagentType: 'reviewer', description: 'Review', prompt: 'review it' })
       expect(world.subagentReads).toHaveLength(0)
-      expect(await route($, 'status')).toContain('  max (set by its definition): Review (reviewer)')
+      expect(await route($, 'status')).toContain('  max: Review (set by its agent definition)')
       const scout = await spawn($, { subagentType: 'scout', description: 'Scout', prompt: 'search for X' })
       expect(world.subagentReads).toHaveLength(1) // the project's scout sets no effort: routed
       await step($, 0, scout)
@@ -916,7 +916,7 @@ describe('effort-router', () => {
       expect(world.subagentReads).toHaveLength(0)
       await step($, 0, id)
       expect(world.sent).toEqual(['medium'])
-      expect(await route($, 'status')).toContain('  xhigh (set by its definition): Audit (auditor) — effort in user settings')
+      expect(await route($, 'status')).toContain('  xhigh: Audit (set by its agent definition)')
     })
 
     test("a plugin's agent is not looked up: it is routed", async ($, on) => {
@@ -945,10 +945,10 @@ describe('effort-router', () => {
       await step($, 0, id) // arrives medium, the brief says low
       expect(world.sent).toEqual(['high', 'low'])
       const report = await route($, 'report session')
-      expect(report).toContain('Effort spend for this session: 2 requests, 2.0k output tokens.')
-      expect(report).toContain('  main thread, medium → high: 1 request, 1.0k output (avg 1.0k)')
-      expect(report).toContain('  subagents, medium → low: 1 request, 1.0k output (avg 1.0k)')
-      expect(report).toContain("The router's own reads: 2 calls")
+      expect(report).toContain('Effort for this session: 2 requests, 2.0k output tokens.')
+      expect(report).toContain('  main conversation, medium → high: 1 request, 1.0k output tokens (avg 1.0k)')
+      expect(report).toContain('  subagents, medium → low: 1 request, 1.0k output tokens (avg 1.0k)')
+      expect(report).toContain("The router's own checks: 2,")
       expect(world.written).toEqual([])
       await complete($)
       expect(world.written).toEqual([LEDGER])
@@ -971,9 +971,9 @@ describe('effort-router', () => {
       expect(world.sent).toEqual(['medium'])
       const week = await route($, 'report')
       expect(week).toContain('3 requests in 2 sessions, 2.6k output tokens.')
-      expect(week).toContain('  medium: 2 requests, 600 output (avg 300 a request)')
-      expect(week).toContain('By repo (output): employment 2.0k · mods 600.')
-      expect(await route($, 'report session')).toContain('Effort spend for this session: 2 requests, 600 output tokens.')
+      expect(week).toContain('  medium: 2 requests, 600 output tokens (avg 300)')
+      expect(week).toContain('By repo (output tokens): employment 2.0k, mods 600.')
+      expect(await route($, 'report session')).toContain('Effort for this session: 2 requests, 600 output tokens.')
     })
 
     test('no home directory: still reported for the session, nothing written', async ($, on) => {
