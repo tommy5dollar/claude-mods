@@ -165,7 +165,7 @@ A top-level `"effortRouter": { "rules": ..., "rulesMode": ..., "allowOff": ..., 
 ## Install
 
 ```
-claude plugin marketplace add tommy5dollar/mods
+claude plugin marketplace add tommy5dollar/claude-mods
 claude plugin install effort-router@tommy-mods
 ```
 
