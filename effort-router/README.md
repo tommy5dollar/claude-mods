@@ -33,6 +33,8 @@ The footer, right beside the native model and effort pickers, shows the router's
 
 `Stop routing` turns the router off for this session: no more checks, subagents aren't routed and your effort setting (named in the button) applies again. `/route` still answers, and `Start routing` or `/route on` starts it again. New sessions are routed as usual.
 
+Changing the effort picker yourself while the router has a level in force does the same: routing stops and your new level is used from that request on. In Desktop the picker keeps showing your setting while the router runs another level, so picking the level it already shows changes nothing there. Use `Stop routing` instead.
+
 <!-- screenshot: footer showing "undecided" beside the gauge and the native pickers -->
 <!-- screenshot: the question card "Effort router: ... Use high effort instead of medium?" with the footer reading "high?" -->
 

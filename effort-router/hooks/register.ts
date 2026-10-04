@@ -433,6 +433,20 @@ async function turnOff($: EngineInterface, id: string, session: Session, setting
   restorePicker($, session, settings)
 }
 
+/** The user changed the effort themselves while a level was in force: routing stops, and their level stands. */
+async function pickerMoved($: EngineInterface, id: string, session: Session, level: Level): Promise<void> {
+  await commit($, id, session, turnedOff(session.state))
+  session.baseline = level
+  session.pendingSync = undefined
+  session.notice = undefined
+  try {
+    $.ui.log(`Effort router: you changed the effort to ${level}, so routing stopped for this session.`)
+  } catch {
+    // headless
+  }
+  $.ui.log(`effort-router: picker moved to ${level} by the user; routing off`, { to: 'debug' })
+}
+
 /** Puts the picker back where it was before the router first synced it. */
 function restorePicker($: EngineInterface, session: Session, settings: Settings): void {
   if (settings.syncPicker && session.baseline) {
@@ -744,13 +758,13 @@ async function decideAtStep($: EngineInterface, id: string, session: Session, se
       $.ui.log(checkLine({ n: session.state.prompts, of: settings.decideWithin, proposal: judged, inForce: picker, threshold: settings.confidence, sure, consent }))
     }
     if (!sure) {
-      recordOutcome($, 'below the bar', waiting.checkedAt)
+      recordOutcome($, 'below the bar', waiting.checkedAt, judged)
       await commit($, id, session, withVerdict(session.state, undefined))
       await spendBudget($, id, session, settings)
       return
     }
     if (consent === 'auto') {
-      recordOutcome($, 'acted', waiting.checkedAt)
+      recordOutcome($, 'acted', waiting.checkedAt, judged)
       if (judged.level === picker) await lock($, id, session, settings, judged.level, lockReason.agreed(judged), judged.why)
       else await lockAuto($, id, session, settings, judged)
       await spendBudget($, id, session, settings)
@@ -1012,6 +1026,7 @@ function recordVerdict($: EngineInterface, session: Session, check: Check, outco
         ...(proposal?.confidence !== undefined ? { confidence: proposal.confidence } : {}),
         ...(proposal ? { reason: proposal.reason } : {}),
         ...(proposal?.why ? { why: proposal.why } : {}),
+        ...(proposal?.spread ? { spread: proposal.spread } : {}),
         outcome,
         ...(check.withInstructions !== undefined ? { withInstructions: check.withInstructions } : {}),
       }),
@@ -1020,8 +1035,8 @@ function recordVerdict($: EngineInterface, session: Session, check: Check, outco
 }
 
 /** What came of a verdict (its question's answer), found by when its check ran. */
-function recordOutcome($: EngineInterface, outcome: string, checkedAt: number | undefined): void {
-  void recordSpend($, ledger => withVerdictOutcome(ledger, outcome, checkedAt))
+function recordOutcome($: EngineInterface, outcome: string, checkedAt: number | undefined, judged?: { level: Level; confidence?: number }): void {
+  void recordSpend($, ledger => withVerdictOutcome(ledger, outcome, checkedAt, judged))
 }
 
 /** Writes the ledger when it changed, one write at a time, each with the newest rows. */
@@ -1362,8 +1377,14 @@ export function register(on: On, options: PluginOptions): void {
           show($)
         }
         if (e.effort !== undefined) {
+          // The user moved the picker while a level was in force: they take over (as Stop routing,
+          // but at their new level). The router's own /effort sync lands on the locked level, so it isn't this.
+          const was = session.pickerSeen ? session.picker : undefined
+          const locked = appliedLevel(session.state)
+          const moved = locked !== undefined && isLevel(was) && isLevel(e.effort) && e.effort !== was && e.effort !== locked
           session.picker = e.effort
           session.pickerSeen = true
+          if (moved && allowOff) await pickerMoved($, id, session, e.effort as Level)
         }
         if (session.state.pending && supportedModel(e.model)) await decideAtStep($, id, session, settings, e.effort)
       }

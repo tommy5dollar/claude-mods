@@ -666,6 +666,21 @@ describe('effort-router', () => {
     expect(world.lines).toContain('Effort router: check 1 of 6: medium 20%, high 45%, xhigh 35%. 65% sure xhigh is too high, below the 70% bar, so staying on xhigh.')
   })
 
+  test('changing the effort yourself after the router locked a level stops routing, and your level is used', async ($, on) => {
+    const world = worldOf(on, '{"decision":"level","levels":{"low":0.85,"medium":0.15},"reason":"coin a term"}', {}, AUTO)
+    await $.session.start(STARTED)
+    await submit($, 'help me coin a term')
+    await step($, 0, undefined, 'xhigh')
+    expect(world.sent).toEqual(['low'])
+    await step($, 1, undefined, 'xhigh') // the picker still says xhigh: the lock holds
+    expect(world.sent).toEqual(['low', 'low'])
+    await submit($, 'think longer and harder about it')
+    await step($, 0, undefined, 'high') // the user moved the picker to high
+    expect(world.sent).toEqual(['low', 'low', 'high'])
+    expect(world.lines).toContain('Effort router: you changed the effort to high, so routing stopped for this session.')
+    expect(await route($, 'status')).toContain('off')
+  })
+
   test('a spread split between staying and moving up is below the bar, and stays', { options: { showChecks: true } }, async ($, on) => {
     const world = worldOf(on, '{"decision":"level","levels":{"medium":0.45,"high":0.4,"xhigh":0.15},"reason":"feature work"}', {}, AUTO)
     await $.session.start(STARTED)

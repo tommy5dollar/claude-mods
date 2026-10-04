@@ -1029,13 +1029,17 @@ export function withVerdictRow(ledger: SpendLedger, row: VerdictRow): SpendLedge
   return { ...ledger, verdicts: [...(ledger.verdicts ?? []), row].slice(-MAX_VERDICTS) }
 }
 
-/** Sets what came of a verdict (the answer to its question): the one checked at `at`, else the newest. */
-export function withVerdictOutcome(ledger: SpendLedger, outcome: string, at?: number): SpendLedger {
+/**
+ * Sets what came of a verdict (the answer to its question): the one checked at `at`, else the newest. A spread
+ * judged later (at the first request) also sets the level and confidence it was judged to.
+ */
+export function withVerdictOutcome(ledger: SpendLedger, outcome: string, at?: number, judged?: { level: Level; confidence?: number }): SpendLedger {
   const verdicts = ledger.verdicts ?? []
   let index = at === undefined ? -1 : verdicts.findLastIndex(v => v.at === at)
   if (index < 0) index = verdicts.length - 1
   const row = verdicts[index]
-  return row ? { ...ledger, verdicts: verdicts.map((v, i) => (i === index ? { ...row, outcome } : v)) } : ledger
+  const update = { outcome, ...(judged ? { level: judged.level } : {}), ...(judged?.confidence !== undefined ? { confidence: judged.confidence } : {}) }
+  return row ? { ...ledger, verdicts: verdicts.map((v, i) => (i === index ? { ...row, ...update } : v)) } : ledger
 }
 
 const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
