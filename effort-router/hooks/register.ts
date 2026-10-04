@@ -23,7 +23,8 @@ import {
   afterBudget,
   agentFileDefinition,
   appliedLevel,
-  capLevel,
+  clampLevel,
+  levelsUpTo,
   classifierPrompt,
   classifierSystem,
   composeRules,
@@ -109,7 +110,8 @@ import {
  * is one on a model the router doesn't support (Haiku).
  *
  * Every level is held to `highestLevel` (xhigh unless set): max rarely beats
- * xhigh on the current models, so the checks aren't offered it.
+ * xhigh on the current models, so the checks aren't offered it. A question
+ * about a jump of two levels or more offers the levels in between as well.
  *
  * Fail open everywhere: any error leaves the request at the picker's effort.
  */
@@ -377,7 +379,7 @@ async function askAndLock(
   settings: Settings,
   proposal: Proposal,
   picker: Level | undefined,
-): Promise<'use' | 'keep' | 'none'> {
+): Promise<{ chose: 'use' | 'between' | 'keep' | 'none'; level?: Level }> {
   const question = effortQuestion(proposal, picker)
   const asking: Asking = picker ? { ...proposal, picker } : { ...proposal }
   session.state = { ...session.state, pending: undefined, asking }
@@ -392,16 +394,22 @@ async function askAndLock(
   if (answer === question.options[0]) {
     recordOutcome($, 'asked: use', proposal.checkedAt)
     await lock($, id, session, settings, proposal.level, lockReason.chosen(proposal))
-    return 'use'
+    return { chose: 'use', level: proposal.level }
   }
-  if (picker && answer === question.options[1]) {
+  const between = question.between.find(level => answer === `Use ${level}`)
+  if (between) {
+    recordOutcome($, 'asked: in between', proposal.checkedAt)
+    await lock($, id, session, settings, between, lockReason.chosen(proposal))
+    return { chose: 'between', level: between }
+  }
+  if (picker && answer === `Keep ${picker}`) {
     recordOutcome($, 'asked: keep', proposal.checkedAt)
     await lock($, id, session, settings, picker, lockReason.kept({ ...proposal, picker }))
-    return 'keep'
+    return { chose: 'keep', level: picker }
   }
   recordOutcome($, 'asked: no answer', proposal.checkedAt)
   await commit($, id, session, session.state)
-  return 'none'
+  return { chose: 'none' }
 }
 
 /** Turns the router off and puts the picker back where it was. */
@@ -534,11 +542,12 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
     const rendered = renderTranscript(messages, input.current, { ...DEFAULT_TRIM, totalChars: settings.classifierMaxChars })
     if (rendered.text.trim() === '' && !input.hint) return undefined
     const notes = await modelNotes($, model)
+    const levels = levelsFor(settings)
     const separate = async (checkModel: string, instructions?: string) => {
       session.sent = { sentChars: rendered.sentChars, fullChars: rendered.fullChars, maxChars: settings.classifierMaxChars, omitted: rendered.omitted }
       return $.model.complete({
         model: checkModel,
-        system: classifierSystem(rules.composed.text, notes, settings.highestLevel),
+        system: classifierSystem(rules.composed.text, notes, levels),
         prompt: classifierPrompt(rendered.text, input.hint, instructions),
         maxTokens: SESSION_CHECK_MAX_TOKENS,
         timeoutMs: settings.classifyTimeoutMs,
@@ -556,7 +565,7 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
           lastReply: lastReplyOf(messages),
           hint: input.hint,
           answered: input.answer?.text,
-          highest: settings.highestLevel,
+          levels,
         }),
       })
       check = { kind: 'fork', model }
@@ -583,14 +592,17 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
     $.ui.log(`effort-router: ${check.kind} check on ${check.model} said (${input.trigger}) ${reply.text.trim().slice(0, 200)}`, { to: 'debug' })
     if (decision.decision !== 'lock') return { ...check, checkedAt }
     const { decision: _, ...found } = decision
-    const level = capLevel(found.level, settings.highestLevel)
-    if (level !== found.level) $.ui.log(`effort-router: ${found.level} held to ${level} (highestLevel)`, { to: 'debug' })
+    const level = clampLevel(found.level, levels)
+    if (level !== found.level) $.ui.log(`effort-router: ${found.level} held to ${level} (offered ${levels.join(', ')})`, { to: 'debug' })
     return { ...check, checkedAt, proposal: { ...found, level, checkedAt } }
   } catch (error) {
     session.error = { at: await now(), text: String(error) }
     throw error
   }
 }
+
+/** The levels a check is offered: low up to `highestLevel`. */
+const levelsFor = (settings: Settings): readonly Level[] => levelsUpTo(settings.highestLevel)
 
 /**
  * Waits for `work` at most `ms`: `{ ok: false }` on a timeout. The work goes on
@@ -686,7 +698,7 @@ async function decideAtStep($: EngineInterface, id: string, session: Session, se
   } else {
     const { picker: current, ...proposal } = decision.asking
     const chosen = await askAndLock($, id, session, settings, proposal, current)
-    $.ui.log(`effort-router: asked ${proposal.level} over the picker's ${current}: ${chosen === 'none' ? 'no answer, deciding' : chosen}`, { to: 'debug' })
+    $.ui.log(`effort-router: asked ${proposal.level} over the picker's ${current}: ${chosen.chose === 'none' ? 'no answer, deciding' : `${chosen.chose} ${chosen.level}`}`, { to: 'debug' })
   }
   await spendBudget($, id, session, settings)
 }
@@ -721,22 +733,25 @@ async function suggestNow($: EngineInterface, id: string, session: Session, sett
   const picker = isLevel(session.picker) ? session.picker : undefined
   const locked = appliedLevel(session.state)
   const sure = proposal.confidence === undefined ? '' : `, ${Math.round(proposal.confidence * 100)}% sure`
-  if (proposal.level === (locked ?? picker)) {
+  // Compared with the level in force now: a kept level, else the picker's.
+  const current = locked ?? picker
+  if (proposal.level === current) {
     if (session.state.pending) await commit($, id, session, { ...session.state, pending: undefined })
     return say(`${proposal.level} still fits (${proposal.reason}${sure}). Nothing changed.`)
   }
   if (hint && session.state.phase !== 'locked') session.state = { ...session.state, hint }
   if ((await consentFor($, settings)) === 'auto') {
     await lockAuto($, id, session, settings, proposal)
-    return `${proposal.level} for this session (${proposal.reason}).`
+    return `${current ? `Changed from ${current} to ${proposal.level}` : proposal.level} for this session (${proposal.reason}).`
   }
   if (proposal.level === picker) {
     await lock($, id, session, settings, proposal.level, lockReason.agreed(proposal))
-    return `${proposal.level} for this session (${proposal.reason}), the same as your setting.`
+    // Only reached with another level kept: the same level returned above.
+    return `Changed from ${locked} back to ${picker}, your setting, for this session (${proposal.reason}${sure}).`
   }
-  const chosen = await askAndLock($, id, session, settings, proposal, picker)
-  if (chosen === 'use') return `${proposal.level} for this session.`
-  if (chosen === 'keep') return `${picker} for this session.`
+  const chosen = await askAndLock($, id, session, settings, proposal, current)
+  if (chosen.chose === 'use' || chosen.chose === 'between') return current ? `Changed from ${current} to ${chosen.level} for this session.` : `${chosen.level} for this session.`
+  if (chosen.chose === 'keep') return `${current} for this session.`
   return 'No answer. Nothing changed.'
 }
 
@@ -828,17 +843,18 @@ async function routeSpawn($: EngineInterface, settings: Settings, session: Sessi
   }
   const brief = { subagentType: e.subagentType, description: e.description, prompt: e.prompt }
   const notes = await modelNotes($, known.id)
+  const levels = levelsFor(settings)
   const read = async () => {
     if (settings.classifierModel === 'session') {
       // The parent knows the task and why it delegates this part: ask a fork of it (cached, a few seconds).
       const forked = await $.model.fork({
-        prompt: subagentForkPrompt({ rules: rules.composed.text, brief, runsOn: known.name, model: notes, maxChars: settings.classifierMaxChars, highest: settings.highestLevel }),
+        prompt: subagentForkPrompt({ rules: rules.composed.text, brief, runsOn: known.name, model: notes, maxChars: settings.classifierMaxChars, levels }),
       })
       if (forked.isAnswered || forked.reason !== 'nothing-to-fork') return forked
     }
     return $.model.complete({
       model: settings.classifierModel === 'session' ? known.id : settings.classifierModel,
-      system: subagentSystem(rules.composed.text, notes, settings.highestLevel),
+      system: subagentSystem(rules.composed.text, notes, levels),
       prompt: subagentPrompt(brief, settings.classifierMaxChars),
       maxTokens: SESSION_CHECK_MAX_TOKENS,
       timeoutMs: settings.classifyTimeoutMs,
@@ -854,7 +870,7 @@ async function routeSpawn($: EngineInterface, settings: Settings, session: Sessi
   if (!result.value.isAnswered) return fallback('the check got no answer')
   $.ui.log(`effort-router: subagent classifier said ${result.value.text.trim().slice(0, 200)}`, { to: 'debug' })
   const found = parseSubagentReply(result.value.text)
-  return found ? { ...found, level: capLevel(found.level, settings.highestLevel) } : fallback('the check gave no level')
+  return found ? { ...found, level: clampLevel(found.level, levels) } : fallback('the check gave no level')
 }
 
 /** Keeps a routed subagent, dropping the oldest past `MAX_ROUTED_AGENTS`. */

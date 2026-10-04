@@ -24,9 +24,13 @@ export const DEFAULT_HIGHEST: Level = 'xhigh'
 /** The levels a check may pick: low up to `highest`. */
 export const levelsUpTo = (highest: Level = DEFAULT_HIGHEST): readonly Level[] => LEVELS.slice(0, LEVELS.indexOf(highest) + 1)
 
-/** A level held to `highest`. */
-export const capLevel = (level: Level, highest: Level = DEFAULT_HIGHEST): Level =>
-  LEVELS.indexOf(level) > LEVELS.indexOf(highest) ? highest : level
+/** A level held inside `levels` (a run of adjacent levels): the nearest end when it falls outside. */
+export function clampLevel(level: Level, levels: readonly Level[]): Level {
+  const lowest = levels[0]
+  const highest = levels[levels.length - 1]
+  if (lowest === undefined || highest === undefined) return level
+  return rank(level) < rank(lowest) ? lowest : rank(level) > rank(highest) ? highest : level
+}
 
 /**
  * The fixed frame around the routing rules. It describes the job and how to
@@ -35,7 +39,7 @@ export const capLevel = (level: Level, highest: Level = DEFAULT_HIGHEST): Level 
  * showed a frame whose examples named levels overrode the notes.) The rules
  * (`rules/default.md` and the user's files) hold the principles for choosing.
  */
-export const classifierFrame = (highest: Level = DEFAULT_HIGHEST): string => `You pick the reasoning-effort level for a whole Claude Code session from its transcript. Levels, lowest to highest: ${levelsUpTo(highest).join(', ')}.
+export const classifierFrame = (levels: readonly Level[] = levelsUpTo()): string => `You pick the reasoning-effort level for a whole Claude Code session from its transcript. Levels you may pick, lowest to highest: ${levels.join(', ')}.
 
 Level names don't mean the same thing on every model: each level buys a different amount of thinking, and different behaviour, on each. Judge what this session needs on the model it runs on, using what the notes below say each level can do there.
 
@@ -68,10 +72,10 @@ Principles for choosing. Later rules override earlier ones where they conflict:`
 /** The frame at the default highest level. */
 export const CLASSIFIER_FRAME = classifierFrame()
 
-export const classifierContract = (highest: Level = DEFAULT_HIGHEST): string => `Reply with exactly one JSON object and nothing else:
+export const classifierContract = (levels: readonly Level[] = levelsUpTo()): string => `Reply with exactly one JSON object and nothing else:
 {"decision":"undecided"}
 or
-{"decision":"level","level":"<${levelsUpTo(highest).join('|')}>","confidence":<0 to 1>,"reason":"<what the task is, 3-8 words, e.g. bug fix in existing code>"}`
+{"decision":"level","level":"<${levels.join('|')}>","confidence":<0 to 1>,"reason":"<what the task is, 3-8 words, e.g. bug fix in existing code>"}`
 
 export const CLASSIFIER_CONTRACT = classifierContract()
 
@@ -84,8 +88,8 @@ const modelBlock = (model: ModelNotes | undefined, who: string): string =>
     : ''
 
 /** The classifier's whole system prompt around the composed rules, with the session model's notes when there are any. */
-export const classifierSystem = (rules: string, model?: ModelNotes, highest: Level = DEFAULT_HIGHEST): string =>
-  `${classifierFrame(highest)}\n\n<rules>\n${rules.trim()}\n</rules>${modelBlock(model, 'The session runs on')}\n\n${classifierContract(highest)}`
+export const classifierSystem = (rules: string, model?: ModelNotes, levels: readonly Level[] = levelsUpTo()): string =>
+  `${classifierFrame(levels)}\n\n<rules>\n${rules.trim()}\n</rules>${modelBlock(model, 'The session runs on')}\n\n${classifierContract(levels)}`
 
 /**
  * The one message a check sends into a fork of the session (`$.model.fork`):
@@ -95,10 +99,10 @@ export const classifierSystem = (rules: string, model?: ModelNotes, highest: Lev
  * along here, as do the prompt being submitted and, mid-turn, the answers the
  * user just gave to the model's questions.
  */
-export function forkPrompt(input: { rules: string; model?: ModelNotes; current?: string; lastReply?: string; hint?: string; answered?: string; highest?: Level }): string {
+export function forkPrompt(input: { rules: string; model?: ModelNotes; current?: string; lastReply?: string; hint?: string; answered?: string; levels?: readonly Level[] }): string {
   const parts = [
     'Pause the task for a moment. Do not use any tools and do not carry on with the work: answer only the question below.',
-    classifierSystem(input.rules, input.model, input.highest),
+    classifierSystem(input.rules, input.model, input.levels),
   ]
   const lastReply = input.lastReply?.trim()
   if (lastReply) parts.push(`Your last reply in this conversation, which is not shown above:\n<last_reply>\n${lastReply}\n</last_reply>`)
@@ -470,10 +474,19 @@ export type Decision =
  * read (fail open).
  */
 export function parseDecision(reply: string | undefined | null): Decision {
-  const record = jsonObjectOf(reply)
+  const record = levelInDecision(jsonObjectOf(reply))
   if (!record || (record.decision !== 'level' && record.decision !== 'lock' && record.decision !== 'suggest')) return { decision: 'undecided' }
   const proposal = proposalOf(record)
   return proposal ? { decision: 'lock', ...proposal } : { decision: 'undecided' }
+}
+
+/**
+ * A reply that names its level as the decision (`{"decision":"medium"}`, seen
+ * from Sonnet 5.5 on a subagent check) is read as that level.
+ */
+function levelInDecision(record: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const named = typeof record?.decision === 'string' ? record.decision.trim().toLowerCase() : undefined
+  return record && isLevel(named) && record.level === undefined ? { ...record, decision: 'level', level: named } : record
 }
 
 /** The first `{...}` in a reply, parsed; undefined when there is none or it is not a JSON object. */
@@ -557,7 +570,7 @@ export function modelName(model: string | undefined): string {
  * inside it, so a user's or organisation's rules ("payments code is never
  * below high") still apply to subagents.
  */
-export const subagentFrame = (highest: Level = DEFAULT_HIGHEST): string => `You pick the reasoning-effort level for one Claude Code subagent. Levels, lowest to highest: ${levelsUpTo(highest).join(', ')}.
+export const subagentFrame = (levels: readonly Level[] = levelsUpTo()): string => `You pick the reasoning-effort level for one Claude Code subagent. Levels you may pick, lowest to highest: ${levels.join(', ')}.
 
 Level names don't mean the same thing on every model. Judge what this subagent needs on the model it runs on, using what the notes below say each level can do there.
 
@@ -569,14 +582,14 @@ Principles for choosing. They were written for whole sessions; read them for a s
 
 export const SUBAGENT_FRAME = subagentFrame()
 
-export const subagentContract = (highest: Level = DEFAULT_HIGHEST): string => `Reply with exactly one JSON object and nothing else:
-{"decision":"lock","level":"<${levelsUpTo(highest).join('|')}>","reason":"<what the subagent's task is, 3-8 words, e.g. codebase search>"}`
+export const subagentContract = (levels: readonly Level[] = levelsUpTo()): string => `Reply with exactly one JSON object and nothing else:
+{"level":"<${levels.join('|')}>","reason":"<what the subagent's task is, 3-8 words, e.g. codebase search>"}`
 
 export const SUBAGENT_CONTRACT = subagentContract()
 
 /** The subagent read's whole system prompt around the composed rules, with the notes on the model it runs on. */
-export const subagentSystem = (rules: string, model?: ModelNotes, highest: Level = DEFAULT_HIGHEST): string =>
-  `${subagentFrame(highest)}\n\n<rules>\n${rules.trim()}\n</rules>${modelBlock(model, 'The subagent runs on')}\n\n${subagentContract(highest)}`
+export const subagentSystem = (rules: string, model?: ModelNotes, levels: readonly Level[] = levelsUpTo()): string =>
+  `${subagentFrame(levels)}\n\n<rules>\n${rules.trim()}\n</rules>${modelBlock(model, 'The subagent runs on')}\n\n${subagentContract(levels)}`
 
 /** What `agent.spawn` says about the subagent, as far as its read needs it. */
 export type SubagentBrief = { subagentType: string; description: string; prompt: string }
@@ -603,11 +616,11 @@ export const subagentPrompt = (brief: SubagentBrief, maxChars: number = DEFAULT_
  * the parent knows the task and why it is delegating this part, which the
  * brief alone often doesn't say.
  */
-export function subagentForkPrompt(input: { rules: string; brief: SubagentBrief; runsOn: string; model?: ModelNotes; maxChars?: number; highest?: Level }): string {
+export function subagentForkPrompt(input: { rules: string; brief: SubagentBrief; runsOn: string; model?: ModelNotes; maxChars?: number; levels?: readonly Level[] }): string {
   const { brief } = input
   return [
     `Pause the task for a moment. Do not use any tools and do not start the subagent yourself: answer only the question below. You are about to start a ${brief.subagentType || 'general-purpose'} subagent on ${input.runsOn}${brief.description.trim() ? ` ("${brief.description.trim()}")` : ''} with the brief below. You know the task and why you are delegating this part of it: use that.`,
-    subagentSystem(input.rules, input.model, input.highest),
+    subagentSystem(input.rules, input.model, input.levels),
     `<brief>\n${capBrief(brief.prompt.trim(), input.maxChars ?? DEFAULT_TRIM.totalChars)}\n</brief>`,
     'Pick the effort level this subagent should run at. JSON only.',
   ].join('\n\n')
@@ -619,9 +632,9 @@ export function subagentForkPrompt(input: { rules: string; brief: SubagentBrief;
  * level or anything unparseable is undefined, and the caller falls back.
  */
 export function parseSubagentReply(reply: string | undefined | null): Proposal | undefined {
-  const record = jsonObjectOf(reply)
+  const record = levelInDecision(jsonObjectOf(reply))
   if (!record) return undefined
-  if (record.decision !== undefined && record.decision !== 'lock' && record.decision !== 'suggest') return undefined
+  if (record.decision !== undefined && record.decision !== 'level' && record.decision !== 'lock' && record.decision !== 'suggest') return undefined
   return proposalOf(record)
 }
 
@@ -1218,15 +1231,37 @@ export const lockReason = {
 }
 
 /**
- * The question asked when the router's level differs from the current one:
- * one line with the reason, `Use <level>` and `Keep <current>` (or `Not now`
- * when the current level is unknown).
+ * The levels between a proposal and the current one, nearest the proposal
+ * first: medium to xhigh gives high, xhigh to low gives medium and high
+ * (offered as medium, then high). Empty when they are next to each other or
+ * the current level is unknown.
  */
-export function effortQuestion(proposal: Proposal, current: Level | undefined): { text: string; options: [string, string]; header: string } {
+export function levelsBetween(proposal: Level, current: Level | undefined): Level[] {
+  if (current === undefined) return []
+  const towards = rank(proposal) > rank(current) ? -1 : 1
+  const between: Level[] = []
+  for (let i = rank(proposal) + towards; i !== rank(current); i += towards) between.push(LEVELS[i] as Level)
+  return between
+}
+
+/**
+ * The question asked when the router's level differs from the current one:
+ * one line with the reason, `Use <level>`, then `Use <level>` for each level in
+ * between, nearest the router's first, and `Keep <current>` (or `Not now` when
+ * the current level is unknown). Tommy, 2026-10-04, on a card that offered
+ * only xhigh or medium: the levels in between are the natural compromise. The
+ * card holds four options, so at most two levels in between are offered.
+ */
+export function effortQuestion(proposal: Proposal, current: Level | undefined): { text: string; options: string[]; between: Level[]; header: string } {
   const reason = proposal.reason.charAt(0).toUpperCase() + proposal.reason.slice(1)
-  return current
-    ? { text: `Effort router: ${reason}. Use ${proposal.level} effort instead of ${current}?`, options: [`Use ${proposal.level}`, `Keep ${current}`], header: 'Effort' }
-    : { text: `Effort router: ${reason}. Use ${proposal.level} effort?`, options: [`Use ${proposal.level}`, 'Not now'], header: 'Effort' }
+  if (!current) return { text: `Effort router: ${reason}. Use ${proposal.level} effort?`, options: [`Use ${proposal.level}`, 'Not now'], between: [], header: 'Effort' }
+  const between = levelsBetween(proposal.level, current).slice(0, 2)
+  return {
+    text: `Effort router: ${reason}. Use ${proposal.level} effort instead of ${current}?`,
+    options: [`Use ${proposal.level}`, ...between.map(level => `Use ${level}`), `Keep ${current}`],
+    between,
+    header: 'Effort',
+  }
 }
 
 /** Off: the picker is in charge. */

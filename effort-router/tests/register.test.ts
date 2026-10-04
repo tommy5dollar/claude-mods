@@ -58,7 +58,7 @@ type World = {
    * Effort): USE the first option, KEEP the second, DISMISS it (the engine
    * rejects, as it does in -p), or GATE (wait until the test calls release).
    */
-  answer: 'USE' | 'KEEP' | 'DISMISS' | 'GATE'
+  answer: 'USE' | 'MIDDLE' | 'KEEP' | 'DISMISS' | 'GATE'
   /** The router's questions as asked: text and option labels. */
   asked: { text: string; options: string[] }[]
   /** Set: every model request reports this many output tokens (otherwise no usage). */
@@ -183,7 +183,7 @@ function worldOf(on: On, reply = BUG_REPLY, sources: Record<string, unknown> = {
     let answer: string = world.answer
     if (answer === 'GATE') answer = await new Promise<string>(resolve => (world.release = resolve))
     if (answer === 'DISMISS') return { deny: 'the user dismissed the question' } as never
-    const label = answer === 'USE' ? options[0] : options[1]
+    const label = answer === 'USE' ? options[0] : answer === 'MIDDLE' ? options[1] : options[options.length - 1]
     return { result: { questions: e.questions, answers: { [first.question]: label } }, text: `User has answered your questions: "${first.question}"="${label}". You can now continue.` } as never
   })
   return world
@@ -414,13 +414,13 @@ describe('effort-router', () => {
     await step($, 0)
     world.messages = [{ role: 'user', text: 'fix the crash in the parser', toolUses: [] }]
     world.reply = BUG_REPLY
-    expect(await route($)).toBe('high for this session.')
+    expect(await route($)).toBe('Changed from medium to high for this session.')
     expect(world.asked).toEqual([{ text: 'Effort router: Bug fix in existing code. Use high effort instead of medium?', options: ['Use high', 'Keep medium'] }])
     await step($, 1)
     expect(world.sent.at(-1)).toBe('high')
   })
 
-  test('/route while locked names the picker level, not the locked one', async ($, on) => {
+  test('/route while locked: asked against the locked level, and Keep keeps it', async ($, on) => {
     const world = worldOf(on)
     await $.session.start(STARTED)
     await submit($, 'fix the crash in the parser')
@@ -429,10 +429,26 @@ describe('effort-router', () => {
     expect(world.sent).toEqual(['high', 'high'])
     world.reply = '{"decision":"lock","level":"low","confidence":0.9,"reason":"quick follow-up"}'
     world.answer = 'KEEP'
-    expect(await route($, 'keep it quick')).toBe('medium for this session.')
-    expect(world.asked.at(-1)).toEqual({ text: 'Effort router: Quick follow-up. Use low effort instead of medium?', options: ['Use low', 'Keep medium'] })
+    expect(await route($, 'keep it quick')).toBe('high for this session.')
+    expect(world.asked.at(-1)).toEqual({ text: 'Effort router: Quick follow-up. Use low effort instead of high?', options: ['Use low', 'Use medium', 'Keep high'] })
     await step($, 2)
-    expect(world.sent.at(-1)).toBe('medium')
+    expect(world.sent.at(-1)).toBe('high')
+  })
+
+  test('a jump of two levels offers the one in between too, and choosing it locks there', async ($, on) => {
+    const world = worldOf(on, '{"decision":"lock","level":"xhigh","confidence":0.9,"reason":"tricky migration"}')
+    await $.session.start(STARTED)
+    world.answer = 'MIDDLE'
+    await submit($, 'migrate the ledger to the new schema, it is really tricky')
+    await step($, 0)
+    expect(world.asked).toEqual([{ text: 'Effort router: Tricky migration. Use xhigh effort instead of medium?', options: ['Use xhigh', 'Use high', 'Keep medium'] }])
+    await step($, 1)
+    expect(world.sent).toEqual(['high', 'high'])
+    expect(await route($, 'status')).toContain('high 🔒')
+    world.messages = [{ role: 'user', text: 'actually just fix the typo in the error message', toolUses: [] }]
+    world.reply = '{"decision":"lock","level":"low","confidence":0.9,"reason":"typo fix"}'
+    expect(await route($)).toBe('Changed from high to medium for this session.') // asked low, medium or keep high; chose the middle
+    expect(world.asked.at(-1)?.options).toEqual(['Use low', 'Use medium', 'Keep high'])
   })
 
   test('/route with the same level as in use changes nothing; the picker level while locked elsewhere locks there', async ($, on) => {
@@ -444,7 +460,7 @@ describe('effort-router', () => {
     expect(await route($)).toBe('high still fits (bug fix in existing code, 90% sure). Nothing changed.')
     expect(world.asked).toHaveLength(1)
     world.reply = '{"decision":"lock","level":"medium","confidence":0.9,"reason":"regular feature work"}'
-    expect(await route($)).toContain('medium for this session (regular feature work), the same as your setting.')
+    expect(await route($)).toBe('Changed from high back to medium, your setting, for this session (regular feature work, 90% sure).')
     expect(world.asked).toHaveLength(1)
   })
 
@@ -458,7 +474,7 @@ describe('effort-router', () => {
     expect(await route($, 'status')).toStartWith('Off')
 
     world.reply = '{"decision":"lock","level":"max","confidence":0.9,"reason":"security review"}'
-    expect(await route($, 'this is a security review')).toBe('xhigh for this session.') // held to highestLevel
+    expect(await route($, 'this is a security review')).toBe('Changed from medium to xhigh for this session.') // held to highestLevel
     expect(world.prompts.at(-1)).toContain('<user_hint>\nthis is a security review\n</user_hint>')
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
     expect((await footerOf(footer)).shown).toBe('xhigh 🔒')
@@ -514,7 +530,7 @@ describe('effort-router', () => {
     await settle($)
     expect(world.asked).toHaveLength(1)
     // the band reopens with what the check found, and Close takes it away
-    expect(await bandOf(band)).toEqual({ headline: 'Effort router: high for this session.', buttons: ['Close'] })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: Changed from medium to high for this session.', buttons: ['Close'] })
     await band.press({ key: 'close' })
     expect((await bandOf(band)).headline).toBeUndefined()
     expect((await footerOf(footer)).shown).toBe('high 🔒')
@@ -568,7 +584,7 @@ describe('effort-router', () => {
     world.reply = BUG_REPLY
     world.messages = [{ role: 'user', text: 'fix the crash in the parser', toolUses: [] }]
     await route($, 'on') // already on: no change
-    expect(await route($)).toBe('high for this session (bug fix in existing code).') // /route under auto: locked without a question
+    expect(await route($)).toBe('Changed from medium to high for this session (bug fix in existing code).') // /route under auto: locked without a question
     expect((await bandOf(band)).headline).toBe('Effort router: using high for this session (bug fix in existing code)')
     await band.press({ key: 'close' })
     await step($, 0)
@@ -638,7 +654,7 @@ describe('effort-router', () => {
     expect((await bandOf(band)).headline).toBeUndefined()
     expect(world.toasts).toEqual([])
     expect(await route($, 'status')).toStartWith('Off (session started before the router)')
-    expect(await route($)).toBe('high for this session.')
+    expect(await route($)).toBe('Changed from medium to high for this session.')
     expect(world.classifierCalls).toBe(1)
   })
 

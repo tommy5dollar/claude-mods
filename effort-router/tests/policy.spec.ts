@@ -9,7 +9,8 @@ import {
   confidenceOf,
   conversationTokens,
   forkPrompt,
-  capLevel,
+  clampLevel,
+  levelsBetween,
   levelsUpTo,
   subagentForkPrompt,
   isConfident,
@@ -371,9 +372,10 @@ describe('state', () => {
     expect(effortQuestion(P_HIGH, 'medium')).toEqual({
       text: 'Effort router: Bug fix in existing code. Use high effort instead of medium?',
       options: ['Use high', 'Keep medium'],
+      between: [],
       header: 'Effort',
     })
-    expect(effortQuestion(P_LOW, undefined)).toEqual({ text: 'Effort router: Minimal patch. Use low effort?', options: ['Use low', 'Not now'], header: 'Effort' })
+    expect(effortQuestion(P_LOW, undefined)).toEqual({ text: 'Effort router: Minimal patch. Use low effort?', options: ['Use low', 'Not now'], between: [], header: 'Effort' })
   })
 
   test('a lock stops reading and clears what was waiting; its reason says who chose', () => {
@@ -584,6 +586,10 @@ describe('subagent reads', () => {
     expect(parseSubagentReply('{"decision":"lock","level":"low","reason":"codebase search"}')).toEqual({ level: 'low', reason: 'codebase search' })
     expect(parseSubagentReply('```json\n{"level":"HIGH","reason":"debugging"}\n```')).toEqual({ level: 'high', reason: 'debugging' })
     expect(parseSubagentReply('{"level":"xhigh"}')).toEqual({ level: 'xhigh', reason: 'classifier' })
+    // Sonnet 5.5 live, 2026-10-04: the level named as the decision.
+    expect(parseSubagentReply('{"decision":"medium","reason":"thorough read-only codebase search for call sites"}')).toEqual({ level: 'medium', reason: 'thorough read-only codebase search for call sites' })
+    expect(parseSubagentReply('{"decision":"level","level":"low"}')).toEqual({ level: 'low', reason: 'classifier' })
+    expect(parseDecision('{"decision":"High","confidence":0.8,"reason":"bug fix"}')).toEqual({ decision: 'lock', level: 'high', reason: 'bug fix', confidence: 0.8 })
     expect(parseSubagentReply('{"decision":"undecided"}')).toBeUndefined()
     expect(parseSubagentReply('{"decision":"undecided","level":"low"}')).toBeUndefined()
     expect(parseSubagentReply('{"level":"extreme","reason":"x"}')).toBeUndefined()
@@ -834,15 +840,25 @@ describe('0.10: confidence, models, size, verdicts', () => {
     expect(forkPrompt({ rules: 'RULES', answered: '"Which platforms?"="Xero"' })).toContain('You asked the user questions, and they have just answered:\n<answers>\n"Which platforms?"="Xero"\n</answers>')
   })
 
-  test('levels are held to the highest level: xhigh unless set, and the prompts offer no more', () => {
+  test('levels: held to the highest level (xhigh unless set); the prompts offer no more; a jump of two offers the middle', () => {
     expect(levelsUpTo()).toEqual(['low', 'medium', 'high', 'xhigh'])
     expect(levelsUpTo('max')).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
-    expect(capLevel('max')).toBe('xhigh')
-    expect(capLevel('high', 'medium')).toBe('medium')
-    expect(capLevel('low')).toBe('low')
-    expect(classifierSystem('RULES')).toContain('Levels, lowest to highest: low, medium, high, xhigh.')
+    expect(levelsBetween('xhigh', 'medium')).toEqual(['high'])
+    expect(levelsBetween('low', 'xhigh')).toEqual(['medium', 'high']) // nearest the proposal first
+    expect(levelsBetween('xhigh', 'low')).toEqual(['high', 'medium'])
+    expect(levelsBetween('high', 'medium')).toEqual([])
+    expect(levelsBetween('high', undefined)).toEqual([])
+    expect(effortQuestion({ level: 'xhigh', reason: 'tricky migration' }, 'medium')).toEqual({ text: 'Effort router: Tricky migration. Use xhigh effort instead of medium?', options: ['Use xhigh', 'Use high', 'Keep medium'], between: ['high'], header: 'Effort' })
+    expect(effortQuestion({ level: 'high', reason: 'bug fix' }, 'medium').options).toEqual(['Use high', 'Keep medium'])
+    expect(effortQuestion({ level: 'low', reason: 'typo' }, 'xhigh').options).toEqual(['Use low', 'Use medium', 'Use high', 'Keep xhigh'])
+    expect(effortQuestion({ level: 'max', reason: 'x' }, 'low').options).toEqual(['Use max', 'Use xhigh', 'Use high', 'Keep low']) // four at most
+    expect(clampLevel('max', ['low', 'medium', 'high'])).toBe('high')
+    expect(clampLevel('low', ['medium', 'high', 'xhigh'])).toBe('medium')
+    expect(clampLevel('medium', ['low', 'medium', 'high'])).toBe('medium')
+    expect(classifierSystem('RULES')).toContain('Levels you may pick, lowest to highest: low, medium, high, xhigh.')
     expect(classifierSystem('RULES')).toContain('"level":"<low|medium|high|xhigh>"')
-    expect(classifierSystem('RULES', undefined, 'max')).toContain('Levels, lowest to highest: low, medium, high, xhigh, max.')
+    expect(classifierSystem('RULES', undefined, ['low', 'medium', 'high'])).toContain('"level":"<low|medium|high>"')
+    expect(subagentSystem('RULES', undefined, ['low', 'medium', 'high'])).toContain('Levels you may pick, lowest to highest: low, medium, high.')
     expect(subagentSystem('RULES')).toContain('"level":"<low|medium|high|xhigh>"')
   })
 

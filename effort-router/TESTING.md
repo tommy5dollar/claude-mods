@@ -25,7 +25,7 @@ bun test                            # 97 tests: trimming (incl. the last assista
                                     # 0.11: no example or rule names a level, levels held to highestLevel (xhigh unless
                                     # set) in the frame, contract and capLevel, the fork's answers block, the subagent read
                                     # told its model with that model's notes, the subagent fork message, definitions' model
-claude plugin test .                # 63 tests in the engine's kit, among them, for the main thread: undecided runs at the
+claude plugin test .                # 64 tests in the engine's kit, among them, for the main thread: undecided runs at the
                                     # picker level with no question; the picker's level locks with no question and reading
                                     # stops; a different level holds the request on the question, Use locks it and syncs
                                     # /effort, Keep locks the picker level; the footer reads high? while the request waits;
@@ -60,7 +60,7 @@ claude plugin test .                # 63 tests in the engine's kit, among them, 
                                     # a subagent's read is a fork of its parent told the subagent's model; a subagent on
                                     # Haiku (the call's model or its definition's) is left alone; Check now shows its result
                                     # in the band
-"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 63 under Desktop's engine
+"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 64 under Desktop's engine
 claude plugin validate . --strict
 bun run eval -- --runs 3            # opt-in, real model: 23 session fixtures and 14 subagent briefs, see below
                                     # (both sets as separate calls on --model, default opus, with its notes; the session
@@ -144,6 +144,20 @@ Read 100% with care. The fixtures were written alongside the subagent frame, sev
 The kit passes a `Select` in the SessionMode footer on both surfaces, but the real Desktop app (2.1.286) silently drops it, so the footer is a `Button`. Footer and band rendering on Desktop has to be checked live (steps 1, 3 and 8 below).
 
 ## Live, headless
+
+### 0.11.0: the cap and subagents (verified 2026-10-04, CLI 2.1.289, Opus 5.5)
+
+One `claude -p` run in the demo shop, consent auto: "find security vulnerabilities in auth.js, work through it on
+your own, I'm away all day", with an Explore and a general-purpose subagent. About $0.95.
+
+- The first check said high at 70% for "unattended security review of auth code". Not max.
+- On a first turn there is no main-thread response to fork, so both subagent checks fell back to a separate call on
+  the subagent's model. Explore ran on Sonnet 5.5 here, not Haiku, so it was checked.
+- The general-purpose check (Opus) answered `{"decision":"lock","level":"high",...}`: high.
+- The Explore check (Sonnet) answered `{"decision":"medium","reason":"thorough read-only codebase search for call
+  sites"}`. The router couldn't read it and gave Explore its parent's high. The prompt asked for
+  `"decision":"lock"` and never said what "lock" meant, so the decision field read as the place for the answer.
+  0.12 asks for `{"level","reason"}` and reads a level named as the decision.
 
 ### 0.10.0: checks on the session's model (verified 2026-10-04, CLI 2.1.289, Opus 5.5)
 
