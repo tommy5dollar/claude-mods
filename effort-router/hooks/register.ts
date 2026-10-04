@@ -40,6 +40,7 @@ import {
   bandHeadline,
   noticeActions,
   noticeHeadline,
+  type Notice,
   effortQuestion,
   forkPrompt,
   isConfident,
@@ -160,7 +161,7 @@ type Session = {
   /** The band was opened from the footer. */
   bandOpen: boolean
   /** Consent `auto` locked a level other than the picker's: the band shows it once, with Revert. */
-  notice?: Proposal
+  notice?: Notice
   /** The band's Assess now / Reassess is running: the footer reads `checking…`. */
   checking: boolean
   /** What the band's Assess now / Reassess found, shown in the band until it is hidden. */
@@ -357,9 +358,11 @@ async function lock($: EngineInterface, id: string, session: Session, settings: 
  * for this session (<reason>)`, with Undo).
  */
 async function lockAuto($: EngineInterface, id: string, session: Session, settings: Settings, proposal: Proposal): Promise<void> {
+  // The band opens when the level in force changes: from a kept level, else the picker's.
+  const from = appliedLevel(session.state) ?? (isLevel(session.picker) ? session.picker : undefined)
   await lock($, id, session, settings, proposal.level, lockReason.router(proposal), proposal.why)
-  if (proposal.level !== session.picker) {
-    session.notice = proposal
+  if (proposal.level !== from) {
+    session.notice = { ...proposal, ...(from ? { from } : {}) }
     show($)
   }
 }
@@ -1021,9 +1024,12 @@ function toggleBand($: EngineInterface, session: Session): void {
 
 /** A band button: closes the band, then applies the action. */
 async function bandAction($: EngineInterface, id: string, session: Session, settings: Settings, value: string): Promise<void> {
+  const notice = session.notice
   closeBand($, session)
   try {
-    if (value === 'off' || value === 'revert') await turnOff($, id, session, settings)
+    if (value === 'ok') return
+    if (value === 'previous' && notice?.from) await lock($, id, session, settings, notice.from, 'your choice')
+    else if (value === 'off' || value === 'revert') await turnOff($, id, session, settings)
     else if (value === 'on') {
       const text = await route($, 'on', settings)
       $.ui.log(`effort-router: ${text}`, { to: 'debug' })
@@ -1357,10 +1363,13 @@ export function register(on: On, options: PluginOptions): void {
     const result = !notice && !session.bandOpen ? session.result : undefined
     const headline = notice && !session.bandOpen ? noticeHeadline(notice) : result ? `Effort router: ${result}` : bandHeadline(state)
     const setting = session.baseline ?? (isLevel(session.picker) ? session.picker : undefined)
-    const actions = notice && !session.bandOpen ? noticeActions(allowOff, setting) : result ? [] : bandActions(state, allowOff, setting)
-    const level = notice && !session.bandOpen ? notice.level : state.asking?.level ?? (state.mode === 'auto' && state.phase === 'locked' ? state.level : undefined)
-    const label = notice && !session.bandOpen ? notice.level : footerLabel(state).text
-    const at = level ? headline.indexOf(label) : -1
+    const noticeShown = notice !== undefined && !session.bandOpen
+    const actions = noticeShown ? noticeActions(allowOff, setting, notice.from) : result ? [] : bandActions(state, allowOff, setting)
+    const level = noticeShown ? notice.level : state.asking?.level ?? (state.mode === 'auto' && state.phase === 'locked' ? state.level : undefined)
+    const label = noticeShown ? notice.level : footerLabel(state).text
+    // The level in the headline, coloured: the one right before "for this session" (a "from xhigh" also holds "high").
+    const before = level ? headline.indexOf(` ${label} for this session`) : -1
+    const at = before >= 0 ? before + 1 : level ? headline.indexOf(label) : -1
     const line =
       at >= 0 && level
         ? Text({
@@ -1381,7 +1390,7 @@ export function register(on: On, options: PluginOptions): void {
         onPress: () => bandAction($, id, session, settings, action.value),
       }),
     )
-    buttons.push(Button({ key: 'close', label: 'Hide', hotkey: 'x', plain: true, dimColor: true, role: 'dismiss', onPress: () => closeBand($, session) }))
+    if (!noticeShown) buttons.push(Button({ key: 'close', label: 'Hide', hotkey: 'x', plain: true, dimColor: true, role: 'dismiss', onPress: () => closeBand($, session) }))
     return Box({
       flexDirection: 'column',
       children: [line, Box({ flexDirection: 'row', columnGap: 2, children: buttons }), theirs],

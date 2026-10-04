@@ -574,7 +574,7 @@ describe('effort-router', () => {
 
   // --- consent auto -----------------------------------------------------------------------
 
-  test('auto: locked at once without a question; the band opens once with Stop routing', async ($, on) => {
+  test('auto: locked at once without a question; the band says what changed, with OK first and Stop routing', async ($, on) => {
     const world = worldOf(on, BUG_REPLY, {}, AUTO)
     await $.session.start(STARTED)
     await submit($, 'fix the crash in the parser')
@@ -582,7 +582,7 @@ describe('effort-router', () => {
     expect(world.sent).toEqual(['high'])
     expect(world.asked).toEqual([])
     const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
-    expect(await bandOf(band)).toEqual({ headline: 'Effort router: using high for this session (bug fix in existing code).', buttons: ['Stop routing (back to medium)', 'Hide'] })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: changed from medium to high for this session (bug fix in existing code).', buttons: ['OK', 'Stop routing (back to medium)'] })
     await band.press({ key: 'revert' })
     expect((await bandOf(band)).headline).toBeUndefined()
     await step($, 1)
@@ -591,7 +591,7 @@ describe('effort-router', () => {
     expect((await footerOf(footer)).shown).toBe('off')
   })
 
-  test("auto: the picker's level locks with no band; Close keeps the lock", async ($, on) => {
+  test("auto: the picker's level locks with no band; OK keeps the change", async ($, on) => {
     const world = worldOf(on, '{"decision":"lock","level":"medium","confidence":0.9,"reason":"regular feature work"}', {}, AUTO)
     await $.session.start(STARTED)
     await submit($, 'add a dark mode toggle')
@@ -602,10 +602,32 @@ describe('effort-router', () => {
     world.messages = [{ role: 'user', text: 'fix the crash in the parser', toolUses: [] }]
     await route($, 'on') // already on: no change
     expect(await route($)).toBe('Changed from medium to high for this session (bug fix in existing code).') // /route under auto: locked without a question
-    expect((await bandOf(band)).headline).toBe('Effort router: using high for this session (bug fix in existing code).')
-    await band.press({ key: 'close' })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: changed from medium to high for this session (bug fix in existing code).', buttons: ['OK', 'Stop routing (back to medium)'] })
+    await band.press({ key: 'ok' })
+    expect((await bandOf(band)).headline).toBeUndefined()
     await step($, 0)
     expect(world.sent).toEqual(['high'])
+  })
+
+  test('auto: Reassess from a kept level says what it changed from, and Go back to restores that level', async ($, on) => {
+    const world = worldOf(on, BUG_REPLY, {}, AUTO)
+    await $.session.start(STARTED)
+    await submit($, 'fix the crash in the parser')
+    await step($, 0) // high, from medium
+    const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
+    await band.press({ key: 'ok' })
+    world.messages = [{ role: 'user', text: 'it is a race between two workers', toolUses: [] }]
+    world.reply = '{"decision":"level","level":"xhigh","confidence":0.9,"reason":"concurrency bug"}'
+    expect(await route($)).toBe('Changed from high to xhigh for this session (concurrency bug).')
+    expect(await bandOf(band)).toEqual({
+      headline: 'Effort router: changed from high to xhigh for this session (concurrency bug).',
+      buttons: ['OK', 'Go back to high', 'Stop routing (back to medium)'],
+    })
+    await band.press({ key: 'previous' })
+    expect((await bandOf(band)).headline).toBeUndefined()
+    await step($, 1)
+    expect(world.sent.at(-1)).toBe('high')
+    expect(await route($, 'status')).toStartWith('Using high for this session (your choice).')
   })
 
   test('consent defaults to auto: a sure level is used without a question, and the band offers to stop routing', async ($, on) => {
@@ -617,7 +639,7 @@ describe('effort-router', () => {
     expect(world.sent).toEqual(['high'])
     expect(await route($, 'status')).toContain('it switches without asking (consent: auto).')
     const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
-    expect((await bandOf(band)).buttons).toEqual(['Stop routing (back to medium)', 'Hide'])
+    expect((await bandOf(band)).buttons).toEqual(['OK', 'Stop routing (back to medium)'])
   })
 
   test('out of prompts with checks below the bar: the reason names the last check, not "no clear task"', { options: { decideWithin: 1 } }, async ($, on) => {
@@ -780,7 +802,7 @@ describe('effort-router', () => {
     await $.session.start(STARTED)
     await submit($, 'fix the crash in the parser')
     const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
-    expect(await bandOf(band)).toEqual({ headline: 'Effort router: using high for this session (bug fix in existing code).', buttons: ['Hide'] })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: changed from medium to high for this session (bug fix in existing code).', buttons: ['OK'] })
   })
 
   test('without enforce, a user settings option layers over the org', async ($, on) => {

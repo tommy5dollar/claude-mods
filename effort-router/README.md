@@ -36,7 +36,7 @@ The footer, right beside the native model and effort pickers, shows the router's
 
 The footer state is a plain button. Pressing it opens the router's band above the prompt: a line such as `Effort router: using high for this session (bug fix in existing code). The crash needs tracing through the parser, but the fix is local.`, then the buttons and `Hide` (hotkey `x`). The words in brackets are what the check took the task to be, and the sentence after is why it chose that level. The buttons are numbered `1`, `2`. Any action closes the band, and pressing the footer again closes it too. With consent `ask` the band never opens by itself: the question card is where you agree.
 
-With consent `auto` (the default) the router doesn't ask. When it keeps a level that differs from your picker's, the band opens by itself once, reading `Effort router: using high for this session (<task>). <why>` with `Stop routing (back to medium)` and `Hide` (keep high). Pressing the footer shows the same band as under `ask`.
+With consent `auto` (the default) the router doesn't ask. When it keeps a level that differs from your picker's, the band opens by itself once, reading `Effort router: changed from medium to high for this session (<task>). <why>`, with `OK` (the change stands), `Go back to xhigh` when the level before wasn't your setting, and `Stop routing (back to medium)`. Pressing the footer shows the same band as under `ask`.
 
 The footer is a button, not a dropdown, because the Desktop app silently drops a `Select` in the footer: it is not drawn, and nothing reports an error (verified live on the 2.1.286 app; the test kit accepts it, so the kit cannot catch this). The footer truncates with `…` when space runs out, so the label stays short.
 

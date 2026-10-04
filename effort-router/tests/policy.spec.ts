@@ -469,9 +469,12 @@ describe('state', () => {
     expect(bandHeadline({ ...DECIDING, gaveUp: true })).toBe('Effort router: stopped checking (no clear task yet). Your effort setting applies.')
 
     expect(noticeHeadline(P_HIGH)).toBe('Effort router: using high for this session (bug fix in existing code).')
-    expect(noticeHeadline({ ...P_HIGH, why: 'Tracing the crash needs care.' })).toBe('Effort router: using high for this session (bug fix in existing code). Tracing the crash needs care.')
-    expect(noticeActions(true, 'medium').map(a => a.label)).toEqual(['Stop routing (back to medium)'])
-    expect(noticeActions(false)).toEqual([])
+    expect(noticeHeadline({ ...P_HIGH, from: 'xhigh', why: 'Tracing the crash needs care.' })).toBe(
+      'Effort router: changed from xhigh to high for this session (bug fix in existing code). Tracing the crash needs care.',
+    )
+    expect(noticeActions(true, 'medium', 'medium').map(a => a.label)).toEqual(['OK', 'Stop routing (back to medium)']) // from your setting: no separate Go back
+    expect(noticeActions(true, 'medium', 'xhigh').map(a => a.label)).toEqual(['OK', 'Go back to xhigh', 'Stop routing (back to medium)'])
+    expect(noticeActions(false, 'medium', 'medium').map(a => a.label)).toEqual(['OK'])
   })
 
   test('a check can say why, in a sentence or two, and the reply keeps it', () => {

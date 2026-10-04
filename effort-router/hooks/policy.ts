@@ -1434,20 +1434,37 @@ export function footerLabel(state: RouterState): { text: string; color?: string;
 }
 
 export type BandAction = {
-  /** What the action does: `suggest` (bare `/route`), `off` or `on`; `revert` (off, from the auto notice). */
-  value: 'suggest' | 'off' | 'on' | 'revert'
+  /**
+   * What the action does: `suggest` (bare `/route`), `off` or `on`; from the
+   * auto notice, `ok` (hide it), `previous` (back to the level before the
+   * change) or `revert` (off).
+   */
+  value: 'suggest' | 'off' | 'on' | 'revert' | 'ok' | 'previous'
   label: string
 }
 
 /** The band consent `auto` opens by itself once, after locking a level other than the picker's. */
-export const noticeHeadline = (proposal: Proposal): string =>
-  `Effort router: using ${proposal.level} for this session (${proposal.reason}).${proposal.why ? ` ${proposal.why}` : ''}`
+export type Notice = Proposal & { from?: Level }
+
+export const noticeHeadline = (notice: Notice): string =>
+  `Effort router: ${notice.from && notice.from !== notice.level ? `changed from ${notice.from} to ${notice.level}` : `using ${notice.level}`} for this session (${notice.reason}).${notice.why ? ` ${notice.why}` : ''}`
 
 /** `Stop routing (back to medium)`: the router off, the user's effort setting back. */
 const stopLabel = (setting: Level | undefined): string => `Stop routing${setting ? ` (back to ${setting})` : ''}`
 
-/** Its one action, stop routing, left out when the organisation keeps the router on. */
-export const noticeActions = (allowOff = true, setting?: Level): BandAction[] => (allowOff ? [{ value: 'revert', label: stopLabel(setting) }] : [])
+/**
+ * The notice's actions: `OK` first (it hides the band, and the change stands),
+ * then `Go back to <from>` when the level before the change wasn't the user's
+ * setting, then stop routing (left out when the organisation keeps the router
+ * on). Tommy, 2026-10-04: the first option after an automatic change should
+ * acknowledge it, not undo it.
+ */
+export function noticeActions(allowOff = true, setting?: Level, from?: Level): BandAction[] {
+  const actions: BandAction[] = [{ value: 'ok', label: 'OK' }]
+  if (from && from !== setting) actions.push({ value: 'previous', label: `Go back to ${from}` })
+  if (allowOff) actions.push({ value: 'revert', label: stopLabel(setting) })
+  return actions
+}
 
 /** The router's band above the prompt, which the footer button opens: one line about the state. */
 export function bandHeadline(state: RouterState): string {
