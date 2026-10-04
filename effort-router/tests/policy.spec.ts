@@ -447,32 +447,44 @@ describe('state', () => {
     expect(footerLabel(PENDING)).toEqual({ text: 'deciding', dim: true })
     expect(footerLabel(ASKING)).toEqual({ text: 'high?', color: 'yellow', dim: false })
     expect(footerLabel({ ...LOCKED, asking: { ...P_LOW, picker: 'medium' } }).text).toBe('low?') // /route asking while locked
-    expect(footerLabel(LOCKED)).toEqual({ text: 'high 🔒', color: 'yellow', dim: false })
+    expect(footerLabel(LOCKED)).toEqual({ text: 'using high', color: 'yellow', dim: false })
     expect(footerLabel(OFF)).toEqual({ text: 'off', dim: true })
   })
 
-  test('the band: headline per state; Check now / Turn off, or Turn on; the auto notice with Undo', () => {
-    const labels = (state: typeof DECIDING, allowOff = true) => bandActions(state, allowOff).map(a => a.label)
-    expect(labels(DECIDING)).toEqual(['Check now', 'Turn off'])
-    expect(labels(LOCKED)).toEqual(['Check now', 'Turn off'])
-    expect(labels(OFF)).toEqual(['Turn on'])
-    expect(labels(DECIDING, false)).toEqual(['Check now'])
+  test('the band: headline per state; Assess now or Reassess / Stop routing, or Start routing; the auto notice with Stop routing', () => {
+    const labels = (state: typeof DECIDING, allowOff = true, setting?: 'medium') => bandActions(state, allowOff, setting).map(a => a.label)
+    expect(labels(DECIDING, true, 'medium')).toEqual(['Assess now', 'Stop routing (back to medium)'])
+    expect(labels(LOCKED, true, 'medium')).toEqual(['Reassess', 'Stop routing (back to medium)'])
+    expect(labels(LOCKED)).toEqual(['Reassess', 'Stop routing'])
+    expect(labels(OFF)).toEqual(['Start routing'])
+    expect(labels(DECIDING, false)).toEqual(['Assess now'])
 
-    expect(bandHeadline(LOCKED)).toBe('Effort router: high 🔒 for this session (bug fix in existing code)')
+    expect(bandHeadline(LOCKED)).toBe('Effort router: using high for this session (bug fix in existing code).')
+    expect(bandHeadline({ ...LOCKED, why: 'A crash fix needs the code traced, but the scope is one function.' })).toBe(
+      'Effort router: using high for this session (bug fix in existing code). A crash fix needs the code traced, but the scope is one function.',
+    )
     expect(bandHeadline(ASKING)).toBe('Effort router: high? Waiting for your answer.')
     expect(bandHeadline(OFF)).toBe('Effort router: off. Your effort setting applies.')
     expect(bandHeadline(DECIDING)).toBe('Effort router: deciding. Your effort setting applies until the task is clear.')
     expect(bandHeadline({ ...DECIDING, gaveUp: true })).toBe('Effort router: stopped checking (no clear task yet). Your effort setting applies.')
 
-    expect(noticeHeadline(P_HIGH)).toBe('Effort router: using high for this session (bug fix in existing code)')
-    expect(noticeActions().map(a => a.label)).toEqual(['Undo'])
+    expect(noticeHeadline(P_HIGH)).toBe('Effort router: using high for this session (bug fix in existing code).')
+    expect(noticeHeadline({ ...P_HIGH, why: 'Tracing the crash needs care.' })).toBe('Effort router: using high for this session (bug fix in existing code). Tracing the crash needs care.')
+    expect(noticeActions(true, 'medium').map(a => a.label)).toEqual(['Stop routing (back to medium)'])
     expect(noticeActions(false)).toEqual([])
+  })
+
+  test('a check can say why, in a sentence or two, and the reply keeps it', () => {
+    expect(parseDecision('{"decision":"level","level":"high","confidence":0.8,"reason":"bug fix","why":"Tracing  the crash\\nneeds care."}')).toEqual({
+      decision: 'lock', level: 'high', reason: 'bug fix', why: 'Tracing the crash needs care.', confidence: 0.8,
+    })
+    expect(classifierSystem('RULES')).toContain('"why":"<one or two sentences')
   })
 
   test('reasons and status', () => {
     expect(routeReport(afterBudget({ ...DECIDING, prompts: 6 }, 6, true), 6)).toStartWith('Off (no clear task after 6 prompts), so your effort setting applies. /route on turns it back on.')
     expect(afterBudget({ ...DECIDING, prompts: 1 }, 1, true).offReason).toBe('no clear task after 1 prompt')
-    expect(routeReport(LOCKED, 6)).toStartWith('high 🔒 for this session (bug fix in existing code). Subagents use it too.')
+    expect(routeReport(LOCKED, 6)).toStartWith('Using high for this session (bug fix in existing code). Subagents use it too.')
     expect(routeReport(ASKING, 6)).toStartWith('high? Waiting for your answer: use high effort instead of medium (bug fix in existing code)?')
     expect(routeReport(PENDING, 6, 'medium')).toStartWith("Deciding. The last check suggested high (bug fix in existing code). If that isn't your setting, you'll be asked before Claude carries on.")
     expect(routeReport({ ...DECIDING, prompts: 2 }, 6, 'medium')).toContain('Prompts checked: 2 of up to 6.')
@@ -631,7 +643,7 @@ describe('subagent reads', () => {
 
     const locked = lockedAt(freshState(), 'high', 'router: bug fix')
     expect(routeReport(locked, 6, 'high', { now: 0, calls: 1, subagents: { routing: 'on', agents: [] } }))
-      .toStartWith('high 🔒 for this session (router: bug fix). Subagents get their own level.')
+      .toStartWith('Using high for this session (router: bug fix). Subagents get their own level.')
     expect(routeReport(locked, 6)).toContain('Subagents use it too.')
   })
 

@@ -161,9 +161,9 @@ type Session = {
   bandOpen: boolean
   /** Consent `auto` locked a level other than the picker's: the band shows it once, with Revert. */
   notice?: Proposal
-  /** The band's Check now is running: the footer reads `checking…`. */
+  /** The band's Assess now / Reassess is running: the footer reads `checking…`. */
   checking: boolean
-  /** What the band's Check now found, shown in the band until it is closed. */
+  /** What the band's Assess now / Reassess found, shown in the band until it is hidden. */
   result?: string
   /** Classifier calls this session, for `/route status`. */
   calls: number
@@ -340,8 +340,8 @@ async function commit($: EngineInterface, id: string, session: Session, state: R
  * the level differs from the picker's, the terminal picker is synced at the
  * next idle moment.
  */
-async function lock($: EngineInterface, id: string, session: Session, settings: Settings, level: Level, reason: string): Promise<void> {
-  await commit($, id, session, lockedAt(session.state, level, reason))
+async function lock($: EngineInterface, id: string, session: Session, settings: Settings, level: Level, reason: string, why?: string): Promise<void> {
+  await commit($, id, session, lockedAt(session.state, level, reason, why))
   if (settings.syncPicker && session.picker !== level) session.pendingSync = level
   try {
     $.ui.log(`Effort router: ${level} for the rest of this session (${reason}).`)
@@ -357,7 +357,7 @@ async function lock($: EngineInterface, id: string, session: Session, settings: 
  * for this session (<reason>)`, with Undo).
  */
 async function lockAuto($: EngineInterface, id: string, session: Session, settings: Settings, proposal: Proposal): Promise<void> {
-  await lock($, id, session, settings, proposal.level, lockReason.router(proposal))
+  await lock($, id, session, settings, proposal.level, lockReason.router(proposal), proposal.why)
   if (proposal.level !== session.picker) {
     session.notice = proposal
     show($)
@@ -393,7 +393,7 @@ async function askAndLock(
   session.state = { ...session.state, asking: undefined }
   if (answer === question.options[0]) {
     recordOutcome($, 'asked: use', proposal.checkedAt)
-    await lock($, id, session, settings, proposal.level, lockReason.chosen(proposal))
+    await lock($, id, session, settings, proposal.level, lockReason.chosen(proposal), proposal.why)
     return { chose: 'use', level: proposal.level }
   }
   const between = question.between.find(level => answer === `Use ${level}`)
@@ -694,7 +694,7 @@ async function decideAtStep($: EngineInterface, id: string, session: Session, se
   if (decision.kind === 'none') return
   if (decision.kind === 'agree') {
     recordOutcome($, 'same as the setting', decision.proposal.checkedAt)
-    await lock($, id, session, settings, decision.proposal.level, lockReason.agreed(decision.proposal))
+    await lock($, id, session, settings, decision.proposal.level, lockReason.agreed(decision.proposal), decision.proposal.why)
   } else {
     const { picker: current, ...proposal } = decision.asking
     const chosen = await askAndLock($, id, session, settings, proposal, current)
@@ -704,7 +704,7 @@ async function decideAtStep($: EngineInterface, id: string, session: Session, se
 }
 
 /**
- * A manual run (`/route [hint]`, the band's Check now): reads the whole
+ * A manual run (`/route [hint]`, the band's Assess now / Reassess): reads the whole
  * conversation now, in any state, ignoring the budget, within the timeout.
  * The same as the level in use: nothing changes. The same as the picker's
  * (while locked elsewhere): locked there, no question. Otherwise it asks at
@@ -745,7 +745,7 @@ async function suggestNow($: EngineInterface, id: string, session: Session, sett
     return `${current ? `Changed from ${current} to ${proposal.level}` : proposal.level} for this session (${proposal.reason}).`
   }
   if (proposal.level === picker) {
-    await lock($, id, session, settings, proposal.level, lockReason.agreed(proposal))
+    await lock($, id, session, settings, proposal.level, lockReason.agreed(proposal), proposal.why)
     // Only reached with another level kept: the same level returned above.
     return `Changed from ${locked} back to ${picker}, your setting, for this session (${proposal.reason}${sure}).`
   }
@@ -942,6 +942,8 @@ function recordVerdict($: EngineInterface, session: Session, check: Check, outco
         prompt: session.state.prompts,
         ...(proposal ? { level: proposal.level } : {}),
         ...(proposal?.confidence !== undefined ? { confidence: proposal.confidence } : {}),
+        ...(proposal ? { reason: proposal.reason } : {}),
+        ...(proposal?.why ? { why: proposal.why } : {}),
         outcome,
         ...(check.withInstructions !== undefined ? { withInstructions: check.withInstructions } : {}),
       }),
@@ -1101,13 +1103,13 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
     case 'off': {
       if (!(await loadRules($)).allowOff) return 'Your organisation keeps the router on.'
       await turnOff($, id, session, settings)
-      return `Router off. Your effort setting${session.baseline ? ` (${session.baseline})` : ''} applies again. /route on turns it back on.`
+      return `Routing stopped for this session. Your effort setting${session.baseline ? ` (${session.baseline})` : ''} applies again. /route on starts it again.`
     }
     case 'on': {
       if (!supportedModel(session.model)) return unsupportedText(session.model)
-      if (session.state.mode !== 'picker' && !session.state.gaveUp) return 'The router is already on.'
+      if (session.state.mode !== 'picker' && !session.state.gaveUp) return 'Already routing.'
       await commit($, id, session, turnedOn(session.state))
-      return `Router on. It checks your next ${settings.decideWithin} prompts until the task is clear.`
+      return `Routing started. It checks your next ${settings.decideWithin} prompts until the task is clear.`
     }
     case 'rules': {
       const { composed, enforced } = await loadRules($)
@@ -1338,9 +1340,10 @@ export function register(on: On, options: PluginOptions): void {
     return Box({ flexDirection: 'row', columnGap: 1, children: [theirs, mine] })
   })
 
-  // The band above the prompt: opened from the footer (the state, then Suggest
-  // now / Turn off or Turn on), or by itself once after consent auto locked a
-  // level other than the picker's (using <level>, then Undo). Close.
+  // The band above the prompt: opened from the footer (the state, then Assess
+  // now or Reassess / Stop routing, or Start routing), or by itself once after
+  // consent auto locked a level other than the picker's (using <level>, then
+  // Stop routing). Hide.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const { id, session } = await sessionOf($)
     if (!bandShown(session) || e.props.hasSurvey) return next(e)
@@ -1350,7 +1353,8 @@ export function register(on: On, options: PluginOptions): void {
     const state = view(session)
     const result = !notice && !session.bandOpen ? session.result : undefined
     const headline = notice && !session.bandOpen ? noticeHeadline(notice) : result ? `Effort router: ${result}` : bandHeadline(state)
-    const actions = notice && !session.bandOpen ? noticeActions(allowOff) : result ? [] : bandActions(state, allowOff)
+    const setting = session.baseline ?? (isLevel(session.picker) ? session.picker : undefined)
+    const actions = notice && !session.bandOpen ? noticeActions(allowOff, setting) : result ? [] : bandActions(state, allowOff, setting)
     const level = notice && !session.bandOpen ? notice.level : state.asking?.level ?? (state.mode === 'auto' && state.phase === 'locked' ? state.level : undefined)
     const label = notice && !session.bandOpen ? notice.level : footerLabel(state).text
     const at = level ? headline.indexOf(label) : -1
@@ -1374,7 +1378,7 @@ export function register(on: On, options: PluginOptions): void {
         onPress: () => bandAction($, id, session, settings, action.value),
       }),
     )
-    buttons.push(Button({ key: 'close', label: 'Close', hotkey: 'x', plain: true, dimColor: true, role: 'dismiss', onPress: () => closeBand($, session) }))
+    buttons.push(Button({ key: 'close', label: 'Hide', hotkey: 'x', plain: true, dimColor: true, role: 'dismiss', onPress: () => closeBand($, session) }))
     return Box({
       flexDirection: 'column',
       children: [line, Box({ flexDirection: 'row', columnGap: 2, children: buttons }), theirs],

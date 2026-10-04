@@ -267,7 +267,7 @@ describe('effort-router', () => {
     expect(world.sent).toEqual(['medium'])
     expect(world.asked).toEqual([])
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
-    expect((await footerOf(footer)).shown).toBe('medium 🔒')
+    expect((await footerOf(footer)).shown).toBe('using medium')
     expect(world.lines).toContain('Effort router: medium for the rest of this session (regular feature work).')
     await submit($, 'and the settings page too')
     expect(world.classifierCalls).toBe(1)
@@ -288,7 +288,7 @@ describe('effort-router', () => {
     expect(world.sent).toEqual(['high', 'high'])
     expect(world.asked).toHaveLength(1)
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
-    expect((await footerOf(footer)).shown).toBe('high 🔒')
+    expect((await footerOf(footer)).shown).toBe('using high')
     await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
     await settle($)
     expect(world.efforts).toEqual(['high']) // the terminal picker is synced when idle
@@ -305,7 +305,7 @@ describe('effort-router', () => {
     expect(world.sent).toEqual(['medium'])
     await step($, 1)
     expect(world.sent).toEqual(['medium', 'medium'])
-    expect(await route($, 'status')).toStartWith('medium 🔒 for this session (your choice).')
+    expect(await route($, 'status')).toStartWith('Using medium for this session (your choice).')
     await submit($, 'and the lexer')
     expect(world.classifierCalls).toBe(1)
   })
@@ -325,7 +325,7 @@ describe('effort-router', () => {
     world.release?.('USE')
     await stepping
     expect(world.sent).toEqual(['high'])
-    expect((await footerOf(footer)).shown).toBe('high 🔒')
+    expect((await footerOf(footer)).shown).toBe('using high')
   })
 
   test('dismissed: this request goes at the picker level, the router stays deciding, and the next read can ask again', async ($, on) => {
@@ -435,6 +435,18 @@ describe('effort-router', () => {
     expect(world.sent.at(-1)).toBe('high')
   })
 
+  test("the check's why: kept with the level, shown in /route status and the band", async ($, on) => {
+    const world = worldOf(on, '{"decision":"level","level":"high","confidence":0.9,"reason":"bug fix in existing code","why":"The crash needs tracing through the parser, but the fix is local."}')
+    await $.session.start(STARTED)
+    await submit($, 'fix the crash in the parser')
+    await step($, 0)
+    expect(await route($, 'status')).toStartWith('Using high for this session (bug fix in existing code). The crash needs tracing through the parser, but the fix is local.')
+    const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
+    const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
+    await footer.press({ key: 'route-state' })
+    expect((await bandOf(band)).headline).toBe('Effort router: using high for this session (bug fix in existing code). The crash needs tracing through the parser, but the fix is local.')
+  })
+
   test('a jump of two levels offers the one in between too, and choosing it locks there', async ($, on) => {
     const world = worldOf(on, '{"decision":"lock","level":"xhigh","confidence":0.9,"reason":"tricky migration"}')
     await $.session.start(STARTED)
@@ -444,7 +456,7 @@ describe('effort-router', () => {
     expect(world.asked).toEqual([{ text: 'Effort router: Tricky migration. Use xhigh effort instead of medium?', options: ['Use xhigh', 'Use high', 'Keep medium'] }])
     await step($, 1)
     expect(world.sent).toEqual(['high', 'high'])
-    expect(await route($, 'status')).toContain('high 🔒')
+    expect(await route($, 'status')).toContain('Using high')
     world.messages = [{ role: 'user', text: 'actually just fix the typo in the error message', toolUses: [] }]
     world.reply = '{"decision":"lock","level":"low","confidence":0.9,"reason":"typo fix"}'
     expect(await route($)).toBe('Changed from high to medium for this session.') // asked low, medium or keep high; chose the middle
@@ -477,7 +489,7 @@ describe('effort-router', () => {
     expect(await route($, 'this is a security review')).toBe('Changed from medium to xhigh for this session.') // held to highestLevel
     expect(world.prompts.at(-1)).toContain('<user_hint>\nthis is a security review\n</user_hint>')
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
-    expect((await footerOf(footer)).shown).toBe('xhigh 🔒')
+    expect((await footerOf(footer)).shown).toBe('using xhigh')
   })
 
   test('highestLevel max lets the router pick max; never Haiku as the check model', { options: { highestLevel: 'max', classifierModel: 'haiku' } }, async ($, on) => {
@@ -497,7 +509,7 @@ describe('effort-router', () => {
     await footer.press({ key: 'route-state' })
     await band.press({ key: 'suggest' })
     await settle($)
-    expect(await bandOf(band)).toEqual({ headline: 'Effort router: No clear task yet. Nothing changed.', buttons: ['Close'] })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: No clear task yet. Nothing changed.', buttons: ['Hide'] })
     expect((await footerOf(footer)).shown).toBe('deciding')
     await footer.press({ key: 'route-state' }) // the footer closes it too
     expect((await bandOf(band)).headline).toBeUndefined()
@@ -520,7 +532,7 @@ describe('effort-router', () => {
     expect((await bandOf(band)).headline).toBeUndefined()
 
     await footer.press({ key: 'route-state' })
-    expect(await bandOf(band)).toMatchObject({ buttons: ['Check now', 'Turn off', 'Close'] })
+    expect(await bandOf(band)).toMatchObject({ buttons: ['Assess now', 'Stop routing (back to medium)', 'Hide'] })
     expect((await bandOf(band)).headline).toBe('Effort router: deciding. Your effort setting applies until the task is clear.')
     await footer.press({ key: 'route-state' })
     expect((await bandOf(band)).headline).toBeUndefined()
@@ -530,19 +542,19 @@ describe('effort-router', () => {
     await settle($)
     expect(world.asked).toHaveLength(1)
     // the band reopens with what the check found, and Close takes it away
-    expect(await bandOf(band)).toEqual({ headline: 'Effort router: Changed from medium to high for this session.', buttons: ['Close'] })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: Changed from medium to high for this session.', buttons: ['Hide'] })
     await band.press({ key: 'close' })
     expect((await bandOf(band)).headline).toBeUndefined()
-    expect((await footerOf(footer)).shown).toBe('high 🔒')
+    expect((await footerOf(footer)).shown).toBe('using high')
     await footer.press({ key: 'route-state' })
-    expect(await bandOf(band)).toEqual({ headline: 'Effort router: high 🔒 for this session (bug fix in existing code)', buttons: ['Check now', 'Turn off', 'Close'] })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: using high for this session (bug fix in existing code).', buttons: ['Reassess', 'Stop routing (back to medium)', 'Hide'] })
 
     await band.press({ key: 'off' })
     await step($, 0)
     expect(world.sent.at(-1)).toBe('medium')
     expect((await footerOf(footer)).shown).toBe('off')
     await footer.press({ key: 'route-state' })
-    expect(await bandOf(band)).toEqual({ headline: 'Effort router: off. Your effort setting applies.', buttons: ['Turn on', 'Close'] })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: off. Your effort setting applies.', buttons: ['Start routing', 'Hide'] })
     await band.press({ key: 'on' })
     expect((await footerOf(footer)).shown).toBe('deciding')
   })
@@ -557,7 +569,7 @@ describe('effort-router', () => {
 
   // --- consent auto -----------------------------------------------------------------------
 
-  test('auto: locked at once without a question; the band opens once with Undo', async ($, on) => {
+  test('auto: locked at once without a question; the band opens once with Stop routing', async ($, on) => {
     const world = worldOf(on, BUG_REPLY, {}, AUTO)
     await $.session.start(STARTED)
     await submit($, 'fix the crash in the parser')
@@ -565,7 +577,7 @@ describe('effort-router', () => {
     expect(world.sent).toEqual(['high'])
     expect(world.asked).toEqual([])
     const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
-    expect(await bandOf(band)).toEqual({ headline: 'Effort router: using high for this session (bug fix in existing code)', buttons: ['Undo', 'Close'] })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: using high for this session (bug fix in existing code).', buttons: ['Stop routing (back to medium)', 'Hide'] })
     await band.press({ key: 'revert' })
     expect((await bandOf(band)).headline).toBeUndefined()
     await step($, 1)
@@ -585,7 +597,7 @@ describe('effort-router', () => {
     world.messages = [{ role: 'user', text: 'fix the crash in the parser', toolUses: [] }]
     await route($, 'on') // already on: no change
     expect(await route($)).toBe('Changed from medium to high for this session (bug fix in existing code).') // /route under auto: locked without a question
-    expect((await bandOf(band)).headline).toBe('Effort router: using high for this session (bug fix in existing code)')
+    expect((await bandOf(band)).headline).toBe('Effort router: using high for this session (bug fix in existing code).')
     await band.press({ key: 'close' })
     await step($, 0)
     expect(world.sent).toEqual(['high'])
@@ -699,11 +711,11 @@ describe('effort-router', () => {
     await $.session.start(STARTED)
     world.messages = [{ role: 'user', text: 'hi', toolUses: [] }]
     expect(await route($, 'status')).toContain('Deciding.')
-    expect(await route($, 'off')).toContain('Router off')
+    expect(await route($, 'off')).toContain('Routing stopped')
     await step($, 0)
     expect(world.sent).toEqual(['medium'])
-    expect(await route($, 'on')).toContain('Router on.')
-    expect(await route($, 'on')).toContain('already on')
+    expect(await route($, 'on')).toContain('Routing started.')
+    expect(await route($, 'on')).toContain('Already routing')
     const calls = world.classifierCalls
     expect(await route($, 'decide')).toContain('No clear task yet.')
     expect(world.classifierCalls).toBe(calls + 1)
@@ -727,7 +739,7 @@ describe('effort-router', () => {
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
     const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
     await footer.press({ key: 'route-state' })
-    expect((await bandOf(band)).buttons).toEqual(['Check now', 'Close'])
+    expect((await bandOf(band)).buttons).toEqual(['Assess now', 'Hide'])
     await band.press({ key: 'close' })
 
     await submit($, 'hi')
@@ -743,7 +755,7 @@ describe('effort-router', () => {
     await $.session.start(STARTED)
     await submit($, 'fix the crash in the parser')
     const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
-    expect(await bandOf(band)).toEqual({ headline: 'Effort router: using high for this session (bug fix in existing code)', buttons: ['Close'] })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: using high for this session (bug fix in existing code).', buttons: ['Hide'] })
   })
 
   test('without enforce, a user settings option layers over the org', async ($, on) => {
@@ -871,8 +883,8 @@ describe('effort-router', () => {
       const saved = JSON.parse(world.files['/home/t/.claude/effort-router/spend/session-1.json'] ?? '{}')
       const rows = (saved.verdicts as Record<string, unknown>[]).map(({ at: _, ...row }) => row)
       expect(rows).toEqual([
-        { kind: 'first', model: 'claude-sonnet-5-5', prompt: 1, level: 'high', confidence: 0.6, outcome: 'below the bar', withInstructions: true },
-        { kind: 'fork', model: 'claude-sonnet-5-5', prompt: 2, level: 'high', confidence: 0.9, outcome: 'asked: keep' },
+        { kind: 'first', model: 'claude-sonnet-5-5', prompt: 1, level: 'high', confidence: 0.6, reason: 'bug fix', outcome: 'below the bar', withInstructions: true },
+        { kind: 'fork', model: 'claude-sonnet-5-5', prompt: 2, level: 'high', confidence: 0.9, reason: 'bug fix in existing code', outcome: 'asked: keep' },
       ])
     })
 

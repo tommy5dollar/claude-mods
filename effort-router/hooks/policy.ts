@@ -75,7 +75,7 @@ export const CLASSIFIER_FRAME = classifierFrame()
 export const classifierContract = (levels: readonly Level[] = levelsUpTo()): string => `Reply with exactly one JSON object and nothing else:
 {"decision":"undecided"}
 or
-{"decision":"level","level":"<${levels.join('|')}>","confidence":<0 to 1>,"reason":"<what the task is, 3-8 words, e.g. bug fix in existing code>"}`
+{"decision":"level","level":"<${levels.join('|')}>","confidence":<0 to 1>,"reason":"<what the task is, 3-8 words, e.g. bug fix in existing code>","why":"<one or two sentences: why this level and not the one above or below, for this task on this model>"}`
 
 export const CLASSIFIER_CONTRACT = classifierContract()
 
@@ -506,7 +506,8 @@ function proposalOf(record: Record<string, unknown>): Proposal | undefined {
   const level = typeof record.level === 'string' ? record.level.trim().toLowerCase() : undefined
   if (!isLevel(level)) return undefined
   const reason = typeof record.reason === 'string' ? record.reason.replace(/\s+/g, ' ').trim() : ''
-  const proposal: Proposal = { level, reason: reason === '' ? 'classifier' : cut(reason, 60).replace(/… \[\d+ more chars\]$/, '…') }
+  const why = typeof record.why === 'string' ? record.why.replace(/\s+/g, ' ').trim().slice(0, 400) : ''
+  const proposal: Proposal = { level, reason: reason === '' ? 'classifier' : cut(reason, 60).replace(/… \[\d+ more chars\]$/, '…'), ...(why ? { why } : {}) }
   const confidence = confidenceOf(record.confidence)
   return confidence === undefined ? proposal : { ...proposal, confidence }
 }
@@ -871,6 +872,9 @@ export type VerdictRow = {
   prompt: number
   level?: Level
   confidence?: number
+  /** The check's short task summary and its why, for calibration. */
+  reason?: string
+  why?: string
   outcome: string
   /** A first check that carried the session's instructions (CLAUDE.md, rules, memory), to learn whether they help. */
   withInstructions?: boolean
@@ -1095,7 +1099,7 @@ export type Mode = 'auto' | 'picker'
 export type Phase = 'undecided' | 'locked'
 
 /** A check's level. `checkedAt` (when the check ran, never saved) ties the answer to its question back to the check's verdict row. */
-export type Proposal = { level: Level; reason: string; confidence?: number; checkedAt?: number }
+export type Proposal = { level: Level; reason: string; why?: string; confidence?: number; checkedAt?: number }
 
 /** A question open about a verdict: use the router's level, or keep the picker's (unknown when no request has gone out yet). */
 export type Asking = Proposal & { picker?: Level }
@@ -1121,6 +1125,8 @@ export type RouterState = {
   level?: Level
   /** Why it is locked, in words for status (`router: bug fix in existing code`). */
   reason?: string
+  /** Why the check chose this level, in a sentence or two, when it said. */
+  why?: string
   /** A read's verdict waiting for the next main-thread request (consent `ask`). Not persisted. */
   pending?: Proposal
   /** The question open about a verdict. Not persisted. */
@@ -1206,12 +1212,13 @@ export function stepDecision(state: RouterState, picker: unknown): StepDecision 
 }
 
 /** Locks a level, for the stated reason: decided, so reading stops. */
-export const lockedAt = (state: RouterState, level: Level, reason: string): RouterState => ({
+export const lockedAt = (state: RouterState, level: Level, reason: string, why?: string): RouterState => ({
   ...state,
   mode: 'auto',
   phase: 'locked',
   level,
   reason,
+  why,
   pending: undefined,
   asking: undefined,
   hint: undefined,
@@ -1319,7 +1326,7 @@ export function routeReport(state: RouterState, decideWithin: number, inForce?: 
   } else if (state.mode === 'picker') {
     lines.push(`Off${state.offReason ? ` (${state.offReason})` : ''}, so ${setting} applies. /route on turns it back on.`)
   } else if (state.phase === 'locked') {
-    lines.push(`${state.level} 🔒 for this session (${state.reason ?? 'router'}).${routed ? ' Subagents get their own level.' : ' Subagents use it too.'}`)
+    lines.push(`Using ${state.level} for this session (${state.reason ?? 'router'}).${state.why ? ` ${state.why}` : ''}${routed ? ' Subagents get their own level.' : ' Subagents use it too.'}`)
   } else if (state.pending) {
     lines.push(`Deciding. The last check suggested ${state.pending.level} (${state.pending.reason}). If that isn't your setting, you'll be asked before Claude carries on.`)
   } else if (leaning && !state.gaveUp) {
@@ -1412,12 +1419,12 @@ export function restored(saved: unknown): RouterState {
 /**
  * The compact state the footer shows beside the native effort picker (which
  * shows the level in use): `deciding`, `high?` while the question is open,
- * `high 🔒` or `off`. `dim` where nothing is locked or asked.
+ * `using high` once decided, or `off`. `dim` where nothing is decided or asked.
  */
 export function footerLabel(state: RouterState): { text: string; color?: string; dim: boolean } {
   if (state.asking) return { text: `${state.asking.level}?`, color: LEVEL_COLOR[state.asking.level], dim: false }
   if (state.mode === 'picker' || state.unsupported) return { text: 'off', dim: true }
-  if (state.phase === 'locked' && state.level) return { text: `${state.level} 🔒`, color: LEVEL_COLOR[state.level], dim: false }
+  if (state.phase === 'locked' && state.level) return { text: `using ${state.level}`, color: LEVEL_COLOR[state.level], dim: false }
   return { text: 'deciding', dim: true }
 }
 
@@ -1428,10 +1435,14 @@ export type BandAction = {
 }
 
 /** The band consent `auto` opens by itself once, after locking a level other than the picker's. */
-export const noticeHeadline = (proposal: Proposal): string => `Effort router: using ${proposal.level} for this session (${proposal.reason})`
+export const noticeHeadline = (proposal: Proposal): string =>
+  `Effort router: using ${proposal.level} for this session (${proposal.reason}).${proposal.why ? ` ${proposal.why}` : ''}`
 
-/** Its one action, `Undo` (router off), left out when the organisation keeps the router on. */
-export const noticeActions = (allowOff = true): BandAction[] => (allowOff ? [{ value: 'revert', label: 'Undo' }] : [])
+/** `Stop routing (back to medium)`: the router off, the user's effort setting back. */
+const stopLabel = (setting: Level | undefined): string => `Stop routing${setting ? ` (back to ${setting})` : ''}`
+
+/** Its one action, stop routing, left out when the organisation keeps the router on. */
+export const noticeActions = (allowOff = true, setting?: Level): BandAction[] => (allowOff ? [{ value: 'revert', label: stopLabel(setting) }] : [])
 
 /** The router's band above the prompt, which the footer button opens: one line about the state. */
 export function bandHeadline(state: RouterState): string {
@@ -1439,20 +1450,23 @@ export function bandHeadline(state: RouterState): string {
   if (state.unsupported) return `Effort router: off on ${state.unsupported}. It works with ${SUPPORTED_NAMES}.`
   if (state.asking) return `Effort router: ${label} Waiting for your answer.`
   if (state.mode === 'picker') return `Effort router: off${state.offReason ? ` (${state.offReason})` : ''}. Your effort setting applies.`
-  if (state.phase === 'locked') return `Effort router: ${label} for this session (${state.reason ?? 'router'})`
+  if (state.phase === 'locked') return `Effort router: ${label} for this session (${state.reason ?? 'router'}).${state.why ? ` ${state.why}` : ''}`
   if (state.gaveUp) return 'Effort router: stopped checking (no clear task yet). Your effort setting applies.'
   return 'Effort router: deciding. Your effort setting applies until the task is clear.'
 }
 
 /**
- * The band's buttons for a state (then `Close`, which the caller adds): off →
- * `Turn on`; otherwise `Check now`, `Turn off`. `allowOff: false` (an
- * organisation's setting) leaves out Turn off.
+ * The band's buttons for a state (then `Hide`, which the caller adds): off →
+ * `Start routing`; deciding → `Assess now`; decided → `Reassess`; and, while
+ * routing, `Stop routing (back to <setting>)`. Tommy, 2026-10-04: "Check now"
+ * read as deterministic and free, and "Turn off" didn't say what it turned
+ * off. `allowOff: false` (an organisation's setting) leaves out Stop routing.
  */
-export function bandActions(state: RouterState, allowOff = true): BandAction[] {
+export function bandActions(state: RouterState, allowOff = true, setting?: Level): BandAction[] {
   if (state.unsupported) return []
-  if (state.mode === 'picker') return [{ value: 'on', label: 'Turn on' }]
-  return allowOff ? [{ value: 'suggest', label: 'Check now' }, { value: 'off', label: 'Turn off' }] : [{ value: 'suggest', label: 'Check now' }]
+  if (state.mode === 'picker') return [{ value: 'on', label: 'Start routing' }]
+  const assess: BandAction = { value: 'suggest', label: state.phase === 'locked' ? 'Reassess' : 'Assess now' }
+  return allowOff ? [assess, { value: 'off', label: stopLabel(setting) }] : [assess]
 }
 
 // --- settings-borne rules (org / user / project) --------------------------------------
