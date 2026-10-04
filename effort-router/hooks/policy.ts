@@ -492,8 +492,90 @@ export function parseSubagentReply(reply: string | undefined | null): Proposal |
   return proposalOf(record)
 }
 
-/** A subagent the router routed: the level its requests carry, and why. */
-export type RoutedAgent = { level: Level; reason: string; subagentType: string; description: string }
+/**
+ * A subagent the router routed: the level its requests carry, and why. With
+ * `byDefinition`, its agent definition sets the level (the engine applies it;
+ * the router leaves its requests alone and only records it), which may be a
+ * number.
+ */
+export type RoutedAgent = { level: Level | number; reason: string; subagentType: string; description: string; byDefinition?: boolean }
+
+// --- agent definitions that set their own effort ------------------------------------
+
+/** One agent definition, as far as the router needs it: its name, and its effort when it sets one. */
+export type AgentDefinition = { name: string; effort?: Level | number; source: string }
+
+/** A definition's effort when it is one the engine takes: a level, or a positive number. */
+export function definitionEffort(value: unknown): Level | number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : undefined
+  if (typeof value !== 'string') return undefined
+  const text = value.trim().replace(/^(['"])(.*)\1$/, '$2').trim().toLowerCase()
+  if (isLevel(text)) return text
+  return /^\d+(\.\d+)?$/.test(text) && Number(text) > 0 ? Number(text) : undefined
+}
+
+/**
+ * The top-level `key: value` pairs of a markdown file's YAML frontmatter
+ * (between `---` lines at the very start); undefined without one. Values are
+ * unquoted; nested and list values are left out (the router reads only
+ * `name` and `effort`).
+ */
+export function frontmatterOf(text: string): Record<string, string> | undefined {
+  const match = text.replace(/^﻿/, '').match(/^---\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)/)
+  if (!match) return undefined
+  const fields: Record<string, string> = {}
+  for (const line of (match[1] as string).split(/\r?\n/)) {
+    const field = line.match(/^([A-Za-z_][\w-]*)[ \t]*:[ \t]*(.*?)[ \t]*$/)
+    if (!field) continue
+    const value = (field[2] as string).replace(/[ \t]+#.*$/, '').replace(/^(['"])(.*)\1$/, '$2')
+    if (value !== '' && !(field[1] as string in fields)) fields[field[1] as string] = value
+  }
+  return fields
+}
+
+/**
+ * An agent definition file (`.claude/agents/*.md`): named by its frontmatter
+ * `name:`, else by its file name. Undefined for a file with no frontmatter,
+ * which is not an agent definition.
+ */
+export function agentFileDefinition(text: string, fileName: string, source: string): AgentDefinition | undefined {
+  const fields = frontmatterOf(text)
+  if (!fields) return undefined
+  const name = fields.name?.trim() || fileName.replace(/\.md$/i, '')
+  const effort = definitionEffort(fields.effort)
+  return effort === undefined ? { name, source } : { name, effort, source }
+}
+
+/**
+ * The agent definitions in a settings source's `agents` key: an object keyed
+ * by agent name (as `--agents` takes them), or a list of `{ name, ... }`.
+ * Anything malformed is skipped.
+ */
+export function settingsAgentDefinitions(settings: unknown, source: string): AgentDefinition[] {
+  const agents = (settings as { agents?: unknown } | null | undefined)?.agents
+  if (typeof agents !== 'object' || agents === null) return []
+  const entries: [unknown, unknown][] = Array.isArray(agents)
+    ? agents.map(agent => [(agent as { name?: unknown } | null)?.name, agent])
+    : Object.entries(agents)
+  const out: AgentDefinition[] = []
+  for (const [name, spec] of entries) {
+    if (typeof name !== 'string' || name.trim() === '' || typeof spec !== 'object' || spec === null) continue
+    const effort = definitionEffort((spec as { effort?: unknown }).effort)
+    out.push(effort === undefined ? { name: name.trim(), source } : { name: name.trim(), effort, source })
+  }
+  return out
+}
+
+/**
+ * The definition a spawn of `subagentType` runs under: the first one with that
+ * name, highest precedence first, whether or not it sets an effort (a project
+ * definition without one still overrides a user definition with one). A
+ * plugin's agent (`<plugin>:<name>`) is never looked up here.
+ */
+export function definitionFor(subagentType: string, definitions: readonly AgentDefinition[]): AgentDefinition | undefined {
+  if (subagentType.includes(':')) return undefined
+  return definitions.find(definition => definition.name === subagentType)
+}
 
 /**
  * Whether subagents are routed in this state. They are unless the person
@@ -506,11 +588,13 @@ export const routesSubagents = (state: RouterState): boolean => state.mode === '
 
 /**
  * The level a spawn inherits, for a fork or when its read fails: the parent
- * subagent's routed level for a nested spawn, else the main thread's level in
- * use; undefined when neither has one (the request is left alone).
+ * subagent's level for a nested spawn (routed, or a level its definition
+ * set), else the main thread's level in use; undefined when neither has one
+ * (the request is left alone).
  */
 export function parentLevel(state: RouterState, agents: ReadonlyMap<string, RoutedAgent>, parentAgentId?: string): Level | undefined {
-  return (parentAgentId !== undefined ? agents.get(parentAgentId)?.level : undefined) ?? appliedLevel(state)
+  const parent = parentAgentId !== undefined ? agents.get(parentAgentId)?.level : undefined
+  return isLevel(parent) ? parent : appliedLevel(state)
 }
 
 /** Why subagents are or are not routed, for `/route status`. */
@@ -530,7 +614,7 @@ export function subagentReport(status: SubagentStatus, shown = 10): string[] {
   lines.push(`Routed subagents this session: ${status.agents.length}${status.agents.length > recent.length ? ` (newest ${recent.length} shown)` : ''}.`)
   for (const agent of recent) {
     const description = cut(agent.description.replace(/\s+/g, ' ').trim() || '(no description)', 60).replace(/… \[\d+ more chars\]$/, '…')
-    lines.push(`  ${agent.level}: ${description} (${agent.subagentType || 'agent'}) — ${agent.reason}`)
+    lines.push(`  ${agent.level}${agent.byDefinition ? ' (set by its definition)' : ''}: ${description} (${agent.subagentType || 'agent'}) — ${agent.reason}`)
   }
   return lines
 }

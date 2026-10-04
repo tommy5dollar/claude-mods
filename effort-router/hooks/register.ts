@@ -1,6 +1,7 @@
 import type { AgentSpawnInput, EngineInterface, On, PluginOptions } from 'claude-code'
 
 import {
+  type AgentDefinition,
   type ComposedRules,
   type ReadDiagnostics,
   type TranscriptMessage,
@@ -13,11 +14,13 @@ import {
   LEVEL_COLOR,
   STARTER_RULES,
   afterBudget,
+  agentFileDefinition,
   appliedLevel,
   classifierPrompt,
   classifierSystem,
   composeRules,
   critiquePrompt,
+  definitionFor,
   footerLabel,
   bandActions,
   bandHeadline,
@@ -36,6 +39,7 @@ import {
   restored,
   routeReport,
   ruleLayers,
+  settingsAgentDefinitions,
   settingsRulesOf,
   renderTranscript,
   firstSighting,
@@ -57,7 +61,7 @@ import {
  *
  * Subagents are routed apart: each spawn waits for one read of its own brief
  * and its requests carry that level (forks, and failed reads, take the
- * parent's level).
+ * parent's level). An agent whose own definition sets an effort is left to it.
  *
  * Fail open everywhere: any error leaves the request at the picker's effort.
  */
@@ -111,6 +115,8 @@ type Session = {
   sent?: ReadDiagnostics['sent']
   /** Routed subagents by agentId, oldest first (memory only: a resume starts empty). */
   agents: Map<string, RoutedAgent>
+  /** The user's and project's agent definitions, scanned once per session. */
+  definitions?: Promise<AgentDefinition[]>
 }
 
 /** What one read sees beyond the stored transcript. */
@@ -264,14 +270,15 @@ async function readText($: EngineInterface, path: string): Promise<string | unde
   }
 }
 
-async function rulePaths($: EngineInterface): Promise<{ defaults: string; user?: string; project?: string }> {
+/** The path separator, and the home directory (undefined when neither variable is set). */
+async function homeOf($: EngineInterface): Promise<{ sep: string; homeDir?: string }> {
   const sep = $.plugin.root.includes('\\') ? '\\' : '/'
-  const [profile, home, root] = await Promise.all([
-    $.env.get('USERPROFILE').catch(() => undefined),
-    $.env.get('HOME').catch(() => undefined),
-    $.session.root().catch(() => undefined),
-  ])
-  const homeDir = sep === '\\' ? (profile ?? home) : (home ?? profile)
+  const [profile, home] = await Promise.all([$.env.get('USERPROFILE').catch(() => undefined), $.env.get('HOME').catch(() => undefined)])
+  return { sep, homeDir: sep === '\\' ? (profile ?? home) : (home ?? profile) }
+}
+
+async function rulePaths($: EngineInterface): Promise<{ defaults: string; user?: string; project?: string }> {
+  const [{ sep, homeDir }, root] = await Promise.all([homeOf($), $.session.root().catch(() => undefined)])
   return {
     defaults: `${$.plugin.root}${sep}rules${sep}default.md`,
     user: homeDir ? `${homeDir}${sep}.claude${sep}effort-router.md` : undefined,
@@ -510,6 +517,59 @@ async function suggestNow($: EngineInterface, id: string, session: Session, sett
 
 // --- subagents -----------------------------------------------------------------------
 
+/** The agent definition files in one `.claude/agents` folder; a missing folder or unreadable file is skipped. */
+async function agentFiles($: EngineInterface, dir: string, sep: string): Promise<AgentDefinition[]> {
+  const entries = await $.fs.list(dir).catch(() => [])
+  const files = entries.filter(entry => entry.kind !== 'dir' && /\.md$/i.test(entry.name)).map(entry => entry.name).sort()
+  const found = await Promise.all(
+    files.map(async name => {
+      const path = `${dir}${sep}${name}`
+      const text = await readText($, path)
+      return text === undefined ? undefined : agentFileDefinition(text, name, path)
+    }),
+  )
+  return found.filter((definition): definition is AgentDefinition => definition !== undefined)
+}
+
+/**
+ * Every agent definition the user and project hold, highest precedence first:
+ * policy settings' `agents`, the project's `.claude/agents/*.md` (the session's
+ * directory, then the project root), project settings' `agents`, the user's
+ * `~/.claude/agents/*.md`, then user settings' `agents`. Plugins' agents are
+ * not here (see definitionFor).
+ */
+async function loadDefinitions($: EngineInterface): Promise<AgentDefinition[]> {
+  const [{ sep, homeDir }, cwd, root, policy, project, user] = await Promise.all([
+    homeOf($),
+    $.session.cwd().catch(() => undefined),
+    $.session.root().catch(() => undefined),
+    settingsSource($, 'policy'),
+    settingsSource($, 'project'),
+    settingsSource($, 'user'),
+  ])
+  const agentsDir = (base: string) => `${base}${sep}.claude${sep}agents`
+  const projectDirs = [...new Set([cwd, root].filter((dir): dir is string => typeof dir === 'string' && dir !== ''))].map(agentsDir)
+  const [projectFiles, userFiles] = await Promise.all([
+    Promise.all(projectDirs.map(dir => agentFiles($, dir, sep))).then(lists => lists.flat()),
+    homeDir ? agentFiles($, agentsDir(homeDir), sep) : Promise.resolve([]),
+  ])
+  const all = [
+    ...settingsAgentDefinitions(policy, 'policy settings'),
+    ...projectFiles,
+    ...settingsAgentDefinitions(project, 'project settings'),
+    ...userFiles,
+    ...settingsAgentDefinitions(user, 'user settings'),
+  ]
+  $.ui.log(`effort-router: ${all.length} agent definitions found, ${all.filter(d => d.effort !== undefined).length} with their own effort`, { to: 'debug' })
+  return all
+}
+
+/** The session's agent definitions, scanned on first use; a failed scan counts as none. */
+function definitionsOf($: EngineInterface, session: Session): Promise<AgentDefinition[]> {
+  session.definitions ??= loadDefinitions($).catch(() => [])
+  return session.definitions
+}
+
 /** Whether subagents are routed now, and if not, why. */
 function subagentRouting(settings: Settings, session: Session): SubagentStatus['routing'] {
   if (!settings.routeSubagents) return 'setting'
@@ -519,16 +579,20 @@ function subagentRouting(settings: Settings, session: Session): SubagentStatus['
 
 /**
  * The level for a spawn, decided before it starts. A fork takes the parent's
- * level. Anything else waits (at most `classifyTimeoutMs`) for one read of its
- * own brief; a failed, late or unusable read takes the parent's level.
- * Undefined leaves the subagent's requests as they would have been.
+ * level. An agent whose definition sets an effort keeps it: no read, and
+ * `byDefinition` so its requests are left to the engine. Anything else waits
+ * (at most `classifyTimeoutMs`) for one read of its own brief; a failed, late
+ * or unusable read takes the parent's level. Undefined leaves the subagent's
+ * requests as they would have been.
  */
-async function routeSpawn($: EngineInterface, settings: Settings, session: Session, e: AgentSpawnInput): Promise<Proposal | undefined> {
+async function routeSpawn($: EngineInterface, settings: Settings, session: Session, e: AgentSpawnInput): Promise<Pick<RoutedAgent, 'level' | 'reason' | 'byDefinition'> | undefined> {
   const rules = await loadRules($) // also learns the org's routeSubagents
   if (!rules.routeSubagents) return undefined
   const inherited = parentLevel(session.state, session.agents, e.parentAgentId)
   const fallback = (why: string): Proposal | undefined => (inherited ? { level: inherited, reason: `${why}: the parent's level` } : undefined)
   if (e.fork) return fallback('fork')
+  const definition = definitionFor(e.subagentType, await definitionsOf($, session))
+  if (definition?.effort !== undefined) return { level: definition.effort, reason: `effort in ${definition.source}`, byDefinition: true }
   const read = async () =>
     $.model.complete({
       model: settings.classifierModel,
@@ -751,7 +815,7 @@ export function register(on: On, options: PluginOptions): void {
   // resolves with the id before the agent's first turn.step (verified live,
   // foreground and background), so its first request already carries it.
   on('agent.spawn', async ($, e, next) => {
-    let routed: { session: Session; proposal: Proposal; took: number } | undefined
+    let routed: { session: Session; proposal: Pick<RoutedAgent, 'level' | 'reason' | 'byDefinition'>; took: number } | undefined
     try {
       const { session } = await sessionOf($)
       if (subagentRouting(settings, session) === 'on') {
@@ -768,7 +832,7 @@ export function register(on: On, options: PluginOptions): void {
         const { session, proposal, took } = routed
         remember(session, result.agentId, { ...proposal, subagentType: e.subagentType, description: e.description })
         $.ui.log(
-          `effort-router: subagent ${result.agentId} (${e.subagentType}${e.fork ? ', fork' : ''}: ${e.description}) -> ${proposal.level} (${proposal.reason}) in ${took} ms`,
+          `effort-router: subagent ${result.agentId} (${e.subagentType}${e.fork ? ', fork' : ''}: ${e.description}) -> ${proposal.level}${proposal.byDefinition ? ' set by its definition, left alone' : ''} (${proposal.reason}) in ${took} ms`,
           { to: 'debug' },
         )
       }
@@ -778,15 +842,15 @@ export function register(on: On, options: PluginOptions): void {
     return result
   })
 
-  // Every model request: a routed subagent's own level; otherwise (the main
-  // loop, and subagents the router did not route) the main level in use, or
-  // the request untouched.
+  // Every model request: a routed subagent's own level; a subagent whose
+  // definition sets its effort, untouched; otherwise (the main loop, and
+  // subagents the router did not route) the main level in use, or untouched.
   on('turn.step', async function* ($, e, next) {
     let effort = e.effort
     try {
       const { session } = await sessionOf($)
       const own = e.agentId !== undefined && subagentRouting(settings, session) === 'on' ? session.agents.get(e.agentId) : undefined
-      const level = own?.level ?? appliedLevel(session.state)
+      const level = own ? (own.byDefinition ? undefined : own.level) : appliedLevel(session.state)
       if (e.agentId === undefined && session.baseline === undefined && isLevel(e.effort) && session.pendingSync === undefined && level === undefined) {
         session.baseline = e.effort
       }

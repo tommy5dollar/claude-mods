@@ -3,14 +3,16 @@
 ## Automated
 
 ```
-bun test                            # 73 tests: trimming (incl. the last assistant message kept long and AskUserQuestion
+bun test                            # 79 tests: trimming (incl. the last assistant message kept long and AskUserQuestion
                                     # questions and answers kept), the classifier input cap (first prompt, then human lines
                                     # before assistant text), reply parsing (incl. fenced json), the classifier frame,
                                     # $defaults layering, settings layers, /route grammar and hints, state: provisional
                                     # (apply), re-reads, Keep/Revert, budget locking, first sighting, status diagnostics;
                                     # subagents: the frame and contract, the brief prompt and its head-and-tail cap, reply
-                                    # parsing (no undecided), the parent's level, user-off vs router-off, the status list
-claude plugin test .                # 34 tests in the engine's kit, among them: the read finishes before prompt.submit goes on
+                                    # parsing (no undecided), the parent's level, user-off vs router-off, the status list;
+                                    # agent definitions: frontmatter, effort values, name over file name, settings agents,
+                                    # first definition wins, plugin agents skipped
+claude plugin test .                # 40 tests in the engine's kit, among them: the read finishes before prompt.submit goes on
                                     # and turn.step index 0 carries the level (main loop and subagent); a re-read changes the
                                     # provisional level and reopens the band; Keep locks and syncs /effort; Revert restores the
                                     # picker level and turns off; budget exhaustion locks with a log line; a classifier that
@@ -22,8 +24,10 @@ claude plugin test .                # 34 tests in the engine's kit, among them: 
                                     # inherit; a throwing, hanging or unusable read falls back to the parent's level, a nested
                                     # one via parentAgentId; routeSubagents false; an existing session still routes them,
                                     # /route off stops it (and /route on brings it back); org routeSubagents false; a denied
-                                    # spawn is not kept
-"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 34 under Desktop's engine
+                                    # spawn is not kept; a user definition with effort gets no read and its requests are left
+                                    # alone; a project definition wins over a user one; a definition without effort is routed;
+                                    # a file is matched by its name: (not file name); settings agents; plugin agents routed
+"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 40 under Desktop's engine
 claude plugin validate . --strict
 bun run eval -- --runs 3            # opt-in, real model: 22 session fixtures and 14 subagent briefs, see below
 ```
@@ -93,6 +97,7 @@ Run `claude --plugin-dir D:/code/mods/effort-router --model sonnet --debug-file 
 4. Clarify: if Claude asks complex-or-simple, answer "2" (simple). Before that turn runs the band opens again with `Using low — ...` and the footer reads `low?`. `grep "read settled" router.log` shows each read and its time.
 5. Press `1` (Keep) in the empty prompt. The band disappears, the transcript shows `effort locked: low 🔒 (router: ...) · /route status`, the footer reads `low 🔒`, and in the terminal a `/effort low` line appears at turn end. No more `read settled` lines follow.
 6. Subagents: ask for something that launches two subagents, one mechanical ("search the codebase for every use of X") and one open-ended ("then have an agent fix the bug it finds"). `grep "effort-router: subagent " router.log` shows one line per launch with its level and reason (for example `-> low (codebase search)`), and `grep "agent=" router.log` shows each subagent's steps at its own level from `index=0`, while the main thread stays at the locked level. `/route status` lists both under `Routed subagents this session`. Then `/route off` and launch another: no `subagent` line, and its steps go out at the picker's level.
+   Definitions (0.7.1): with `~/.claude/agents/effort-probe-low.md` carrying `effort: low` and the router on, launch `effort-probe-low` with an open-ended brief. The debug log shows `-> low set by its definition, left alone` and no `subagent classifier said` line, the agent's steps log `low -> low` (the engine's level, untouched), and `/route status` lists it as `low (set by its definition)`. Verified before the fix (0.7.0 live, 2026-10-04): the engine honours a file definition's `effort:` (ran at low with the session at medium and the router off), and 0.7.0 would have overridden it.
 7. Manual switch: `/route this is now a security review`. The band opens with `Effort router: low 🔒 → max? — switch to max: ...` and `1: Accept max  2: Keep low  3: Turn off  x: Close`; the footer reads `low 🔒 → max?`. Press `2` with the band focused (ctrl+x tab), or accept.
 8. Revert: in a fresh session, give a task, then press `2: Revert to picker`. The footer reads `off` (dim) and the next steps log `<picker> -> <picker>`. Press the footer, then `Turn on`: back to `deciding`.
 9. Budget: in a fresh session, give a task and keep chatting without pressing Keep. After the sixth prompt the transcript shows `effort locked: high 🔒 (kept after 6 prompts; router: ...)`. In another fresh session send six filler prompts: the footer reads `off` and `/route status` says `no clear task after 6 prompts — /route to ask again`.

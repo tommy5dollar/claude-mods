@@ -38,6 +38,11 @@ import {
   questionText,
   ago,
   SUBAGENT_CONTRACT,
+  agentFileDefinition,
+  definitionEffort,
+  definitionFor,
+  frontmatterOf,
+  settingsAgentDefinitions,
   SUBAGENT_FRAME,
   capBrief,
   parentLevel,
@@ -587,5 +592,67 @@ describe('subagent reads', () => {
   test("the organisation's routeSubagents is read from settings", () => {
     expect(settingsRulesOf({ pluginConfigs: { 'effort-router@tommy-mods': { options: { routeSubagents: false } } } })).toEqual({ routeSubagents: false })
     expect(settingsRulesOf({ effortRouter: { routeSubagents: 'no' } })).toEqual({})
+  })
+})
+
+describe('agent definitions that set their own effort', () => {
+  test('frontmatter: top-level key/value pairs, unquoted; none without a leading --- block', () => {
+    const text = '---\nname: "effort-probe-low"\ndescription: Temporary test agent: low\neffort: low # in the definition\ntools:\n  - Read\n---\n\nBody with effort: max\n'
+    expect(frontmatterOf(text)).toEqual({ name: 'effort-probe-low', description: 'Temporary test agent: low', effort: 'low' })
+    expect(frontmatterOf('---\r\nname: x\r\neffort: high\r\n---\r\n')).toEqual({ name: 'x', effort: 'high' })
+    expect(frontmatterOf('﻿---\nname: x\n---')).toEqual({ name: 'x' })
+    expect(frontmatterOf('# no frontmatter\nname: x')).toBeUndefined()
+    expect(frontmatterOf('intro\n---\nname: x\n---')).toBeUndefined()
+  })
+
+  test('an effort counts when it is a level or a positive number', () => {
+    expect(definitionEffort('low')).toBe('low')
+    expect(definitionEffort(' XHigh ')).toBe('xhigh')
+    expect(definitionEffort("'max'")).toBe('max')
+    expect(definitionEffort(32000)).toBe(32000)
+    expect(definitionEffort('2048')).toBe(2048)
+    for (const value of ['', 'inherit', 'very high', '0', 0, -1, null, undefined, true]) expect(definitionEffort(value)).toBeUndefined()
+  })
+
+  test('a definition file is named by its frontmatter name, else its file name', () => {
+    expect(agentFileDefinition('---\nname: effort-probe-low\neffort: low\n---\n', 'probe.md', 'u/probe.md')).toEqual({ name: 'effort-probe-low', effort: 'low', source: 'u/probe.md' })
+    expect(agentFileDefinition('---\ndescription: d\n---\n', 'Scout.md', 'p')).toEqual({ name: 'Scout', source: 'p' })
+    expect(agentFileDefinition('---\nname: x\neffort: whatever\n---\n', 'x.md', 'p')).toEqual({ name: 'x', source: 'p' })
+    expect(agentFileDefinition('just notes', 'notes.md', 'p')).toBeUndefined()
+  })
+
+  test("a settings source's agents key: an object by name or a list of named specs", () => {
+    expect(settingsAgentDefinitions({ agents: { auditor: { prompt: 'p', effort: 'xhigh' }, helper: { prompt: 'p' }, bad: 'x' } }, 'user settings')).toEqual([
+      { name: 'auditor', effort: 'xhigh', source: 'user settings' },
+      { name: 'helper', source: 'user settings' },
+    ])
+    expect(settingsAgentDefinitions({ agents: [{ name: 'a', effort: 'low' }, { effort: 'high' }] }, 'policy')).toEqual([{ name: 'a', effort: 'low', source: 'policy' }])
+    expect(settingsAgentDefinitions({}, 's')).toEqual([])
+    expect(settingsAgentDefinitions(undefined, 's')).toEqual([])
+  })
+
+  test('the first definition with the name wins, effort or not; plugin agents are never matched', () => {
+    const definitions = [
+      { name: 'scout', source: 'project' },
+      { name: 'reviewer', effort: 'max' as const, source: 'project' },
+      { name: 'scout', effort: 'low' as const, source: 'user' },
+      { name: 'probe-low', effort: 'low' as const, source: 'user' },
+    ]
+    expect(definitionFor('scout', definitions)).toEqual({ name: 'scout', source: 'project' })
+    expect(definitionFor('reviewer', definitions)?.effort).toBe('max')
+    expect(definitionFor('general-purpose', definitions)).toBeUndefined()
+    expect(definitionFor('subagent-probe:probe-low', definitions)).toBeUndefined()
+  })
+
+  test('status marks a level set by a definition; a nested spawn inherits only a level', () => {
+    const lines = subagentReport({ routing: 'on', agents: [{ level: 'low', reason: 'effort in u/probe.md', subagentType: 'probe', description: 'Probe', byDefinition: true }] })
+    expect(lines.at(-1)).toBe('  low (set by its definition): Probe (probe) — effort in u/probe.md')
+    const agents = new Map([
+      ['a', { level: 'low' as const, reason: 'r', subagentType: 't', description: 'd', byDefinition: true }],
+      ['b', { level: 32000, reason: 'r', subagentType: 't', description: 'd', byDefinition: true }],
+    ])
+    const provisional = withReading(freshState(), { level: 'high', reason: 'bug fix' }, true)
+    expect(parentLevel(provisional, agents, 'a')).toBe('low')
+    expect(parentLevel(provisional, agents, 'b')).toBe('high')
   })
 })

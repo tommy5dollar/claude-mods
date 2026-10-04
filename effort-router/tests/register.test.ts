@@ -49,23 +49,38 @@ type World = {
   spawned: Record<string, unknown>[]
   /** Set: the engine refuses spawns with this reason. */
   denySpawn?: string
+  /** Files `$.fs` sees, by path with forward slashes (backslashes are folded). */
+  files: Record<string, string>
 }
+
+/** `$.fs` paths with forward slashes and no drive (the kit resolves `/repo` to `D:\repo` on Windows). */
+const slashed = (path: string): string => path.replace(/\\/g, '/').replace(/^[A-Za-z]:\//, '/')
 
 /** Answers every `$` call the mod makes, beneath it. */
 function worldOf(on: On, reply = BUG_REPLY, sources: Record<string, unknown> = {}, env: Record<string, string> = {}): World {
   const clock = mock.clock(on)
   const world: World = {
     sent: [], efforts: [], lines: [], debug: [], classifierCalls: 0, reply, messages: [], prompts: [], toasts: [], clock, callsAtSubmit: [],
-    subagentReply: SEARCH_REPLY, subagentReads: [], spawned: [],
+    subagentReply: SEARCH_REPLY, subagentReads: [], spawned: [], files: {},
   }
   mock.store(on)
   mock.env(on, env)
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'session-1' }))
   on('session.root', () => ({ value: '/repo' }))
+  on('session.cwd', () => ({ value: '/repo' }))
   on('session.messages', () => ({ value: world.messages as never }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
-  on('fs.read', () => ({ deny: 'ENOENT' }))
+  on('fs.read', ($, e) => {
+    const text = world.files[slashed(e.path)]
+    return text === undefined ? { deny: 'ENOENT' } : { value: text }
+  })
+  on('fs.list', ($, e) => {
+    const dir = `${slashed(e.path).replace(/\/$/, '')}/`
+    const names = Object.keys(world.files).filter(path => path.startsWith(dir) && !path.slice(dir.length).includes('/'))
+    if (names.length === 0) return { deny: 'ENOENT' }
+    return { value: names.map(path => ({ name: path.slice(dir.length), kind: 'file' as const, size: 1, mtimeMs: 0, isLink: false })) }
+  })
   on('model.complete', async ($, e) => {
     const subagent = e.prompt.startsWith('Agent type:')
     const reply = subagent ? world.subagentReply : world.reply
@@ -760,6 +775,83 @@ describe('effort-router', () => {
       expect(result.deny).toBe('no agents here')
       expect(world.subagentReads).toHaveLength(1)
       expect(await route($, 'status')).not.toContain('Routed subagents')
+    })
+  })
+
+  describe("subagents whose definition sets an effort", () => {
+    const HOME = { HOME: '/home/t', USERPROFILE: '/home/t' }
+    const def = (name: string, effort?: string) =>
+      `---\nname: ${name}\ndescription: test agent\n${effort ? `effort: ${effort}\n` : ''}tools: Read, Grep\n---\n\nYou are a test agent.\n`
+
+    test('a user definition with effort: no read, requests left to the engine, status says so', async ($, on) => {
+      const world = worldOf(on, BUG_REPLY, {}, HOME)
+      world.files['/home/t/.claude/agents/effort-probe-low.md'] = def('effort-probe-low', 'low')
+      await $.session.start(STARTED)
+      await submit($, 'fix the crash in the parser') // main: high
+      const id = await spawn($, { subagentType: 'effort-probe-low', description: 'Probe', prompt: 'implement the whole billing system' })
+      expect(world.subagentReads).toHaveLength(0)
+      await step($, 0, id)
+      await step($, 0)
+      expect(world.sent).toEqual(['medium', 'high']) // untouched (the engine applies low); the main thread keeps high
+      const status = await route($, 'status')
+      expect(status).toContain('  low (set by its definition): Probe (effort-probe-low) — effort in /home/t')
+      expect(world.debug.some(line => /subagent agent-1 \(effort-probe-low: Probe\) -> low set by its definition, left alone/.test(line))).toBe(true)
+    })
+
+    test('a project definition wins over a user one, with or without an effort', async ($, on) => {
+      const world = worldOf(on, BUG_REPLY, {}, HOME)
+      world.files['/home/t/.claude/agents/reviewer.md'] = def('reviewer', 'low')
+      world.files['/repo/.claude/agents/reviewer.md'] = def('reviewer', 'max')
+      world.files['/home/t/.claude/agents/scout.md'] = def('scout', 'xhigh')
+      world.files['/repo/.claude/agents/scout.md'] = def('scout')
+      await $.session.start(STARTED)
+      await spawn($, { subagentType: 'reviewer', description: 'Review', prompt: 'review it' })
+      expect(world.subagentReads).toHaveLength(0)
+      expect(await route($, 'status')).toContain('  max (set by its definition): Review (reviewer)')
+      const scout = await spawn($, { subagentType: 'scout', description: 'Scout', prompt: 'search for X' })
+      expect(world.subagentReads).toHaveLength(1) // the project's scout sets no effort: routed
+      await step($, 0, scout)
+      expect(world.sent).toEqual(['low'])
+    })
+
+    test('a definition without an effort is routed as usual', async ($, on) => {
+      const world = worldOf(on, BUG_REPLY, {}, HOME)
+      world.files['/home/t/.claude/agents/searcher.md'] = def('searcher')
+      await $.session.start(STARTED)
+      const id = await spawn($, { subagentType: 'searcher', prompt: 'search for X' })
+      expect(world.subagentReads).toHaveLength(1)
+      await step($, 0, id)
+      expect(world.sent).toEqual(['low'])
+    })
+
+    test("a file is matched by its frontmatter name, not its file name; definitions are scanned once", async ($, on) => {
+      const world = worldOf(on, BUG_REPLY, {}, HOME)
+      world.files['/home/t/.claude/agents/probe.md'] = def('effort-probe-low', 'low')
+      await $.session.start(STARTED)
+      await spawn($, { subagentType: 'effort-probe-low', prompt: 'anything' })
+      expect(world.subagentReads).toHaveLength(0)
+      world.files['/home/t/.claude/agents/probe-two.md'] = def('probe', 'high') // after the scan: not seen this session
+      await spawn($, { subagentType: 'probe', prompt: 'search for X' })
+      expect(world.subagentReads).toHaveLength(1) // "probe" is only a file name: routed
+    })
+
+    test("an effort in a settings source's agents key is respected", async ($, on) => {
+      const sources = { user: { agents: { auditor: { description: 'audits', prompt: 'audit', effort: 'xhigh' } } } }
+      const world = worldOf(on, BUG_REPLY, sources, HOME)
+      await $.session.start(STARTED)
+      const id = await spawn($, { subagentType: 'auditor', description: 'Audit', prompt: 'audit it' })
+      expect(world.subagentReads).toHaveLength(0)
+      await step($, 0, id)
+      expect(world.sent).toEqual(['medium'])
+      expect(await route($, 'status')).toContain('  xhigh (set by its definition): Audit (auditor) — effort in user settings')
+    })
+
+    test("a plugin's agent is not looked up: it is routed", async ($, on) => {
+      const world = worldOf(on, BUG_REPLY, {}, HOME)
+      world.files['/home/t/.claude/agents/probe-low.md'] = def('probe-low', 'low')
+      await $.session.start(STARTED)
+      await spawn($, { subagentType: 'subagent-probe:probe-low', prompt: 'search for X' })
+      expect(world.subagentReads).toHaveLength(1)
     })
   })
 })

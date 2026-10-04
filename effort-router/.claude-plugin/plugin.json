@@ -1,6 +1,6 @@
 {
   "name": "effort-router",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Reads the conversation before each prompt runs until the task is clear (a Haiku read against Anthropic's 'Spending your effort' guidance and your own rules) and puts a reasoning-effort level in use for every request at once; Keep locks it, Revert hands back to the picker. /route runs it on demand, optionally with a hint. Each subagent gets its own level from a read of its brief at spawn. The footer shows the state (deciding, high?, high 🔒, off) and is a button that opens the router's band above the prompt.",
   "author": {
     "name": "Tommy Long"
@@ -67,7 +67,7 @@
     "routeSubagents": {
       "type": "boolean",
       "title": "Route subagents",
-      "description": "Give each subagent its own level from a read of its brief when it starts (searches and lookups low, implementing, debugging and review high); a fork, or a failed read, takes the parent's level. Off: subagents run at the session's level. /route off also stops it.",
+      "description": "Give each subagent its own level from a read of its brief when it starts (searches and lookups low, implementing, debugging and review high); a fork, or a failed read, takes the parent's level. An agent whose own definition (a user or project agents file, or settings) sets an effort keeps it. Off: subagents run at the session's level. /route off also stops it.",
       "required": false,
       "default": true
     },
