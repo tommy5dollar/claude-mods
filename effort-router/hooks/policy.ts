@@ -36,28 +36,64 @@ Judge the task as it stands now:
 - Read short replies against the question they answer. If the assistant asked "1. full rewrite or 2. minimal patch?" and the user replied "2", the task is the minimal patch. Answers to the assistant's multiple-choice questions appear as "ASSISTANT asked:" then "USER answered:"; they are the user's words about the task.
 - If a user hint is given, the user asked for this routing explicitly: weigh the hint strongly.
 
+How sure you are:
+- Give a confidence from 0 to 1: how likely it is that this level stays right for the work from here. The router only acts on a level you are confident in, and otherwise asks you again after the next message, so be honest rather than decisive.
+- 0.9 or more: the task, and what makes it easy or hard, is clear, and more conversation is unlikely to move the level.
+- 0.6 to 0.8: the task is stated, but its scope, its risk or the code it touches could still move it a level.
+- Below 0.6: a guess.
+
 Worked examples (transcript, then the reply):
 1. USER: hi → {"decision":"undecided"}
 2. USER: pull the latest code → {"decision":"undecided"}
 3. USER: what's in this repo? / ASSISTANT: A Next.js storefront with a Postgres backend. → {"decision":"undecided"}
-4. USER: pull latest code / ASSISTANT: Pulled, 3 new commits. / USER: implement for me a new finance solution pulling from multiple accountancy platforms → {"decision":"lock","level":"high","reason":"new multi-platform finance integration build"} (money, reconciliation and several external APIs: edge cases, even though the details are not settled yet)
-5. USER: add a dark mode toggle to the settings page → {"decision":"lock","level":"medium","reason":"regular feature work"}
-6. USER: the checkout total is wrong when a coupon expires mid-session, fix it → {"decision":"lock","level":"high","reason":"bug fix in existing code"}
-7. USER: refactor the payment retry logic / ASSISTANT: 1. a full rewrite with a state machine or 2. just extract the backoff constant? / USER: 2, keep it simple → {"decision":"lock","level":"low","reason":"small constant extraction"}
-8. USER: build a sync job for our invoices / ASSISTANT asked: Which platforms? [options: Xero | QuickBooks | Sage] / USER answered: Xero and QuickBooks, nightly, EU data residency → {"decision":"lock","level":"high","reason":"multi-platform invoice sync"}
-9. USER: rename getUser to fetchUser across the repo → {"decision":"lock","level":"low","reason":"mechanical rename"}
-10. USER: find security vulnerabilities in our auth service and fix them, work through it on your own, I'm away all day → {"decision":"lock","level":"max","reason":"autonomous security vulnerability hunt"}
+4. USER: pull latest code / ASSISTANT: Pulled, 3 new commits. / USER: implement for me a new finance solution pulling from multiple accountancy platforms → {"decision":"level","level":"high","confidence":0.7,"reason":"new multi-platform finance integration build"} (money, reconciliation and several external APIs: edge cases. The details are not settled yet, so the level may still move)
+5. USER: add a dark mode toggle to the settings page → {"decision":"level","level":"medium","confidence":0.8,"reason":"regular feature work"}
+6. USER: the checkout total is wrong when a coupon expires mid-session, fix it → {"decision":"level","level":"high","confidence":0.9,"reason":"bug fix in existing code"}
+7. USER: refactor the payment retry logic / ASSISTANT: 1. a full rewrite with a state machine or 2. just extract the backoff constant? / USER: 2, keep it simple → {"decision":"level","level":"low","confidence":0.9,"reason":"small constant extraction"}
+8. USER: build a sync job for our invoices / ASSISTANT asked: Which platforms? [options: Xero | QuickBooks | Sage] / USER answered: Xero and QuickBooks, nightly, EU data residency → {"decision":"level","level":"high","confidence":0.85,"reason":"multi-platform invoice sync"}
+9. USER: rename getUser to fetchUser across the repo → {"decision":"level","level":"low","confidence":0.95,"reason":"mechanical rename"}
+10. USER: find security vulnerabilities in our auth service and fix them, work through it on your own, I'm away all day → {"decision":"level","level":"max","confidence":0.9,"reason":"autonomous security vulnerability hunt"}
 
 Apply these routing rules. Later rules override earlier ones where they conflict:`
 
 export const CLASSIFIER_CONTRACT = `Reply with exactly one JSON object and nothing else:
 {"decision":"undecided"}
 or
-{"decision":"lock","level":"<low|medium|high|xhigh|max>","reason":"<what the task is, 3-8 words, e.g. bug fix in existing code>"}`
+{"decision":"level","level":"<low|medium|high|xhigh|max>","confidence":<0 to 1>,"reason":"<what the task is, 3-8 words, e.g. bug fix in existing code>"}`
 
-/** The classifier's whole system prompt around the composed rules. */
-export const classifierSystem = (rules: string): string =>
-  `${CLASSIFIER_FRAME}\n\n<rules>\n${rules.trim()}\n</rules>\n\n${CLASSIFIER_CONTRACT}`
+/** What effort means on the session's model: its name and the notes in `rules/models/`. */
+export type ModelNotes = { name: string; notes: string }
+
+const modelBlock = (model?: ModelNotes): string =>
+  model && model.notes.trim() !== ''
+    ? `\n\nThe session runs on ${model.name}. How effort behaves on this model (weigh it when you pick the level):\n<model_notes>\n${model.notes.trim()}\n</model_notes>`
+    : ''
+
+/** The classifier's whole system prompt around the composed rules, with the session model's notes when there are any. */
+export const classifierSystem = (rules: string, model?: ModelNotes): string =>
+  `${CLASSIFIER_FRAME}\n\n<rules>\n${rules.trim()}\n</rules>${modelBlock(model)}\n\n${CLASSIFIER_CONTRACT}`
+
+/**
+ * The one message a check sends into a fork of the session (`$.model.fork`):
+ * the whole conversation as the session's model last saw it, its own system
+ * prompt, CLAUDE.md and memory included, then this. A fork replays the last
+ * request, which does not hold the reply it produced, so that reply comes
+ * along here, as does the prompt being submitted.
+ */
+export function forkPrompt(input: { rules: string; model?: ModelNotes; current?: string; lastReply?: string; hint?: string }): string {
+  const parts = [
+    'Pause the task for a moment. Do not use any tools and do not carry on with the work: answer only the question below.',
+    classifierSystem(input.rules, input.model),
+  ]
+  const lastReply = input.lastReply?.trim()
+  if (lastReply) parts.push(`Your last reply in this conversation, which is not shown above:\n<last_reply>\n${lastReply}\n</last_reply>`)
+  const current = input.current?.trim()
+  if (current) parts.push(`The user has just sent this new message, and the work goes on from it:\n<new_message>\n${current}\n</new_message>`)
+  const hint = input.hint?.trim()
+  if (hint) parts.push(`<user_hint>\n${hint}\n</user_hint>\nThe user asked for this routing explicitly and gave this hint; weigh it strongly.`)
+  parts.push("The transcript is this conversation: everything above, with your instructions, CLAUDE.md and memory. Suggest the session's effort level now; answer undecided only if no actionable task has been stated yet. JSON only.")
+  return parts.join('\n\n')
+}
 
 // --- rule files and their composition ---------------------------------------------
 
@@ -364,32 +400,51 @@ export function humanPromptCount(messages: readonly TranscriptMessage[]): number
 }
 
 /**
- * The state for a session the router first sees with prompts already in it:
- * those prompts count toward the budget. A session already past the budget is
- * left alone (off; idle deciding when the organisation keeps the router on).
+ * Roughly how many tokens the conversation holds: its messages, tool calls
+ * and tool results, at four characters a token. Not the system prompt or the
+ * tool definitions, which every session carries.
  */
-export function firstSighting(prior: number, decideWithin: number, allowOff: boolean): RouterState {
+export function conversationTokens(messages: readonly TranscriptMessage[]): number {
+  let chars = 0
+  for (const message of messages) {
+    chars += (message.text ?? '').length
+    for (const use of message.toolUses ?? []) chars += (use.text ?? '').length + JSON.stringify(use.input ?? '').length
+  }
+  return Math.round(chars / 4)
+}
+
+/**
+ * The state for a session the router first sees with prompts already in it:
+ * those prompts count toward the budget. A session already past the budget,
+ * or already longer than `size.limit` tokens, is left alone (off; idle
+ * deciding when the organisation keeps the router on).
+ */
+export function firstSighting(prior: number, decideWithin: number, allowOff: boolean, size?: { tokens: number; limit: number }): RouterState {
   const state = { ...freshState(), prompts: prior }
-  if (prior < decideWithin) return state
+  const tooLong = size !== undefined && size.limit > 0 && size.tokens > size.limit
+  if (prior < decideWithin && !tooLong) return state
   const offReason = 'session started before the router'
   return allowOff ? { ...state, mode: 'picker', gaveUp: true, offReason } : { ...state, gaveUp: true, offReason }
 }
 
 /**
- * The user message sent to the classifier. A manual `/route <hint>` adds the
- * hint after the transcript.
+ * The user message sent to the classifier. The session's instructions
+ * (CLAUDE.md files, rules, memory) come first when known; a manual
+ * `/route <hint>` adds the hint after the transcript.
  */
-export const classifierPrompt = (transcript: string, hint?: string): string => {
+export const classifierPrompt = (transcript: string, hint?: string, instructions?: string): string => {
   const said = hint?.trim()
   const hintBlock = said ? `\n\n<user_hint>\n${said}\n</user_hint>\nThe user asked for this routing explicitly and gave this hint; weigh it strongly.` : ''
-  return `Transcript so far (oldest first):\n<transcript>\n${transcript}\n</transcript>${hintBlock}\n\nSuggest the session's effort level now; answer undecided only if no actionable task has been stated yet. JSON only.`
+  const given = instructions?.trim()
+  const instructionsBlock = given ? `The session's instructions (CLAUDE.md files, rules and memory), as its model sees them:\n<instructions>\n${given}\n</instructions>\n\n` : ''
+  return `${instructionsBlock}Transcript so far (oldest first):\n<transcript>\n${transcript}\n</transcript>${hintBlock}\n\nSuggest the session's effort level now; answer undecided only if no actionable task has been stated yet. JSON only.`
 }
 
 // --- parsing the classifier's reply ---------------------------------------------
 
 export type Decision =
   | { decision: 'undecided' }
-  | { decision: 'lock'; level: Level; reason: string }
+  | { decision: 'lock'; level: Level; reason: string; confidence?: number }
 
 /**
  * Reads the classifier's reply: the first `{...}` in it, so a reply fenced
@@ -399,7 +454,7 @@ export type Decision =
  */
 export function parseDecision(reply: string | undefined | null): Decision {
   const record = jsonObjectOf(reply)
-  if (!record || (record.decision !== 'lock' && record.decision !== 'suggest')) return { decision: 'undecided' }
+  if (!record || (record.decision !== 'level' && record.decision !== 'lock' && record.decision !== 'suggest')) return { decision: 'undecided' }
   const proposal = proposalOf(record)
   return proposal ? { decision: 'lock', ...proposal } : { decision: 'undecided' }
 }
@@ -416,12 +471,64 @@ function jsonObjectOf(reply: string | undefined | null): Record<string, unknown>
   }
 }
 
-/** A reply's level (case-insensitive) and reason (capped); undefined for an unknown level. */
+/** A reply's level (case-insensitive), reason (capped) and confidence; undefined for an unknown level. */
 function proposalOf(record: Record<string, unknown>): Proposal | undefined {
   const level = typeof record.level === 'string' ? record.level.trim().toLowerCase() : undefined
   if (!isLevel(level)) return undefined
   const reason = typeof record.reason === 'string' ? record.reason.replace(/\s+/g, ' ').trim() : ''
-  return { level, reason: reason === '' ? 'classifier' : cut(reason, 60).replace(/… \[\d+ more chars\]$/, '…') }
+  const proposal: Proposal = { level, reason: reason === '' ? 'classifier' : cut(reason, 60).replace(/… \[\d+ more chars\]$/, '…') }
+  const confidence = confidenceOf(record.confidence)
+  return confidence === undefined ? proposal : { ...proposal, confidence }
+}
+
+/** A confidence from 0 to 1. A percentage (1 to 100) is read as one; anything else is undefined. */
+export function confidenceOf(value: unknown): number | undefined {
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value.replace(/%$/, '')) : NaN
+  if (!Number.isFinite(n) || n < 0) return undefined
+  if (n <= 1) return n
+  return n <= 100 ? n / 100 : undefined
+}
+
+/** Whether a check is sure enough to act on. A reply with no confidence is not. A threshold of 0 acts on any level. */
+export const isConfident = (proposal: Proposal, threshold: number): boolean => threshold <= 0 || (proposal.confidence ?? 0) >= threshold
+
+/** `72%`. */
+export const percent = (confidence: number): string => `${Math.round(confidence * 100)}%`
+
+// --- supported models ---------------------------------------------------------------
+
+/**
+ * The models the router supports: the current generation, each with a notes
+ * file in `rules/models/` on what effort means there. On any other model the
+ * router stands aside, because its rules and notes were written for these
+ * levels. A new model needs a new version of the plugin.
+ */
+export type SupportedModel = { id: string; alias: string; name: string; notesFile: string }
+
+export const SUPPORTED_MODELS: readonly SupportedModel[] = [
+  { id: 'claude-fable-5-1', alias: 'fable', name: 'Fable 5.1', notesFile: 'fable-5-1.md' },
+  { id: 'claude-opus-5-5', alias: 'opus', name: 'Opus 5.5', notesFile: 'opus-5-5.md' },
+  { id: 'claude-sonnet-5-5', alias: 'sonnet', name: 'Sonnet 5.5', notesFile: 'sonnet-5-5.md' },
+]
+
+/** `Fable 5.1, Opus 5.5 and Sonnet 5.5`. */
+export const SUPPORTED_NAMES = SUPPORTED_MODELS.map(m => m.name).join(', ').replace(/, ([^,]*)$/, ' and $1')
+
+/** The supported model a model id or alias names (`claude-opus-5-5`, `claude-opus-5-5[1m]`, `opus`, a cloud provider's id), or undefined. */
+export function supportedModel(model: string | undefined): SupportedModel | undefined {
+  if (!model) return undefined
+  const id = model.toLowerCase().replace(/\[[^\]]*\]$/, '').trim()
+  return SUPPORTED_MODELS.find(m => id === m.alias || id.includes(m.id))
+}
+
+/** A model's name as people say it: `Opus 5.5`, `Haiku 4.5`; the id itself when it is not a Claude id. */
+export function modelName(model: string | undefined): string {
+  if (!model) return 'this model'
+  const known = supportedModel(model)
+  if (known) return known.name
+  const match = model.toLowerCase().match(/claude-([a-z]+)-(\d+)(?:-(\d{1,2})(?!\d))?/)
+  if (!match?.[1] || !match[2]) return model
+  return `${match[1].charAt(0).toUpperCase()}${match[1].slice(1)} ${match[2]}${match[3] ? `.${match[3]}` : ''}`
 }
 
 // --- subagents --------------------------------------------------------------------
@@ -689,10 +796,43 @@ export type SpendRow = {
   input: number
 }
 
-/** The router's own reads (the classifier model), per UTC day. */
-export type ReadRow = { day: string; calls: number; output: number; input: number }
+/**
+ * How a check was made: `first`, a separate call on the session's model
+ * before the conversation has a request to fork; `fork`, a fork of the
+ * conversation; `separate`, a call on the check model setting's model;
+ * `subagent`, a subagent's brief.
+ */
+export type CheckKind = 'first' | 'fork' | 'separate' | 'subagent'
 
-export type SpendLedger = { version: 1; session: string; repo: string; rows: SpendRow[]; reads: ReadRow[] }
+export const isCheckKind = (value: unknown): value is CheckKind =>
+  value === 'first' || value === 'fork' || value === 'separate' || value === 'subagent'
+
+/** The router's own reads, per UTC day and kind (no kind: recorded before 0.10). */
+export type ReadRow = { day: string; kind?: CheckKind; calls: number; output: number; input: number }
+
+/**
+ * One check of the session and what came of it, kept to calibrate confidence
+ * later: the level and confidence it gave, and `outcome`: `acted`, `below
+ * the bar`, `undecided`, `kept going` (a manual check), or what happened at
+ * the question (`asked: use`, `asked: keep`, `asked: no answer`, `same as
+ * the setting`).
+ */
+export type VerdictRow = {
+  at: number
+  kind: CheckKind
+  model: string
+  prompt: number
+  level?: Level
+  confidence?: number
+  outcome: string
+  /** A first check that carried the session's instructions (CLAUDE.md, rules, memory), to learn whether they help. */
+  withInstructions?: boolean
+}
+
+/** Verdicts kept per session. */
+export const MAX_VERDICTS = 200
+
+export type SpendLedger = { version: 1; session: string; repo: string; rows: SpendRow[]; reads: ReadRow[]; verdicts?: VerdictRow[] }
 
 /** A request's usage, in the API's spelling. */
 export type SpendUsage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
@@ -728,11 +868,25 @@ export function withSpend(ledger: SpendLedger, entry: SpendEntry): SpendLedger {
 }
 
 /** Adds one of the router's own reads. */
-export function withRead(ledger: SpendLedger, day: string, usage: SpendUsage): SpendLedger {
-  const at = ledger.reads.findIndex(r => r.day === day)
-  const old: ReadRow = ledger.reads[at] ?? { day, calls: 0, output: 0, input: 0 }
-  const row = { day, calls: old.calls + 1, output: old.output + usage.output_tokens, input: old.input + inputOf(usage) }
+export function withRead(ledger: SpendLedger, day: string, usage: SpendUsage, kind?: CheckKind): SpendLedger {
+  const at = ledger.reads.findIndex(r => r.day === day && r.kind === kind)
+  const old: ReadRow = ledger.reads[at] ?? { day, ...(kind ? { kind } : {}), calls: 0, output: 0, input: 0 }
+  const row = { ...old, calls: old.calls + 1, output: old.output + usage.output_tokens, input: old.input + inputOf(usage) }
   return { ...ledger, reads: at >= 0 ? ledger.reads.map((r, i) => (i === at ? row : r)) : [...ledger.reads, row] }
+}
+
+/** Adds one check's verdict, keeping the newest `MAX_VERDICTS`. */
+export function withVerdictRow(ledger: SpendLedger, row: VerdictRow): SpendLedger {
+  return { ...ledger, verdicts: [...(ledger.verdicts ?? []), row].slice(-MAX_VERDICTS) }
+}
+
+/** Sets what came of a verdict (the answer to its question): the one checked at `at`, else the newest. */
+export function withVerdictOutcome(ledger: SpendLedger, outcome: string, at?: number): SpendLedger {
+  const verdicts = ledger.verdicts ?? []
+  let index = at === undefined ? -1 : verdicts.findLastIndex(v => v.at === at)
+  if (index < 0) index = verdicts.length - 1
+  const row = verdicts[index]
+  return row ? { ...ledger, verdicts: verdicts.map((v, i) => (i === index ? { ...row, outcome } : v)) } : ledger
 }
 
 const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0
@@ -757,9 +911,20 @@ export function parseLedger(text: string): SpendLedger | undefined {
       isCount(r.requests) && isCount(r.output) && isCount(r.input),
   )
   const reads = (Array.isArray(value.reads) ? value.reads : []).filter(
-    (r): r is ReadRow => typeof r === 'object' && r !== null && typeof r.day === 'string' && isCount(r.calls) && isCount(r.output) && isCount(r.input),
+    (r): r is ReadRow =>
+      typeof r === 'object' && r !== null && typeof r.day === 'string' && (r.kind === undefined || isCheckKind(r.kind)) &&
+      isCount(r.calls) && isCount(r.output) && isCount(r.input),
   )
-  return { version: 1, session: value.session, repo: typeof value.repo === 'string' ? value.repo : 'unknown', rows, reads }
+  const verdicts = (Array.isArray(value.verdicts) ? value.verdicts : []).filter(
+    (r): r is VerdictRow =>
+      typeof r === 'object' && r !== null && isCount(r.at) && isCheckKind(r.kind) && typeof r.model === 'string' && isCount(r.prompt) &&
+      (r.level === undefined || isLevel(r.level)) && (r.confidence === undefined || isCount(r.confidence)) && typeof r.outcome === 'string' &&
+      (r.withInstructions === undefined || typeof r.withInstructions === 'boolean'),
+  )
+  return {
+    version: 1, session: value.session, repo: typeof value.repo === 'string' ? value.repo : 'unknown', rows, reads,
+    ...(verdicts.length > 0 ? { verdicts } : {}),
+  }
 }
 
 /** A token count in a few characters: 950, 12.3k, 450k, 1.23M. */
@@ -850,7 +1015,14 @@ export function spendReport(ledgers: readonly SpendLedger[], period: SpendPeriod
   const reads = chosen.flatMap(l => l.reads)
   if (reads.length > 0) {
     const r = reads.reduce((t, x) => ({ calls: t.calls + x.calls, output: t.output + x.output, input: t.input + x.input }), { calls: 0, output: 0, input: 0 })
-    lines.push(`The router's own checks: ${r.calls}, using ${tokens(r.output)} output and ${tokens(r.input)} input tokens.`)
+    const count = (kinds: readonly (CheckKind | undefined)[]) => reads.filter(x => kinds.includes(x.kind)).reduce((n, x) => n + x.calls, 0)
+    const split = [
+      [count(['first']), 'of a first prompt'],
+      [count(['fork', 'separate', undefined]), 'of a conversation'],
+      [count(['subagent']), 'for subagents'],
+    ].filter(([n]) => (n as number) > 0).map(([n, what]) => `${n} ${what}`)
+    const by = split.length > 1 ? ` (${split.join(', ')})` : ''
+    lines.push(`The router's own checks: ${r.calls}${by}, using ${tokens(r.output)} output and ${tokens(r.input)} input tokens.`)
   }
 
   if (period !== 'session') {
@@ -875,7 +1047,8 @@ export type Mode = 'auto' | 'picker'
 
 export type Phase = 'undecided' | 'locked'
 
-export type Proposal = { level: Level; reason: string }
+/** A check's level. `checkedAt` (when the check ran, never saved) ties the answer to its question back to the check's verdict row. */
+export type Proposal = { level: Level; reason: string; confidence?: number; checkedAt?: number }
 
 /** A question open about a verdict: use the router's level, or keep the picker's (unknown when no request has gone out yet). */
 export type Asking = Proposal & { picker?: Level }
@@ -913,6 +1086,8 @@ export type RouterState = {
   gaveUp?: boolean
   /** Why the router is off, when it turned itself off (cleared when the person turns it off). */
   offReason?: string
+  /** Shown only, never saved: the session's model, which the router does not support, so it stands aside. */
+  unsupported?: string
 }
 
 export const freshState = (): RouterState => ({ mode: 'auto', phase: 'undecided', prompts: 0 })
@@ -931,14 +1106,19 @@ export function consentOf(value: unknown): Consent | undefined {
   return undefined
 }
 
+/** The state as it applies on a model: on one the router does not support, it stands aside (`unsupported`) without forgetting its state. */
+export function onModel(state: RouterState, model: string | undefined): RouterState {
+  return model === undefined || supportedModel(model) ? state : { ...state, unsupported: modelName(model) }
+}
+
 /** The level `turn.step` applies to the main thread, or undefined to leave the request alone. */
 export function appliedLevel(state: RouterState): Level | undefined {
-  return state.mode === 'auto' && state.phase === 'locked' ? state.level : undefined
+  return state.mode === 'auto' && state.phase === 'locked' && !state.unsupported ? state.level : undefined
 }
 
 /** Whether an automatic read should follow this human prompt. */
 export function wantsRead(state: RouterState, decideWithin: number): boolean {
-  return state.mode === 'auto' && state.phase !== 'locked' && !state.gaveUp && state.prompts <= decideWithin
+  return state.mode === 'auto' && state.phase !== 'locked' && !state.gaveUp && !state.unsupported && state.prompts <= decideWithin
 }
 
 /**
@@ -1031,7 +1211,7 @@ export type ReadDiagnostics = {
   now: number
   /** Classifier calls this session, automatic and manual. */
   calls: number
-  verdict?: { at: number; trigger: string; raw: string; decision: Decision }
+  verdict?: { at: number; trigger: string; raw: string; decision: Decision; kind?: CheckKind }
   error?: { at: number; text: string }
   /** The consent mode in force. */
   consent?: string
@@ -1041,6 +1221,10 @@ export type ReadDiagnostics = {
   sent?: { sentChars: number; fullChars: number; maxChars: number; omitted: number }
   /** Whether subagents are routed, and the ones that were. */
   subagents?: SubagentStatus
+  /** How sure a check must be before the router acts, 0 to 1. */
+  threshold?: number
+  /** Which model runs the checks, in words (`your session's model (Opus 5.5)`, `haiku`). */
+  checkModel?: string
 }
 
 /** `12s ago`, `4m ago`, `2h ago`. */
@@ -1056,7 +1240,12 @@ export function routeReport(state: RouterState, decideWithin: number, inForce?: 
   const setting = inForce === undefined ? 'your effort setting' : `your effort setting (${inForce})`
   const lines: string[] = []
   const routed = diagnostics?.subagents?.routing === 'on'
-  if (state.asking) {
+  const verdict = diagnostics?.verdict
+  const threshold = diagnostics?.threshold ?? 0
+  const leaning = verdict?.decision.decision === 'lock' && !isConfident(verdict.decision, threshold) ? verdict.decision : undefined
+  if (state.unsupported) {
+    lines.push(`Off on ${state.unsupported}, so ${setting} applies. The router works with ${SUPPORTED_NAMES}.`)
+  } else if (state.asking) {
     lines.push(`${state.asking.level}? Waiting for your answer: use ${state.asking.level} effort${insteadOf(state.asking)} (${state.asking.reason})?`)
   } else if (state.mode === 'picker') {
     lines.push(`Off${state.offReason ? ` (${state.offReason})` : ''}, so ${setting} applies. /route on turns it back on.`)
@@ -1064,10 +1253,12 @@ export function routeReport(state: RouterState, decideWithin: number, inForce?: 
     lines.push(`${state.level} 🔒 for this session (${state.reason ?? 'router'}).${routed ? ' Subagents get their own level.' : ' Subagents use it too.'}`)
   } else if (state.pending) {
     lines.push(`Deciding. The last check suggested ${state.pending.level} (${state.pending.reason}). If that isn't your setting, you'll be asked before Claude carries on.`)
+  } else if (leaning && !state.gaveUp) {
+    lines.push(`Deciding. The last check leaned ${leaning.level} but was only ${percent(leaning.confidence ?? 0)} sure, so it checks again after your next prompt. Until then ${setting} applies.`)
   } else {
     lines.push(`Deciding. The router checks each prompt until the task is clear, and until then ${setting} applies.`)
   }
-  if (state.mode === 'auto' && state.phase !== 'locked') {
+  if (state.mode === 'auto' && state.phase !== 'locked' && !state.unsupported) {
     lines.push(state.gaveUp
       ? `Stopped checking (${state.offReason ?? `no clear task after ${decideWithin} prompt${decideWithin === 1 ? '' : 's'}`}). /route checks now.`
       : `Prompts checked: ${Math.min(state.prompts, decideWithin)} of up to ${decideWithin}.`)
@@ -1075,14 +1266,15 @@ export function routeReport(state: RouterState, decideWithin: number, inForce?: 
   if (state.hint) lines.push(`Your hint: ${state.hint}`)
   if (diagnostics) {
     if (diagnostics.consent) {
+      const bar = threshold > 0 ? `It acts once a check is at least ${percent(threshold)} sure. ` : ''
       lines.push(diagnostics.consent === 'auto'
-        ? 'If it disagrees with your setting, it switches without asking (consent: auto).'
-        : 'If it disagrees with your setting, it asks you (consent: ask).')
+        ? `${bar}If that level isn't your setting, it switches without asking (consent: auto).`
+        : `${bar}If that level isn't your setting, it asks you first (consent: ask).`)
     }
-    lines.push(`Checks this session: ${diagnostics.calls}.`)
-    const verdict = diagnostics.verdict
+    lines.push(`Checks this session: ${diagnostics.calls}${diagnostics.checkModel ? `, on ${diagnostics.checkModel}` : ''}.`)
     if (verdict) {
-      const said = verdict.decision.decision === 'lock' ? `${verdict.decision.level} (${verdict.decision.reason})` : 'no clear task yet'
+      const sure = verdict.decision.decision === 'lock' && verdict.decision.confidence !== undefined ? `, ${percent(verdict.decision.confidence)} sure` : ''
+      const said = verdict.decision.decision === 'lock' ? `${verdict.decision.level}${sure} (${verdict.decision.reason})` : 'no clear task yet'
       const took = diagnostics.lastReadMs === undefined ? '' : `, took ${(diagnostics.lastReadMs / 1000).toFixed(1)}s`
       lines.push(`Last check (${verdict.trigger}, ${ago(diagnostics.now, verdict.at)}${took}): ${said}.`)
     }
@@ -1155,7 +1347,7 @@ export function restored(saved: unknown): RouterState {
  */
 export function footerLabel(state: RouterState): { text: string; color?: string; dim: boolean } {
   if (state.asking) return { text: `${state.asking.level}?`, color: LEVEL_COLOR[state.asking.level], dim: false }
-  if (state.mode === 'picker') return { text: 'off', dim: true }
+  if (state.mode === 'picker' || state.unsupported) return { text: 'off', dim: true }
   if (state.phase === 'locked' && state.level) return { text: `${state.level} 🔒`, color: LEVEL_COLOR[state.level], dim: false }
   return { text: 'deciding', dim: true }
 }
@@ -1175,6 +1367,7 @@ export const noticeActions = (allowOff = true): BandAction[] => (allowOff ? [{ v
 /** The router's band above the prompt, which the footer button opens: one line about the state. */
 export function bandHeadline(state: RouterState): string {
   const label = footerLabel(state).text
+  if (state.unsupported) return `Effort router: off on ${state.unsupported}. It works with ${SUPPORTED_NAMES}.`
   if (state.asking) return `Effort router: ${label} Waiting for your answer.`
   if (state.mode === 'picker') return `Effort router: off${state.offReason ? ` (${state.offReason})` : ''}. Your effort setting applies.`
   if (state.phase === 'locked') return `Effort router: ${label} for this session (${state.reason ?? 'router'})`
@@ -1188,6 +1381,7 @@ export function bandHeadline(state: RouterState): string {
  * organisation's setting) leaves out Turn off.
  */
 export function bandActions(state: RouterState, allowOff = true): BandAction[] {
+  if (state.unsupported) return []
   if (state.mode === 'picker') return [{ value: 'on', label: 'Turn on' }]
   return allowOff ? [{ value: 'suggest', label: 'Check now' }, { value: 'off', label: 'Turn off' }] : [{ value: 'suggest', label: 'Check now' }]
 }

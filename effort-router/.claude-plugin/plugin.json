@@ -1,7 +1,7 @@
 {
   "name": "effort-router",
-  "version": "0.9.1",
-  "description": "Picks the reasoning effort each task needs, following Anthropic's 'Spending your effort' guidance. When it disagrees with your effort setting, it asks before the task runs. Subagents get their own level. /route report shows where your effort went.",
+  "version": "0.10.0",
+  "description": "Picks the reasoning effort each task needs, following Anthropic's 'Spending your effort' guidance. Your session's own model judges the task, and the router only acts once it's confident. When it disagrees with your effort setting, it asks before the task runs. Subagents get their own level. /route report shows where your effort went.",
   "author": {
     "name": "Tommy Long"
   },
@@ -23,9 +23,9 @@
     "classifyTimeoutMs": {
       "type": "number",
       "title": "Check timeout (ms)",
-      "description": "How long a prompt waits for the router's check (usually 1-2 seconds) before running at your setting.",
+      "description": "How long a prompt waits for the router's check (usually 2-5 seconds) before running at your setting.",
       "required": false,
-      "default": 8000
+      "default": 15000
     },
     "classifierMaxChars": {
       "type": "number",
@@ -44,9 +44,30 @@
     "classifierModel": {
       "type": "string",
       "title": "Check model",
-      "description": "The model that runs the checks.",
+      "description": "\"session\" (default): your session's own model judges the task, reading the conversation as it sees it. Or name a model, such as haiku, for quicker, cheaper checks that read a shortened copy.",
       "required": false,
-      "default": "haiku"
+      "default": "session"
+    },
+    "confidence": {
+      "type": "number",
+      "title": "How sure a check must be",
+      "description": "From 0 to 1. The router only changes the effort when a check is at least this sure. Otherwise it checks again after your next prompt.",
+      "required": false,
+      "default": 0.8
+    },
+    "skipAboveTokens": {
+      "type": "number",
+      "title": "Leave longer sessions alone (tokens)",
+      "description": "A session that already holds more conversation than this when the router first sees it keeps your effort setting.",
+      "required": false,
+      "default": 20000
+    },
+    "firstCheckInstructions": {
+      "type": "boolean",
+      "title": "Send your instructions with the first check",
+      "description": "The first prompt's check also reads your CLAUDE.md files, rules and memory. Off: it reads only the prompt, which is cheaper.",
+      "required": false,
+      "default": true
     },
     "syncPicker": {
       "type": "boolean",

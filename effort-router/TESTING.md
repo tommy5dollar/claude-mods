@@ -3,7 +3,7 @@
 ## Automated
 
 ```
-bun test                            # 84 tests: trimming (incl. the last assistant message kept long and AskUserQuestion
+bun test                            # 94 tests: trimming (incl. the last assistant message kept long and AskUserQuestion
                                     # questions and answers kept), the classifier input cap (first prompt, then human lines
                                     # before assistant text), reply parsing (incl. fenced json), the classifier frame,
                                     # $defaults layering, settings layers, /route grammar and hints, state: consent names
@@ -17,8 +17,12 @@ bun test                            # 84 tests: trimming (incl. the last assista
                                     # first definition wins, plugin agents skipped;
                                     # the spend ledger: rows per day, caller and pair of levels (input counts cache), reads,
                                     # a saved file round-trips and bad rows are dropped, token counts, the report (by level,
-                                    # what was moved beside requests left at that level, definitions, reads, repos, periods)
-claude plugin test .                # 49 tests in the engine's kit, among them, for the main thread: undecided runs at the
+                                    # what was moved beside requests left at that level, definitions, reads, repos, periods);
+                                    # 0.10: confidence in replies (fractions, percentages, none), the bar, supported models
+                                    # and names, standing aside on other models, the size skip, the fork's message, the
+                                    # instructions block, status when a check leaned below the bar, reads by kind, verdict
+                                    # rows and their outcome tied to the check that asked
+claude plugin test .                # 60 tests in the engine's kit, among them, for the main thread: undecided runs at the
                                     # picker level with no question; the picker's level locks with no question and reading
                                     # stops; a different level holds the request on the question, Use locks it and syncs
                                     # /effort, Keep locks the picker level; the footer reads high? while the request waits;
@@ -41,10 +45,17 @@ claude plugin test .                # 49 tests in the engine's kit, among them, 
                                     # spend: each request recorded with the level it arrived at and went out at, main and
                                     # subagent, plus the router's reads; the file written when a turn ends and not again
                                     # with nothing new; a session carries on from its saved file; the week reads every saved
-                                    # session (a stray non-ledger file skipped) and splits by repo; no home: reported, not saved
-"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 49 under Desktop's engine
+                                    # session (a stray non-ledger file skipped) and splits by repo; no home: reported, not saved;
+                                    # 0.10: the first prompt checked by a separate call on the session model with the
+                                    # instructions from prompt.context, then forks; firstCheckInstructions false; below the bar
+                                    # nothing happens and the next prompt asks; a bar of 0; no check while a turn runs or for
+                                    # answers mid-turn; verdict rows saved; an unsupported model: no checks, off, says why;
+                                    # a locked level not applied after /model to another; model notes in the check and in
+                                    # /route rules; a long first-seen session left alone
+"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 60 under Desktop's engine
 claude plugin validate . --strict
 bun run eval -- --runs 3            # opt-in, real model: 22 session fixtures and 14 subagent briefs, see below
+                                    # (separate calls on haiku: it scores levels, not confidence or forks)
 ```
 
 ### Classifier eval (2026-10-04, haiku, `bun run eval -- --runs 3`)
@@ -66,6 +77,27 @@ Read 100% with care. The fixtures were written alongside the subagent frame, sev
 The kit passes a `Select` in the SessionMode footer on both surfaces, but the real Desktop app (2.1.286) silently drops it, so the footer is a `Button`. Footer and band rendering on Desktop has to be checked live (steps 1, 3 and 8 below).
 
 ## Live, headless
+
+### 0.10.0: checks on the session's model (verified 2026-10-04, CLI 2.1.289, Opus 5.5)
+
+One `claude -p --input-format stream-json` process in `D:/code/mods`, the dev folder as `--plugin-dir` with the
+installed router disabled, `EFFORT_ROUTER_CONSENT=auto`, two prompts sent one after the other's result:
+
+- `prompt.context` fired before the first `prompt.submit` and carried the `claudeMd` block (31k characters here).
+- Prompt 1 ("what's in this repo? don't read anything"): `$.model.fork` said there was no response to fork yet, so
+  the separate call ran on `claude-opus-5-5`: 1433 ms, `{"decision":"undecided"}`.
+- Prompt 2 (a read-and-explain question): the fork took 1619 ms and read 72,346 tokens from the main thread's cache,
+  with 2,790 fresh input tokens (the router's own instructions), 224 written and 43 output. About 2.6 cents.
+- The ledger file was written at each turn's end.
+
+Probes behind the design (scratchpad, same day):
+
+- An effort change mid-session (turn 2 at high after turn 1 at medium) kept the cache: 124k read, 492 written.
+- `$.model.complete` never caches: two identical calls of 16k tokens (Opus) and 12k (Haiku) read 0 and wrote 0, with
+  the text in the prompt or in the system prompt.
+- A fork during the first turn, before its second request, paid 13.5k tokens fresh and the main thread's next request
+  missed its own cache too. Between turns the fork reads the whole conversation from cache. So the router never forks
+  mid-turn.
 
 ### 0.9.0: the spend ledger (verified 2026-10-04, CLI 2.1.289)
 

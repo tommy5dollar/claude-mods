@@ -9,9 +9,10 @@ Claude Code runs every request at the effort level you picked, whatever the task
 too unless its agent definition fixes one. A parent can't choose a subagent's effort when it launches one. effort-router picks levels per task, based on Anthropic's
 [Spending your effort](https://claude.dev/blog/spending-your-effort/) guidance.
 
-- **Your session.** A quick Haiku read of the conversation decides what the task needs. If that matches your effort
-  picker, nothing changes. If it doesn't, the turn waits and Claude's own question card asks: "Use high effort
-  instead of medium?" Nothing runs at a level you didn't agree to. Prefer not to be asked? Set consent to `auto`.
+- **Your session.** Your session's own model judges what the task needs, and the router acts only once it's
+  confident. If that matches your effort picker, nothing changes. If it doesn't, the turn waits and Claude's own
+  question card asks: "Use high effort instead of medium?" Nothing runs at a level you didn't agree to. Prefer not
+  to be asked? Set consent to `auto`. It works with Fable 5.1, Opus 5.5 and Sonnet 5.5.
 - **Subagents.** Each subagent gets its own level from the brief its parent wrote, before it starts: web lookups and
   searches run low, implementation, debugging and review run high. An agent whose definition sets its own `effort:`
   is left alone.

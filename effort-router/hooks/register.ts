@@ -3,7 +3,9 @@ import type { AgentSpawnInput, EngineInterface, On, PluginOptions } from 'claude
 import {
   type AgentDefinition,
   type Asking,
+  type CheckKind,
   type ComposedRules,
+  type ModelNotes,
   type Consent,
   type ReadDiagnostics,
   type TranscriptMessage,
@@ -24,7 +26,9 @@ import {
   classifierPrompt,
   classifierSystem,
   composeRules,
+  confidenceOf,
   consentOf,
+  conversationTokens,
   critiquePrompt,
   dayOf,
   emptyLedger,
@@ -35,9 +39,13 @@ import {
   noticeActions,
   noticeHeadline,
   effortQuestion,
+  forkPrompt,
+  isConfident,
   isLevel,
   lockReason,
   lockedAt,
+  modelName,
+  onModel,
   parseDecision,
   parseLedger,
   parseRoute,
@@ -46,6 +54,8 @@ import {
   routesSubagents,
   subagentPrompt,
   subagentSystem,
+  supportedModel,
+  SUPPORTED_NAMES,
   restored,
   routeReport,
   ruleLayers,
@@ -65,16 +75,25 @@ import {
   withRead,
   withSaved,
   withSpend,
+  withVerdictOutcome,
+  withVerdictRow,
 } from './policy'
 
 /**
- * effort-router: reads the conversation after each human prompt until the
- * task is clear. With consent `ask` (the default) the verdict waits for the
- * next main-thread request, where the picker's level is known: undecided or
- * the same level, the request goes ahead (the same level locks); a different
- * level holds the request on a question (Use <level> / Keep <picker>), and
- * either answer locks. With `auto` the router's level is locked at once.
- * `/route` reads on demand, with an optional hint, and asks the same way.
+ * effort-router: checks the conversation after each human prompt until a
+ * check is sure enough of the task's level (the confidence bar). By default
+ * the checks run on the session's own model: from the second prompt on as a
+ * fork of the conversation (`$.model.fork`, served from the session's prompt
+ * cache), and on the first prompt, when there is no request yet to fork, as
+ * one separate call carrying the session's instructions (CLAUDE.md, rules,
+ * memory, from `prompt.context`). A check below the bar changes nothing and
+ * the next prompt is checked again. With consent `ask` (the default) a sure
+ * verdict waits for the next main-thread request, where the picker's level is
+ * known: the same level locks; a different level holds the request on a
+ * question (Use <level> / Keep <picker>), and either answer locks. With
+ * `auto` the router's level is locked at once. `/route` checks on demand,
+ * with an optional hint, and asks the same way. On a model the router does
+ * not support (see SUPPORTED_MODELS) it stands aside.
  *
  * The question is `$.ui.ask` (the engine's own AskUserQuestion card) because
  * a `turn.step` hook waiting on anything else is abandoned after about 10 s;
@@ -95,7 +114,14 @@ type Settings = {
   classifyTimeoutMs: number
   /** Cap on the transcript sent to the classifier. */
   classifierMaxChars: number
+  /** `session`: the session's own model (a fork from the second prompt). Otherwise a model for separate calls (`haiku`). */
   classifierModel: string
+  /** How sure (0 to 1) a check must be before the router acts on it. */
+  confidence: number
+  /** A session the router first sees with more than this many tokens of conversation is left alone. */
+  skipAboveTokens: number
+  /** Send the session's instructions (CLAUDE.md, rules, memory) with the first prompt's check. */
+  firstCheckInstructions: boolean
   syncPicker: boolean
   /** `button`: the footer state is a button that opens the band. `label`: plain text, /route is the control. */
   footerControl: 'button' | 'label'
@@ -137,6 +163,12 @@ type Session = {
   definitions?: Promise<AgentDefinition[]>
   /** This session's spend ledger, loaded from its file on first use. */
   spend?: Promise<Spend>
+  /** The main loop's model, as its last request named it (or `$.session.model()`). */
+  model?: string
+  /** The session's instructions block (CLAUDE.md files, rules, memory), as `prompt.context` carried it. */
+  instructions?: string
+  /** A main-thread turn is running: a fork now would not be served from the cache. */
+  busy: boolean
 }
 
 /** A session's spend ledger, where it is saved, and whether it changed since. */
@@ -164,10 +196,16 @@ let isInteractive = true
 let allowOff = true
 /** `decideWithin`, for a session's first sighting (set at register). */
 let budgetAtSighting = 6
+/** `skipAboveTokens`, for a session's first sighting (set at register). */
+let skipAboveTokens = 20000
 /** The organisation's `routeSubagents`, as the last rules read found it. */
 let orgRoutesSubagents = true
 /** Routed subagents kept per session, for turn.step and `/route status`. */
 const MAX_ROUTED_AGENTS = 200
+/** The most instruction text a first check sends (about 20k tokens). */
+const MAX_INSTRUCTIONS_CHARS = 80_000
+/** A check on the session's own model may think at its default effort: room for that and the reply. */
+const SESSION_CHECK_MAX_TOKENS = 4000
 
 const FALLBACK_RULES =
   'low: quick in-the-loop work, questions, chores. medium: regular feature work (default). ' +
@@ -185,9 +223,12 @@ function settingsOf(options: PluginOptions): Settings {
   return {
     consent,
     decideWithin: num(options.decideWithin, 6),
-    classifyTimeoutMs: num(options.classifyTimeoutMs, 8000),
+    classifyTimeoutMs: num(options.classifyTimeoutMs, 15000),
     classifierMaxChars: num(options.classifierMaxChars, DEFAULT_TRIM.totalChars),
-    classifierModel: typeof options.classifierModel === 'string' && options.classifierModel !== '' ? options.classifierModel : 'haiku',
+    classifierModel: typeof options.classifierModel === 'string' && options.classifierModel.trim() !== '' ? options.classifierModel.trim() : 'session',
+    confidence: confidenceOf(options.confidence) ?? 0.8,
+    skipAboveTokens: typeof options.skipAboveTokens === 'number' || typeof options.skipAboveTokens === 'string' ? num(options.skipAboveTokens, 20000) : 20000,
+    firstCheckInstructions: options.firstCheckInstructions !== false && options.firstCheckInstructions !== 'false',
     syncPicker: options.syncPicker !== false && options.syncPicker !== 'false',
     footerControl: options.footerControl === 'label' ? 'label' : 'button',
     routeSubagents: options.routeSubagents !== false && options.routeSubagents !== 'false',
@@ -204,13 +245,15 @@ async function sessionOf($: EngineInterface): Promise<{ id: string; session: Ses
     const saved = all?.[id]
     let state = restored(saved)
     if (saved === undefined) {
-      // first sighting: prompts already in the session count toward the budget
-      const prior = humanPromptCount((await $.session.messages().catch(() => [])) as TranscriptMessage[])
-      if (prior >= budgetAtSighting) await loadRules($).catch(() => undefined) // learns the org's allowOff
-      state = firstSighting(prior, budgetAtSighting, allowOff)
-      if (prior > 0) $.ui.log(`effort-router: first sighting with ${prior} prompts already in the session${state.gaveUp ? ' — left off' : ''}`, { to: 'debug' })
+      // first sighting: prompts already in the session count toward the budget, and a long conversation is left alone
+      const messages = (await $.session.messages().catch(() => [])) as TranscriptMessage[]
+      const prior = humanPromptCount(messages)
+      const size = { tokens: conversationTokens(messages), limit: skipAboveTokens }
+      if (prior >= budgetAtSighting || size.tokens > size.limit) await loadRules($).catch(() => undefined) // learns the org's allowOff
+      state = firstSighting(prior, budgetAtSighting, allowOff, size)
+      if (prior > 0) $.ui.log(`effort-router: first sighting with ${prior} prompts (~${size.tokens} tokens) already in the session${state.gaveUp ? ', left off' : ''}`, { to: 'debug' })
     }
-    session = { state, reading: false, bandOpen: false, calls: 0, agents: new Map() }
+    session = { state, reading: false, bandOpen: false, calls: 0, agents: new Map(), busy: false }
     if (appliedLevel(state)) session.pendingSync = appliedLevel(state)
     SESSIONS.set(id, session)
   }
@@ -225,6 +268,34 @@ async function persist($: EngineInterface, id: string, state: RouterState): Prom
     // persistence is best effort
   }
 }
+
+/** The main loop's model now (it can change with /model), remembered for drawing. */
+async function modelOf($: EngineInterface, session: Session): Promise<string | undefined> {
+  const model = await $.session.model().catch(() => undefined)
+  if (model) session.model = model
+  return session.model
+}
+
+/** The session's state as it applies on its model: on an unsupported one the router stands aside. */
+const view = (session: Session): RouterState => onModel(session.state, session.model)
+
+/** The notes on what effort means on the session's model (`rules/models/<model>.md`); undefined on an unsupported model or with no file. */
+async function modelNotes($: EngineInterface, model: string | undefined): Promise<(ModelNotes & { path: string }) | undefined> {
+  const known = supportedModel(model)
+  if (!known) return undefined
+  const { sep } = await homeOf($)
+  const path = `${$.plugin.root}${sep}rules${sep}models${sep}${known.notesFile}`
+  const notes = (await readText($, path))?.replace(/<!--[\s\S]*?-->/g, '').trim()
+  return notes ? { name: known.name, notes, path } : undefined
+}
+
+/** Which model runs the checks, in words for `/route status`. */
+function checkModelLabel(settings: Settings, session: Session): string {
+  return settings.classifierModel === 'session' ? `your session's model${session.model ? ` (${modelName(session.model)})` : ''}` : settings.classifierModel
+}
+
+/** The model for subagent checks: a quick one, since a spawn waits for the answer. */
+const subagentModel = (settings: Settings): string => (settings.classifierModel === 'session' ? 'haiku' : settings.classifierModel)
 
 // --- showing and applying ----------------------------------------------------------
 
@@ -300,13 +371,16 @@ async function askAndLock(
   }
   session.state = { ...session.state, asking: undefined }
   if (answer === question.options[0]) {
+    recordOutcome($, 'asked: use', proposal.checkedAt)
     await lock($, id, session, settings, proposal.level, lockReason.chosen(proposal))
     return 'use'
   }
   if (picker && answer === question.options[1]) {
+    recordOutcome($, 'asked: keep', proposal.checkedAt)
     await lock($, id, session, settings, picker, lockReason.kept({ ...proposal, picker }))
     return 'keep'
   }
+  recordOutcome($, 'asked: no answer', proposal.checkedAt)
   await commit($, id, session, session.state)
   return 'none'
 }
@@ -408,38 +482,79 @@ async function loadRules($: EngineInterface): Promise<LoadedRules> {
 
 // --- deciding ----------------------------------------------------------------------
 
-/** One classifier read of the whole conversation. Undefined = undecided (or failed). Records the verdict or error for `/route status`. */
-async function classifyNow($: EngineInterface, settings: Settings, session: Session, input: ReadInput): Promise<Proposal | undefined> {
+/** What one check found: its level (undefined = undecided or failed), how it was made, and when it answered. */
+type Check = { proposal?: Proposal; kind: CheckKind; model: string; withInstructions?: boolean; checkedAt?: number }
+
+/** The last assistant reply's text, capped: a fork replays the request before it, so it is sent along. */
+function lastReplyOf(messages: readonly TranscriptMessage[]): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message?.role === 'assistant' && message.text.trim() !== '') return message.text.trim().slice(-DEFAULT_TRIM.lastAssistantChars)
+    if (message?.role === 'user' && message.text.trim() !== '') return undefined
+  }
+  return undefined
+}
+
+/**
+ * One check of the whole conversation. On the session's model: a fork when
+ * the conversation has a request to fork, else (the first prompt, or the
+ * first after a resume) a separate call with the session's instructions and
+ * the transcript. On another model: a separate call with the transcript.
+ * Undefined when there is nothing to check. Records the verdict or error for
+ * `/route status`, and the read in the ledger.
+ */
+async function classifyNow($: EngineInterface, settings: Settings, session: Session, input: ReadInput): Promise<Check | undefined> {
   const now = async () => $.clock.now().catch(() => Date.now())
   try {
-    const [stored, rules] = await Promise.all([
+    const [stored, rules, model] = await Promise.all([
       $.session.messages().catch(() => [] as TranscriptMessage[]),
       loadRules($),
+      modelOf($, session),
     ])
     const messages = input.answer ? withQuestionAnswer(stored as TranscriptMessage[], input.answer) : (stored as TranscriptMessage[])
     const rendered = renderTranscript(messages, input.current, { ...DEFAULT_TRIM, totalChars: settings.classifierMaxChars })
-    const transcript = rendered.text
-    if (transcript.trim() === '' && !input.hint) return undefined
-    session.sent = { sentChars: rendered.sentChars, fullChars: rendered.fullChars, maxChars: settings.classifierMaxChars, omitted: rendered.omitted }
+    if (rendered.text.trim() === '' && !input.hint) return undefined
+    const notes = await modelNotes($, model)
+    const separate = async (checkModel: string, instructions?: string) => {
+      session.sent = { sentChars: rendered.sentChars, fullChars: rendered.fullChars, maxChars: settings.classifierMaxChars, omitted: rendered.omitted }
+      return $.model.complete({
+        model: checkModel,
+        system: classifierSystem(rules.composed.text, notes),
+        prompt: classifierPrompt(rendered.text, input.hint, instructions),
+        ...(checkModel === model ? { maxTokens: SESSION_CHECK_MAX_TOKENS } : { maxTokens: 200, effort: 'low' as const }),
+        timeoutMs: settings.classifyTimeoutMs,
+      })
+    }
     session.calls += 1
-    const reply = await $.model.complete({
-      model: settings.classifierModel,
-      system: classifierSystem(rules.composed.text),
-      prompt: classifierPrompt(transcript, input.hint),
-      maxTokens: 200,
-      effort: 'low',
-      timeoutMs: settings.classifyTimeoutMs,
-    })
-    recordRead($, reply.usage)
+    let check: Check
+    let reply: Awaited<ReturnType<typeof $.model.fork>>
+    if (settings.classifierModel === 'session' && model) {
+      reply = await $.model.fork({ prompt: forkPrompt({ rules: rules.composed.text, model: notes, current: input.current, lastReply: lastReplyOf(messages), hint: input.hint }) })
+      check = { kind: 'fork', model }
+      if (!reply.isAnswered && reply.reason === 'nothing-to-fork') {
+        const instructions = settings.firstCheckInstructions && session.instructions ? session.instructions.slice(0, MAX_INSTRUCTIONS_CHARS) : undefined
+        reply = await separate(model, instructions)
+        check = { kind: 'first', model, withInstructions: instructions !== undefined }
+      } else {
+        session.sent = undefined
+      }
+    } else {
+      reply = await separate(settings.classifierModel)
+      check = { kind: 'separate', model: settings.classifierModel }
+    }
+    if ('usage' in reply) recordRead($, reply.usage, check.kind)
     if (!reply.isAnswered) {
       session.error = { at: await now(), text: `the check got no answer (${reply.reason})` }
       $.ui.log(`effort-router: ${session.error.text}`, { to: 'debug' })
-      return undefined
+      return check
     }
     const decision = parseDecision(reply.text)
-    session.verdict = { at: await now(), trigger: input.trigger, raw: reply.text, decision }
-    $.ui.log(`effort-router: classifier said (${input.trigger}) ${reply.text.trim().slice(0, 200)}`, { to: 'debug' })
-    return decision.decision === 'lock' ? { level: decision.level, reason: decision.reason } : undefined
+    const checkedAt = await now()
+    session.verdict = { at: checkedAt, trigger: input.trigger, raw: reply.text, decision, kind: check.kind }
+    $.ui.log(`effort-router: ${check.kind} check on ${check.model} said (${input.trigger}) ${reply.text.trim().slice(0, 200)}`, { to: 'debug' })
+    if (decision.decision !== 'lock') return { ...check, checkedAt }
+    const { decision: _, ...found } = decision
+    return { ...check, checkedAt, proposal: { ...found, checkedAt } }
   } catch (error) {
     session.error = { at: await now(), text: String(error) }
     throw error
@@ -465,17 +580,22 @@ async function timed<T>($: EngineInterface, ms: number, work: Promise<T>): Promi
 }
 
 /**
- * A read's verdict, by consent. `auto`: the router's level is locked at once.
- * `ask`: it waits in `pending` for the next main-thread request, the only
- * place the picker's level is known (decideAtStep); undecided clears it.
+ * A check's verdict, by consent, once it clears the confidence bar. `auto`:
+ * the router's level is locked at once. `ask`: it waits in `pending` for the
+ * next main-thread request, the only place the picker's level is known
+ * (decideAtStep). Below the bar, or undecided, nothing waits: the next
+ * prompt is checked again.
  */
-async function afterRead($: EngineInterface, id: string, session: Session, settings: Settings, consent: Consent, proposal: Proposal | undefined): Promise<void> {
+async function afterRead($: EngineInterface, id: string, session: Session, settings: Settings, consent: Consent, check: Check | undefined): Promise<void> {
   if (session.state.mode !== 'auto' || session.state.phase === 'locked') return
-  if (consent === 'auto' && proposal) {
+  const proposal = check?.proposal
+  const sure = proposal !== undefined && isConfident(proposal, settings.confidence)
+  if (check) recordVerdict($, session, check, !proposal ? 'undecided' : !sure ? 'below the bar' : consent === 'auto' ? 'acted' : 'waiting')
+  if (consent === 'auto' && sure) {
     await lockAuto($, id, session, settings, proposal)
     return
   }
-  const next = withVerdict(session.state, proposal)
+  const next = withVerdict(session.state, sure ? proposal : undefined)
   if (next !== session.state) await commit($, id, session, next)
 }
 
@@ -504,7 +624,8 @@ async function readAfter($: EngineInterface, id: string, session: Session, setti
       outcome = 'timed out'
       session.error = { at: await $.clock.now().catch(() => Date.now()), text: `the check timed out after ${settings.classifyTimeoutMs} ms, so the prompt ran at your setting` }
     } else {
-      outcome = result.value ? `${result.value.level} (${result.value.reason})` : 'undecided'
+      const proposal = result.value?.proposal
+      outcome = proposal ? `${proposal.level} (${proposal.reason}${proposal.confidence === undefined ? '' : `, ${Math.round(proposal.confidence * 100)}%`})` : 'undecided'
       await afterRead($, id, session, settings, consent, result.value)
     }
   } catch (error) {
@@ -529,6 +650,7 @@ async function decideAtStep($: EngineInterface, id: string, session: Session, se
   const decision = stepDecision(session.state, picker)
   if (decision.kind === 'none') return
   if (decision.kind === 'agree') {
+    recordOutcome($, 'same as the setting', decision.proposal.checkedAt)
     await lock($, id, session, settings, decision.proposal.level, lockReason.agreed(decision.proposal))
   } else {
     const { picker: current, ...proposal } = decision.asking
@@ -548,6 +670,8 @@ async function decideAtStep($: EngineInterface, id: string, session: Session, se
  */
 async function suggestNow($: EngineInterface, id: string, session: Session, settings: Settings, hint: string | undefined): Promise<string> {
   if (session.reading) return 'Already checking. Try again in a moment.'
+  const model = await modelOf($, session)
+  if (!supportedModel(model)) return unsupportedText(model)
   session.reading = true
   let proposal: Proposal | undefined
   try {
@@ -556,7 +680,8 @@ async function suggestNow($: EngineInterface, id: string, session: Session, sett
       session.error = { at: await $.clock.now().catch(() => Date.now()), text: `the check timed out after ${settings.classifyTimeoutMs} ms` }
       return 'The check timed out. Nothing changed.'
     }
-    proposal = result.value
+    proposal = result.value?.proposal
+    if (result.value) recordVerdict($, session, result.value, proposal ? 'manual' : 'undecided')
   } finally {
     session.reading = false
   }
@@ -571,9 +696,10 @@ async function suggestNow($: EngineInterface, id: string, session: Session, sett
   if (!proposal) return say(`No clear task yet${hint ? ', even with your hint' : ''}. Nothing changed.`)
   const picker = isLevel(session.picker) ? session.picker : undefined
   const locked = appliedLevel(session.state)
+  const sure = proposal.confidence === undefined ? '' : `, ${Math.round(proposal.confidence * 100)}% sure`
   if (proposal.level === (locked ?? picker)) {
     if (session.state.pending) await commit($, id, session, { ...session.state, pending: undefined })
-    return say(`${proposal.level} still fits (${proposal.reason}). Nothing changed.`)
+    return say(`${proposal.level} still fits (${proposal.reason}${sure}). Nothing changed.`)
   }
   if (hint && session.state.phase !== 'locked') session.state = { ...session.state, hint }
   if ((await consentFor($, settings)) === 'auto') {
@@ -670,7 +796,7 @@ async function routeSpawn($: EngineInterface, settings: Settings, session: Sessi
   if (definition?.effort !== undefined) return { level: definition.effort, reason: `from ${definition.source}`, byDefinition: true }
   const read = async () =>
     $.model.complete({
-      model: settings.classifierModel,
+      model: subagentModel(settings),
       system: subagentSystem(rules.composed.text),
       prompt: subagentPrompt({ subagentType: e.subagentType, description: e.description, prompt: e.prompt }, settings.classifierMaxChars),
       maxTokens: 200,
@@ -683,7 +809,7 @@ async function routeSpawn($: EngineInterface, settings: Settings, session: Sessi
   })
   if (!result) return fallback('the check failed')
   if (!result.ok) return fallback('the check timed out')
-  recordRead($, result.value.usage)
+  recordRead($, result.value.usage, 'subagent')
   if (!result.value.isAnswered) return fallback('the check got no answer')
   $.ui.log(`effort-router: subagent classifier said ${result.value.text.trim().slice(0, 200)}`, { to: 'debug' })
   return parseSubagentReply(result.value.text) ?? fallback('the check gave no level')
@@ -741,8 +867,33 @@ async function recordSpend($: EngineInterface, change: (ledger: SpendLedger, day
 }
 
 /** One of the router's own reads, when the reply carried usage. */
-function recordRead($: EngineInterface, usage: SpendUsage | undefined): void {
-  if (usage) void recordSpend($, (ledger, day) => withRead(ledger, day, usage))
+function recordRead($: EngineInterface, usage: SpendUsage | undefined, kind: CheckKind): void {
+  if (usage) void recordSpend($, (ledger, day) => withRead(ledger, day, usage, kind))
+}
+
+/** One check's verdict and what came of it, for calibrating confidence later. */
+function recordVerdict($: EngineInterface, session: Session, check: Check, outcome: string): void {
+  void (async () => {
+    const at = check.checkedAt ?? (await $.clock.now().catch(() => Date.now()))
+    const { proposal } = check
+    await recordSpend($, ledger =>
+      withVerdictRow(ledger, {
+        at,
+        kind: check.kind,
+        model: check.model,
+        prompt: session.state.prompts,
+        ...(proposal ? { level: proposal.level } : {}),
+        ...(proposal?.confidence !== undefined ? { confidence: proposal.confidence } : {}),
+        outcome,
+        ...(check.withInstructions !== undefined ? { withInstructions: check.withInstructions } : {}),
+      }),
+    )
+  })()
+}
+
+/** What came of a verdict (its question's answer), found by when its check ran. */
+function recordOutcome($: EngineInterface, outcome: string, checkedAt: number | undefined): void {
+  void recordSpend($, ledger => withVerdictOutcome(ledger, outcome, checkedAt))
 }
 
 /** Writes the ledger when it changed, one write at a time, each with the newest rows. */
@@ -826,6 +977,10 @@ async function bandAction($: EngineInterface, id: string, session: Session, sett
  */
 async function humanTurn($: EngineInterface, settings: Settings, input: ReadInput): Promise<void> {
   const { id, session } = await sessionOf($)
+  if (!supportedModel(await modelOf($, session))) return
+  // A fork mid-turn is not served from the cache, so answers given mid-turn,
+  // and prompts queued while a turn runs, wait for the next prompt's check.
+  if (settings.classifierModel === 'session' && (session.busy || input.answer)) return
   if (session.state.mode === 'auto' && session.state.phase !== 'locked' && !session.state.gaveUp) {
     session.state = { ...session.state, prompts: session.state.prompts + 1 }
   }
@@ -842,8 +997,13 @@ async function consentFor($: EngineInterface, settings: Settings): Promise<Conse
 
 // --- /route ------------------------------------------------------------------------
 
+/** What the router says on a model it does not support. */
+const unsupportedText = (model: string | undefined): string =>
+  `The router doesn't support ${modelName(model)}, so your effort setting applies. It works with ${SUPPORTED_NAMES}.`
+
 async function route($: EngineInterface, args: string, settings: Settings): Promise<string> {
   const { id, session } = await sessionOf($)
+  await modelOf($, session)
   const command = parseRoute(args)
   switch (command.kind) {
     case 'suggest':
@@ -851,7 +1011,7 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
     case 'report':
       return spendReportFor($, id, session, command.period)
     case 'status':
-      return routeReport(session.state, settings.decideWithin, session.lastSent, {
+      return routeReport(view(session), settings.decideWithin, session.lastSent, {
         now: await $.clock.now().catch(() => Date.now()),
         calls: Math.max(session.calls, (await spendOf($, id, session)).ledger.reads.reduce((n, r) => n + r.calls, 0)), // the ledger survives a resume
         verdict: session.verdict,
@@ -860,6 +1020,8 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
         lastReadMs: session.lastReadMs,
         sent: session.sent,
         subagents: { routing: subagentRouting(settings, session), agents: [...session.agents.values()] },
+        threshold: settings.confidence,
+        checkModel: checkModelLabel(settings, session),
       })
     case 'off': {
       if (!(await loadRules($)).allowOff) return 'Your organisation keeps the router on.'
@@ -867,17 +1029,21 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
       return `Router off. Your effort setting${session.baseline ? ` (${session.baseline})` : ''} applies again. /route on turns it back on.`
     }
     case 'on': {
+      if (!supportedModel(session.model)) return unsupportedText(session.model)
       if (session.state.mode !== 'picker' && !session.state.gaveUp) return 'The router is already on.'
       await commit($, id, session, turnedOn(session.state))
       return `Router on. It checks your next ${settings.decideWithin} prompts until the task is clear.`
     }
     case 'rules': {
       const { composed, enforced } = await loadRules($)
+      const notes = await modelNotes($, session.model)
       const from = composed.contributors
         .map(c => (c.how === 'base' ? `  ${c.source}` : c.how === 'spliced' ? `  + ${c.source}` : `  ${c.source} (replaces the rules above)`))
         .join('\n')
       const note = enforced ? "\n(Your organisation's rules are final, so personal and project rules are ignored.)" : ''
-      return `Routing rules in use:\n${from}${note}\n\n${composed.text}`
+      const onModel = notes ? `\n  + notes on ${notes.name} (${notes.path})` : ''
+      const notesText = notes ? `\n\nOn ${notes.name}:\n${notes.notes}` : ''
+      return `Routing rules in use:\n${from}${onModel}${note}\n\n${composed.text}${notesText}`
     }
     case 'rules-init': {
       if ((await loadRules($)).enforced) return "Your organisation's routing rules are final, so a personal or project file would be ignored. /route rules shows them."
@@ -902,6 +1068,7 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
 export function register(on: On, options: PluginOptions): void {
   const settings = settingsOf(options)
   budgetAtSighting = settings.decideWithin
+  skipAboveTokens = settings.skipAboveTokens
 
   on('session.start', async ($, e, next) => {
     isInteractive = e.isInteractive
@@ -912,6 +1079,7 @@ export function register(on: On, options: PluginOptions): void {
         argumentHint: '[hint] | status | report [session|week|month|all] | off | on | rules [init|critique]',
       })
       const { session } = await sessionOf($)
+      await modelOf($, session)
       if (session.lastSent === undefined) {
         const configured = (await $.settings.read().catch(() => ({}))) as { effortLevel?: unknown }
         if (isLevel(configured.effortLevel)) session.lastSent = configured.effortLevel
@@ -932,6 +1100,19 @@ export function register(on: On, options: PluginOptions): void {
     } catch (error) {
       return { text: `/route failed: ${String(error)}` }
     }
+  })
+
+  // The context the conversation's first message carries: keep the
+  // instructions block (CLAUDE.md files, rules, memory) for the first check,
+  // which cannot fork a conversation that has sent nothing yet. Unchanged.
+  on('prompt.context', async ($, e, next) => {
+    try {
+      const text = e.blocks.find(block => block.name === 'claudeMd')?.text
+      if (text) (await sessionOf($)).session.instructions = text
+    } catch {
+      // the first check goes without them
+    }
+    return next(e)
   })
 
   // After each human prompt while deciding (and within the budget), read the
@@ -1015,12 +1196,17 @@ export function register(on: On, options: PluginOptions): void {
     try {
       const { id, session } = await sessionOf($)
       if (e.agentId === undefined) {
+        session.busy = true
+        if (session.model !== e.model) {
+          session.model = e.model
+          show($)
+        }
         if (e.effort !== undefined) session.picker = e.effort
-        if (session.state.pending) await decideAtStep($, id, session, settings, e.effort)
+        if (session.state.pending && supportedModel(e.model)) await decideAtStep($, id, session, settings, e.effort)
       }
       const own = e.agentId !== undefined && subagentRouting(settings, session) === 'on' ? session.agents.get(e.agentId) : undefined
       byDefinition = own?.byDefinition === true
-      const level = own ? (own.byDefinition ? undefined : own.level) : appliedLevel(session.state)
+      const level = own ? (own.byDefinition ? undefined : own.level) : appliedLevel(view(session))
       if (e.agentId === undefined && session.baseline === undefined && isLevel(e.effort) && session.pendingSync === undefined && level === undefined) {
         session.baseline = e.effort
       }
@@ -1052,6 +1238,7 @@ export function register(on: On, options: PluginOptions): void {
     const result = await next(e)
     try {
       const { session } = await sessionOf($)
+      if (e.agentId === undefined) session.busy = false
       if (e.agentId === undefined && settings.syncPicker) flushSync($, session)
       await saveSpend($, session)
     } catch {
@@ -1064,7 +1251,7 @@ export function register(on: On, options: PluginOptions): void {
   // that opens the band. (Desktop silently drops a Select here, so no Select.)
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     const { session } = await sessionOf($)
-    const label = footerLabel(session.state)
+    const label = footerLabel(view(session))
     const theirs = await next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     const mine =
@@ -1082,7 +1269,8 @@ export function register(on: On, options: PluginOptions): void {
     if (!bandShown(session) || e.props.hasSurvey) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     const theirs = await next(e)
-    const { state, notice } = session
+    const { notice } = session
+    const state = view(session)
     const headline = notice && !session.bandOpen ? noticeHeadline(notice) : bandHeadline(state)
     const actions = notice && !session.bandOpen ? noticeActions(allowOff) : bandActions(state, allowOff)
     const level = notice && !session.bandOpen ? notice.level : state.asking?.level ?? (state.mode === 'auto' && state.phase === 'locked' ? state.level : undefined)

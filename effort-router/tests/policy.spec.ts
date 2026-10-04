@@ -5,6 +5,16 @@ import { describe, expect, test } from 'bun:test'
 
 import {
   DEFAULT_TRIM,
+  SUPPORTED_NAMES,
+  confidenceOf,
+  conversationTokens,
+  forkPrompt,
+  isConfident,
+  modelName,
+  onModel,
+  supportedModel,
+  withVerdictOutcome,
+  withVerdictRow,
   afterBudget,
   appliedLevel,
   classifierPrompt,
@@ -296,9 +306,9 @@ describe('the classifier prompt', () => {
     expect(system).toContain('Answer undecided ONLY when no actionable task has been stated yet')
     expect(system).toContain('suggest the best level for it NOW, even if the details are still unclear')
     expect(system).not.toContain('When unsure, answer undecided')
-    expect(system).toContain('implement for me a new finance solution pulling from multiple accountancy platforms → {"decision":"lock","level":"high"')
+    expect(system).toContain('implement for me a new finance solution pulling from multiple accountancy platforms → {"decision":"level","level":"high","confidence":0.7')
     expect(system).toContain('USER: pull the latest code → {"decision":"undecided"}')
-    expect(system).toContain('2, keep it simple → {"decision":"lock","level":"low"')
+    expect(system).toContain('2, keep it simple → {"decision":"level","level":"low","confidence":0.9')
     expect(system).toContain('USER answered:')
     expect((system.match(/^\d+\. USER:/gm) ?? []).length).toBeGreaterThanOrEqual(6)
     expect(classifierPrompt('USER: hi')).toContain('answer undecided only if no actionable task has been stated yet')
@@ -468,7 +478,7 @@ describe('state', () => {
       error: { at: 100_000 - 5 * 60_000, text: 'Error: timeout' },
       sent: { sentChars: 23_900, fullChars: 91_000, maxChars: 24_000, omitted: 210 },
     })
-    expect(report).toContain('If it disagrees with your setting, it asks you (consent: ask).')
+    expect(report).toContain("If that level isn't your setting, it asks you first (consent: ask).")
     expect(report).toContain('Checks this session: 3.')
     expect(report).toContain('Last check (after a prompt, 12s ago, took 1.2s): no clear task yet.')
     expect(report).toContain('Last error (5m ago): Error: timeout')
@@ -742,6 +752,100 @@ describe('the spend ledger', () => {
     expect(session).not.toContain('By repo')
     expect(spendReport([a, b], 'all', { today: '2026-10-04', session: 's1' }).split('\n')[0]).toBe(
       'Effort for all recorded sessions: 23 requests in 2 sessions, 64k output tokens.',
+    )
+  })
+})
+
+describe('0.10: confidence, models, size, verdicts', () => {
+  test('a reply carries its confidence; "level", "lock" and "suggest" all read as a level', () => {
+    expect(parseDecision('{"decision":"level","level":"high","confidence":0.72,"reason":"bug fix"}')).toEqual({ decision: 'lock', level: 'high', reason: 'bug fix', confidence: 0.72 })
+    expect(parseDecision('{"decision":"lock","level":"low","confidence":"85%","reason":"rename"}')).toEqual({ decision: 'lock', level: 'low', reason: 'rename', confidence: 0.85 })
+    expect(parseDecision('{"decision":"suggest","level":"low","reason":"rename"}')).toEqual({ decision: 'lock', level: 'low', reason: 'rename' })
+  })
+
+  test('confidence values: 0 to 1, percentages, nonsense', () => {
+    expect([0, 0.5, 1, 80, '0.9', '70%', -1, 150, 'sure', undefined].map(confidenceOf)).toEqual([0, 0.5, 1, 0.8, 0.9, 0.7, undefined, undefined, undefined, undefined])
+  })
+
+  test('the bar: a level with no confidence never clears it, unless the bar is 0', () => {
+    expect(isConfident({ level: 'high', reason: 'x', confidence: 0.8 }, 0.8)).toBe(true)
+    expect(isConfident({ level: 'high', reason: 'x', confidence: 0.79 }, 0.8)).toBe(false)
+    expect(isConfident({ level: 'high', reason: 'x' }, 0.8)).toBe(false)
+    expect(isConfident({ level: 'high', reason: 'x' }, 0)).toBe(true)
+  })
+
+  test('supported models: ids, aliases, context-window suffixes and cloud ids; others are named', () => {
+    expect(['claude-opus-5-5', 'claude-opus-5-5[1m]', 'opus', 'us.anthropic.claude-sonnet-5-5-v1:0', 'claude-fable-5-1-20261001'].map(m => supportedModel(m)?.name)).toEqual([
+      'Opus 5.5', 'Opus 5.5', 'Opus 5.5', 'Sonnet 5.5', 'Fable 5.1',
+    ])
+    expect(['claude-haiku-4-5-20251001', 'claude-opus-4-8', 'claude-opus-5', 'claude-fable-5', 'gpt-x', undefined].map(m => supportedModel(m))).toEqual([undefined, undefined, undefined, undefined, undefined, undefined])
+    expect(['claude-haiku-4-5-20251001', 'claude-opus-4-8', 'claude-opus-5-20260101', 'gpt-x', undefined].map(modelName)).toEqual(['Haiku 4.5', 'Opus 4.8', 'Opus 5', 'gpt-x', 'this model'])
+    expect(SUPPORTED_NAMES).toBe('Fable 5.1, Opus 5.5 and Sonnet 5.5')
+  })
+
+  test('on an unsupported model the router stands aside: no level, no checks, off in the footer and band', () => {
+    const locked = lockedAt(freshState(), 'high', 'bug fix')
+    const away = onModel(locked, 'claude-haiku-4-5-20251001')
+    expect(onModel(locked, 'claude-opus-5-5')).toBe(locked)
+    expect(appliedLevel(away)).toBeUndefined()
+    expect(wantsRead(onModel(freshState(), 'claude-opus-4-8'), 6)).toBe(false)
+    expect(footerLabel(away).text).toBe('off')
+    expect(bandHeadline(away)).toBe('Effort router: off on Haiku 4.5. It works with Fable 5.1, Opus 5.5 and Sonnet 5.5.')
+    expect(bandActions(away)).toEqual([])
+  })
+
+  test('first sighting: a conversation longer than the limit is left alone, whatever its prompt count', () => {
+    expect(firstSighting(1, 6, true, { tokens: 30_000, limit: 20_000 })).toMatchObject({ mode: 'picker', offReason: 'session started before the router' })
+    expect(firstSighting(1, 6, true, { tokens: 5_000, limit: 20_000 })).toMatchObject({ mode: 'auto', prompts: 1 })
+    expect(conversationTokens([{ role: 'user', text: 'x'.repeat(400) }, { role: 'assistant', text: '', toolUses: [{ tool: 'Read', input: { p: 'a' }, text: 'y'.repeat(380) }] }])).toBe(197) // (400 + 380 + 9) / 4
+  })
+
+  test("the fork's message: the job, the rules, the model's notes, the last reply and the new message", () => {
+    const text = forkPrompt({ rules: 'RULES', model: { name: 'Opus 5.5', notes: '- medium is the default' }, current: 'fix it', lastReply: 'Found the bug.', hint: 'be careful' })
+    expect(text).toStartWith('Pause the task for a moment.')
+    expect(text).toContain('<rules>\nRULES\n</rules>')
+    expect(text).toContain('The session runs on Opus 5.5.')
+    expect(text).toContain('<last_reply>\nFound the bug.\n</last_reply>')
+    expect(text).toContain('<new_message>\nfix it\n</new_message>')
+    expect(text).toContain('<user_hint>\nbe careful\n</user_hint>')
+    expect(forkPrompt({ rules: 'RULES' })).not.toContain('<new_message>')
+  })
+
+  test('the separate check carries the instructions first when given', () => {
+    expect(classifierPrompt('USER: hi', undefined, 'Use bun.')).toStartWith("The session's instructions (CLAUDE.md files, rules and memory), as its model sees them:\n<instructions>\nUse bun.\n</instructions>")
+    expect(classifierPrompt('USER: hi')).toStartWith('Transcript so far')
+  })
+
+  test('status: a check below the bar says it leaned, and the bar is stated', () => {
+    const report = routeReport(freshState(), 6, 'medium', {
+      now: 10_000, calls: 1, consent: 'ask', threshold: 0.8, checkModel: "your session's model (Opus 5.5)",
+      verdict: { at: 5_000, trigger: 'after a prompt', raw: '', decision: { decision: 'lock', level: 'high', reason: 'bug fix', confidence: 0.6 } },
+    })
+    expect(report).toStartWith('Deciding. The last check leaned high but was only 60% sure, so it checks again after your next prompt.')
+    expect(report).toContain("It acts once a check is at least 80% sure. If that level isn't your setting, it asks you first (consent: ask).")
+    expect(report).toContain("Checks this session: 1, on your session's model (Opus 5.5).")
+    expect(report).toContain('Last check (after a prompt, 5s ago): high, 60% sure (bug fix).')
+  })
+
+  test('ledger: reads by kind, verdicts with their outcome, both survive a save; the report splits checks by kind', () => {
+    const usage = { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 90, cache_creation_input_tokens: 0 }
+    let ledger = emptyLedger('s1', 'repo')
+    ledger = withRead(ledger, '2026-10-04', usage, 'first')
+    ledger = withRead(ledger, '2026-10-04', usage, 'fork')
+    ledger = withRead(ledger, '2026-10-04', usage, 'fork')
+    ledger = withRead(ledger, '2026-10-04', usage, 'subagent')
+    ledger = withVerdictRow(ledger, { at: 1, kind: 'first', model: 'claude-opus-5-5', prompt: 1, level: 'high', confidence: 0.6, outcome: 'below the bar', withInstructions: true })
+    ledger = withVerdictRow(ledger, { at: 2, kind: 'fork', model: 'claude-opus-5-5', prompt: 2, level: 'high', confidence: 0.9, outcome: 'waiting' })
+    ledger = withVerdictRow(ledger, { at: 3, kind: 'fork', model: 'claude-opus-5-5', prompt: 2, level: 'medium', confidence: 0.9, outcome: 'manual' })
+    ledger = withVerdictOutcome(ledger, 'asked: use', 2) // a manual check came in while the question was open
+    expect(ledger.reads.map(r => `${r.kind} ${r.calls}`)).toEqual(['first 1', 'fork 2', 'subagent 1'])
+    expect(ledger.verdicts?.map(v => v.outcome)).toEqual(['below the bar', 'asked: use', 'manual'])
+    expect(withVerdictOutcome(ledger, 'asked: keep').verdicts?.map(v => v.outcome)).toEqual(['below the bar', 'asked: use', 'asked: keep'])
+    const back = parseLedger(JSON.stringify(ledger))
+    expect(back).toEqual(ledger)
+    ledger = withSpend(ledger, { day: '2026-10-04', caller: 'main', from: 'medium', to: 'high', usage })
+    expect(spendReport([ledger], 'session', { today: '2026-10-04', session: 's1' })).toContain(
+      "The router's own checks: 4 (1 of a first prompt, 2 of a conversation, 1 for subagents), using 20 output and 400 input tokens.",
     )
   })
 })
