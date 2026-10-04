@@ -51,9 +51,9 @@ describe('levelOf with the defaults (30, 40)', () => {
 
 describe('gaugeOf', () => {
   test('text and theme colour', () => {
-    expect(gaugeOf({ percent: 12 })).toEqual({ percent: 12, text: 'ctx 12%', level: 'green', color: 'success' })
-    expect(gaugeOf({ percent: 34 })).toEqual({ percent: 34, text: 'ctx 34%', level: 'yellow', color: 'warning' })
-    expect(gaugeOf({ percent: 47 })).toEqual({ percent: 47, text: 'ctx 47%', level: 'red', color: 'error' })
+    expect(gaugeOf({ percent: 12 })).toEqual({ percent: 12, text: '12%', level: 'green', color: 'success' })
+    expect(gaugeOf({ percent: 34 })).toEqual({ percent: 34, text: '34%', level: 'yellow', color: 'warning' })
+    expect(gaugeOf({ percent: 47 })).toEqual({ percent: 47, text: '47%', level: 'red', color: 'error' })
   })
 
   test('nothing to show when there is no reading', () => {
@@ -113,7 +113,7 @@ describe('breakdownText', () => {
         ],
       },
     })
-    expect(text).toBe(['ctx 34% (68k of 200k tokens)', '  Messages       60k', '  System prompt  3.1k'].join('\n'))
+    expect(text).toBe(['Session context: 68k / 200k (34%)', '  Messages       60k', '  System prompt  3.1k'].join('\n'))
   })
 
   test('no reading', () => {
@@ -124,12 +124,18 @@ describe('breakdownText', () => {
 describe('estimatedGaugeOf', () => {
   test('estimates from the breakdown total against the model window, marked with ~', () => {
     const g = estimatedGaugeOf({ window: 200_000, breakdown: { totalTokens: 24_000 } })
-    expect(g).toEqual({ percent: 12, text: 'ctx ~12%', level: 'green', color: 'success' })
+    expect(g).toEqual({ percent: 12, text: '~12%', level: 'green', color: 'success' })
   })
 
   test('nothing without a breakdown total or a window', () => {
     expect(estimatedGaugeOf({ window: 200_000 })).toBeUndefined()
     expect(estimatedGaugeOf({ breakdown: { totalTokens: 5 } })).toBeUndefined()
     expect(estimatedGaugeOf(undefined)).toBeUndefined()
+  })
+})
+
+describe('breakdownText headline for a 1m window', () => {
+  test('reads Session context: 310k / 1m (31%)', () => {
+    expect(breakdownText({ tokens: 310_000, window: 1_000_000, percent: 31 })).toBe('Session context: 310k / 1m (31%)')
   })
 })

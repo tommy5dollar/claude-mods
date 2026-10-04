@@ -3,10 +3,10 @@
 A Claude Code mod that shows one thing: how full the context window is.
 
 ```
-                                                 focus ctx 34%
+                                                 focus 34%
 ```
 
-`ctx 34%` sits at the right of the prompt footer, beside Claude Code's own mode labels. It is coloured by how
+`34%` sits at the right of the prompt footer, beside Claude Code's own mode labels. It is coloured by how
 close you are to compacting:
 
 | Colour | When | Meaning |
@@ -15,14 +15,14 @@ close you are to compacting:
 | yellow | 30% to 40% | getting full |
 | red | above 40% | compact soon (it suits an auto-compact set at 50%) |
 
-<!-- screenshot: terminal footer showing a yellow "ctx 34%" -->
+<!-- screenshot: terminal footer showing a yellow "34%" -->
 
 It does not show 5-hour or 7-day rate limits or cost. That is deliberate.
 
 `/ctx` prints the breakdown by category, largest first:
 
 ```
-ctx 34% (68k of 200k tokens)
+Session context: 68k / 200k (34%)
   Messages       60k
   System prompt  3.1k
   ...

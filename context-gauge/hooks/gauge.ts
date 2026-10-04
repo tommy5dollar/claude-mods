@@ -10,7 +10,7 @@ export type Level = 'green' | 'yellow' | 'red'
 export type Gauge = {
   /** Whole percent of the context window in use. */
   percent: number
-  /** The label, e.g. `ctx 34%`. */
+  /** The label, e.g. `34%`. */
   text: string
   level: Level
   /** A Claude Code theme key, so it reads in light and dark themes. */
@@ -106,13 +106,13 @@ export function gaugeOf(
 
   const level = levelOf(percent, thresholds)
 
-  return { percent, text: `ctx ${percent}%`, level, color: COLORS[level] }
+  return { percent, text: `${percent}%`, level, color: COLORS[level] }
 }
 
 /**
  * An estimated gauge from a `summary` breakdown, for when the engine has no
  * live reading: just after compaction, until the next response lands. Drawn
- * as `ctx ~12%` so it reads as an estimate. Measured against the model's
+ * as `~12%` so it reads as an estimate. Measured against the model's
  * window (`window`), the same base the live reading uses.
  */
 export function estimatedGaugeOf(
@@ -126,7 +126,7 @@ export function estimatedGaugeOf(
   const percent = Math.round((total / window) * 100)
   const level = levelOf(percent, thresholds)
 
-  return { percent, text: `ctx ~${percent}%`, level, color: COLORS[level] }
+  return { percent, text: `~${percent}%`, level, color: COLORS[level] }
 }
 
 /** Whether two gauges would draw the same thing. */
@@ -145,8 +145,11 @@ export function siteOf(value: unknown): Site {
 /** One row of the /context breakdown, as the gauge's command reads it. */
 export type BreakdownRow = { name: string; tokens: number; kind: string }
 
-const formatTokens = (n: number): string =>
-  n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(Math.round(n))
+const formatTokens = (n: number): string => {
+  if (n >= 1_000_000) return `${Number((n / 1_000_000).toFixed(1))}m`
+  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k`
+  return String(Math.round(n))
+}
 
 /**
  * The text the `/ctx` command prints: the headline figure, then the used
@@ -165,8 +168,8 @@ export function breakdownText(
 
   const head =
     isFiniteNumber(context.tokens) && isFiniteNumber(context.window)
-      ? `${gauge.text} (${formatTokens(context.tokens)} of ${formatTokens(context.window)} tokens)`
-      : gauge.text
+      ? `Session context: ${formatTokens(context.tokens)} / ${formatTokens(context.window)} (${gauge.percent}%)`
+      : `Session context: ${gauge.percent}%`
 
   const rows = (context.breakdown?.categories ?? [])
     .filter(row => row.kind === 'used' && isFiniteNumber(row.tokens) && row.tokens > 0)

@@ -1,6 +1,6 @@
 {
   "name": "context-gauge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Context-window usage as a small coloured 'ctx NN%' in the prompt footer: green below 30%, yellow 30-40%, red above 40%. /ctx prints the breakdown by category.",
   "author": { "name": "Tommy Long" },
   "repository": "https://github.com/tommy5dollar/mods",

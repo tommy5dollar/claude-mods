@@ -52,7 +52,7 @@ describe('register', () => {
         changed: ['context'],
       })
       const ui = await $.ui.mount({ ...FOOTER, surface })
-      const found = await ui.find({ type: 'Text', text: 'ctx 34%' })
+      const found = await ui.find({ type: 'Text', text: '34%' })
       expect(found?.props.color).toBe('warning')
       await ui.unmount()
     })
@@ -75,7 +75,7 @@ describe('register', () => {
     await clock.settle() // let the start's background usage read land
 
     const ui = await $.ui.mount({ ...FOOTER_WITH_MODE, surface: 'terminal' })
-    expect((await ui.find({ type: 'Text', text: 'ctx 10%' }))?.props.color).toBe('success')
+    expect((await ui.find({ type: 'Text', text: '10%' }))?.props.color).toBe('success')
     expect(await ui.find({ text: 'focus' })).toBeDefined()
     await ui.unmount()
   })
@@ -90,7 +90,7 @@ describe('register', () => {
       changed: ['context'],
     })
     const ui = await $.ui.mount({ ...FOOTER, surface: 'terminal' })
-    expect((await ui.find({ type: 'Text', text: 'ctx 45%' }))?.props.color).toBe('error')
+    expect((await ui.find({ type: 'Text', text: '45%' }))?.props.color).toBe('error')
     await ui.unmount()
   })
 
@@ -101,7 +101,7 @@ describe('register', () => {
     const { text } = await $.command.run({ command: 'ctx', args: '', origin: { kind: 'composer' },
       presentation: { isFullscreen: false, columns: 120 },
     })
-    expect(text).toContain('ctx 27% (53k of 200k tokens)')
+    expect(text).toContain('Session context: 53k / 200k (27%)')
     expect(text).toContain('Messages')
     expect(text).not.toContain('Free space')
   })
@@ -120,7 +120,7 @@ describe('register', () => {
       changed: ['context'],
     })
     const ui = await $.ui.mount({ ...FOOTER, surface: 'desktop' })
-    expect(await ui.find({ type: 'Text', text: 'ctx 34%' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '34%' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'auto · medium' })).toBeDefined()
     await ui.unmount()
   })
