@@ -53,10 +53,10 @@ Judge the task as it stands now:
 - If a user hint is given, the user asked for this routing explicitly: weigh the hint strongly.
 
 How sure you are:
-- Give a confidence from 0 to 1: how likely it is that this level stays right for the work from here. The router only acts on a level you are confident in, and otherwise asks you again after the next message, so be honest rather than decisive.
-- 0.9 or more: the task, and what makes it easy or hard, is clear, and more conversation is unlikely to move the level.
-- 0.6 to 0.8: the task is stated, but its scope, its risk or the code it touches could still move it a level.
-- Below 0.6: a guess.
+- Give each level you may pick a probability that it is the right level for the work from here. They sum to 1.
+- Spread the probability where you are torn. If the task clearly needs more than the level the session is on but you can't tell high from xhigh, say so (for example medium 0.1, high 0.5, xhigh 0.4) rather than naming one level and sounding unsure of it.
+- The router moves the session only when you are sure its current level is wrong in one direction, and then to the middle of your spread, so be honest rather than decisive.
+- Put most of the probability on one level only when the task, and what makes it easy or hard, is clear and more conversation is unlikely to move it.
 
 Worked examples of reading a transcript (what level each needs depends on the model, so none is shown):
 1. USER: hi → {"decision":"undecided"}
@@ -75,7 +75,8 @@ export const CLASSIFIER_FRAME = classifierFrame()
 export const classifierContract = (levels: readonly Level[] = levelsUpTo()): string => `Reply with exactly one JSON object and nothing else:
 {"decision":"undecided"}
 or
-{"decision":"level","level":"<${levels.join('|')}>","confidence":<0 to 1>,"reason":"<what the task is, 3-8 words, e.g. bug fix in existing code>","why":"<one or two sentences: why this level and not the one above or below, for this task on this model>"}`
+{"decision":"level","levels":{${levels.map(level => `"${level}":<0 to 1>`).join(',')}},"reason":"<what the task is, 3-8 words, e.g. bug fix in existing code>","why":"<one or two sentences: why the work needs about this much effort on this model, and what would tip it a level either way>"}
+"levels" gives the probability that each level is the right one for the work from here, summing to 1.`
 
 export const CLASSIFIER_CONTRACT = classifierContract()
 
@@ -99,7 +100,7 @@ export const classifierSystem = (rules: string, model?: ModelNotes, levels: read
  * along here, as do the prompt being submitted and, mid-turn, the answers the
  * user just gave to the model's questions.
  */
-export function forkPrompt(input: { rules: string; model?: ModelNotes; current?: string; lastReply?: string; hint?: string; answered?: string; levels?: readonly Level[] }): string {
+export function forkPrompt(input: { rules: string; model?: ModelNotes; current?: string; lastReply?: string; hint?: string; answered?: string; levels?: readonly Level[]; inForce?: Level }): string {
   const parts = [
     'Pause the task for a moment. Do not use any tools and do not carry on with the work: answer only the question below.',
     classifierSystem(input.rules, input.model, input.levels),
@@ -112,6 +113,7 @@ export function forkPrompt(input: { rules: string; model?: ModelNotes; current?:
   if (current) parts.push(`The user has just sent this new message, and the work goes on from it:\n<new_message>\n${current}\n</new_message>`)
   const hint = input.hint?.trim()
   if (hint) parts.push(`<user_hint>\n${hint}\n</user_hint>\nThe user asked for this routing explicitly and gave this hint; weigh it strongly.`)
+  if (input.inForce) parts.push(`The session is at ${input.inForce} effort now.`)
   parts.push("The transcript is this conversation: everything above, with your instructions, CLAUDE.md and memory. Suggest the session's effort level now; answer undecided only if no actionable task has been stated yet. JSON only.")
   return parts.join('\n\n')
 }
@@ -453,19 +455,22 @@ export function firstSighting(prior: number, decideWithin: number, allowOff: boo
  * (CLAUDE.md files, rules, memory) come first when known; a manual
  * `/route <hint>` adds the hint after the transcript.
  */
-export const classifierPrompt = (transcript: string, hint?: string, instructions?: string): string => {
+/** The line that tells a check which level the session is on now, which its spread is judged against. */
+const inForceLine = (inForce: Level | undefined): string => (inForce ? `\n\nThe session is at ${inForce} effort now.` : '')
+
+export const classifierPrompt = (transcript: string, hint?: string, instructions?: string, inForce?: Level): string => {
   const said = hint?.trim()
   const hintBlock = said ? `\n\n<user_hint>\n${said}\n</user_hint>\nThe user asked for this routing explicitly and gave this hint; weigh it strongly.` : ''
   const given = instructions?.trim()
   const instructionsBlock = given ? `The session's instructions (CLAUDE.md files, rules and memory), as its model sees them:\n<instructions>\n${given}\n</instructions>\n\n` : ''
-  return `${instructionsBlock}Transcript so far (oldest first):\n<transcript>\n${transcript}\n</transcript>${hintBlock}\n\nSuggest the session's effort level now; answer undecided only if no actionable task has been stated yet. JSON only.`
+  return `${instructionsBlock}Transcript so far (oldest first):\n<transcript>\n${transcript}\n</transcript>${hintBlock}${inForceLine(inForce)}\n\nSuggest the session's effort level now; answer undecided only if no actionable task has been stated yet. JSON only.`
 }
 
 // --- parsing the classifier's reply ---------------------------------------------
 
 export type Decision =
   | { decision: 'undecided' }
-  | { decision: 'lock'; level: Level; reason: string; confidence?: number }
+  | { decision: 'lock'; level: Level; reason: string; why?: string; confidence?: number; spread?: Spread }
 
 /**
  * Reads the classifier's reply: the first `{...}` in it, so a reply fenced
@@ -489,28 +494,117 @@ function levelInDecision(record: Record<string, unknown> | undefined): Record<st
   return record && isLevel(named) && record.level === undefined ? { ...record, decision: 'level', level: named } : record
 }
 
-/** The first `{...}` in a reply, parsed; undefined when there is none or it is not a JSON object. */
+/**
+ * The first JSON object in a reply, parsed; undefined when there is none.
+ * Reads from the first `{` to the brace that closes it, so text after the
+ * object is ignored, and closes braces left open at the end of the reply
+ * (Fable 5.1 sometimes stops before its last `}`).
+ */
 function jsonObjectOf(reply: string | undefined | null): Record<string, unknown> | undefined {
-  const match = typeof reply === 'string' ? reply.match(/\{[\s\S]*\}/) : null
-  if (!match) return undefined
+  if (typeof reply !== 'string') return undefined
+  const start = reply.indexOf('{')
+  if (start < 0) return undefined
+  let depth = 0
+  let inString = false
+  let end = reply.length
+  for (let i = start; i < reply.length; i++) {
+    const c = reply[i]
+    if (inString) {
+      if (c === '\\') i++
+      else if (c === '"') inString = false
+    } else if (c === '"') inString = true
+    else if (c === '{') depth++
+    else if (c === '}' && --depth === 0) {
+      end = i + 1
+      break
+    }
+  }
+  const text = reply.slice(start, end).trimEnd() + (end === reply.length && depth > 0 && !inString ? '}'.repeat(depth) : '')
   try {
-    const data: unknown = JSON.parse(match[0])
+    const data: unknown = JSON.parse(text)
     return typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : undefined
   } catch {
     return undefined
   }
 }
 
-/** A reply's level (case-insensitive), reason (capped) and confidence; undefined for an unknown level. */
+/**
+ * A reply's level (case-insensitive), reason (capped) and confidence;
+ * undefined for an unknown level. A reply with a spread (`levels`) takes the
+ * spread's median as its level, and its confidence is judged later against
+ * the level in force (judgeSpread).
+ */
 function proposalOf(record: Record<string, unknown>): Proposal | undefined {
-  const level = typeof record.level === 'string' ? record.level.trim().toLowerCase() : undefined
+  const spread = spreadOf(record.levels)
+  const named = typeof record.level === 'string' ? record.level.trim().toLowerCase() : undefined
+  const level = spread ? judgeSpread(spread, undefined, LEVELS).level : named
   if (!isLevel(level)) return undefined
   const reason = typeof record.reason === 'string' ? record.reason.replace(/\s+/g, ' ').trim() : ''
   const why = typeof record.why === 'string' ? record.why.replace(/\s+/g, ' ').trim().slice(0, 400) : ''
   const proposal: Proposal = { level, reason: reason === '' ? 'classifier' : cut(reason, 60).replace(/… \[\d+ more chars\]$/, '…'), ...(why ? { why } : {}) }
+  if (spread) return { ...proposal, spread }
   const confidence = confidenceOf(record.confidence)
   return confidence === undefined ? proposal : { ...proposal, confidence }
 }
+
+/** A reply's `levels` object as a spread: known levels with a probability (0-1 or a percentage), normalised. */
+export function spreadOf(value: unknown): Spread | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const spread: Spread = {}
+  let total = 0
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    const level = key.trim().toLowerCase()
+    const p = confidenceOf(raw)
+    if (!isLevel(level) || p === undefined) continue
+    spread[level] = (spread[level] ?? 0) + p
+    total += p
+  }
+  if (total <= 0) return undefined
+  for (const level of LEVELS) if (spread[level] !== undefined) spread[level] = (spread[level] as number) / total
+  return spread
+}
+
+/**
+ * Turns a spread into a level and a confidence, against the level in force.
+ * The level is the spread's median within the offered levels (the lowest
+ * level at least as likely as not to be enough), so a check torn between high
+ * and xhigh lands on high. The confidence is how sure the check is that the
+ * level in force is wrong in that direction: the probability above it for a
+ * move up, below it for a move down, and for staying, one minus the larger of
+ * the two. Tommy, 2026-10-05: a check "certain that it has to go up, just not
+ * [sure] to what" should still move; one confidence in one exact level kept it
+ * on the level it was sure was wrong. With no level in force known, the
+ * confidence is the median level's own probability.
+ */
+export function judgeSpread(spread: Spread, inForce: Level | undefined, offered: readonly Level[] = levelsUpTo()): { level: Level; confidence: number } {
+  const mass = offered.map(() => 0)
+  for (const level of LEVELS) {
+    const p = spread[level]
+    if (p !== undefined) mass[offered.indexOf(clampLevel(level, offered))] += p
+  }
+  let cumulative = 0
+  let at = offered.length - 1
+  for (let i = 0; i < offered.length; i++) {
+    cumulative += mass[i] as number
+    if (cumulative >= 0.5 - 1e-9) {
+      at = i
+      break
+    }
+  }
+  const level = offered[at] as Level
+  if (inForce === undefined) return { level, confidence: mass[at] as number }
+  const ref = offered.indexOf(clampLevel(inForce, offered))
+  const up = mass.slice(ref + 1).reduce((a, b) => a + b, 0)
+  const down = mass.slice(0, ref).reduce((a, b) => a + b, 0)
+  const confidence = at > ref ? up : at < ref ? down : 1 - Math.max(up, down)
+  return { level, confidence: Math.round(confidence * 1000) / 1000 }
+}
+
+/** A spread as text, lowest level first, levels with 1% or more: `medium 10%, high 50%, xhigh 40%`. */
+export const spreadText = (spread: Spread): string =>
+  LEVELS.filter(level => (spread[level] ?? 0) >= 0.005)
+    .map(level => `${level} ${Math.round((spread[level] as number) * 100)}%`)
+    .join(', ')
 
 /** A confidence from 0 to 1. A percentage (1 to 100) is read as one; anything else is undefined. */
 export function confidenceOf(value: unknown): number | undefined {
@@ -877,6 +971,8 @@ export type VerdictRow = {
   /** The check's short task summary and its why, for calibration. */
   reason?: string
   why?: string
+  /** The check's probability for each level, when it gave one. */
+  spread?: Spread
   outcome: string
   /** A first check that carried the session's instructions (CLAUDE.md, rules, memory), to learn whether they help. */
   withInstructions?: boolean
@@ -1101,7 +1197,10 @@ export type Mode = 'auto' | 'picker'
 export type Phase = 'undecided' | 'locked'
 
 /** A check's level. `checkedAt` (when the check ran, never saved) ties the answer to its question back to the check's verdict row. */
-export type Proposal = { level: Level; reason: string; why?: string; confidence?: number; checkedAt?: number }
+/** A check's probability for each level, normalised to sum to 1. */
+export type Spread = Partial<Record<Level, number>>
+
+export type Proposal = { level: Level; reason: string; why?: string; confidence?: number; spread?: Spread; checkedAt?: number }
 
 /** A question open about a verdict: use the router's level, or keep the picker's (unknown when no request has gone out yet). */
 export type Asking = Proposal & { picker?: Level }
@@ -1357,9 +1456,10 @@ export function routeReport(state: RouterState, decideWithin: number, inForce?: 
     lines.push(`Checks this session: ${diagnostics.calls}${diagnostics.checkModel ? `, on ${diagnostics.checkModel}` : ''}.`)
     if (verdict) {
       const sure = verdict.decision.decision === 'lock' && verdict.decision.confidence !== undefined ? `, ${percent(verdict.decision.confidence)} sure` : ''
-      const said = verdict.decision.decision === 'lock' ? `${verdict.decision.level}${sure} (${verdict.decision.reason})` : 'no clear task yet'
+      const spread = verdict.decision.decision === 'lock' && verdict.decision.spread ? ` Spread: ${spreadText(verdict.decision.spread)}` : ''
+      const said = verdict.decision.decision === 'lock' ? `${verdict.decision.level}${sure} (${verdict.decision.reason}).${spread}` : 'no clear task yet.'
       const took = diagnostics.lastReadMs === undefined ? '' : `, took ${(diagnostics.lastReadMs / 1000).toFixed(1)}s`
-      lines.push(`Last check (${verdict.trigger}, ${ago(diagnostics.now, verdict.at)}${took}): ${said}.`)
+      lines.push(`Last check (${verdict.trigger}, ${ago(diagnostics.now, verdict.at)}${took}): ${said}`)
     }
     const sent = diagnostics.sent
     if (sent && sent.omitted > 0) lines.push(`It read ${sent.sentChars} of the conversation's ${sent.fullChars} characters (limit ${sent.maxChars}).`)
@@ -1430,10 +1530,19 @@ export function restored(saved: unknown): RouterState {
  */
 export function footerLabel(state: RouterState): { text: string; color?: string; dim: boolean } {
   if (state.asking) return { text: `${state.asking.level}?`, color: LEVEL_COLOR[state.asking.level], dim: false }
-  if (state.mode === 'picker' || state.unsupported) return { text: 'off', dim: true }
+  if (state.unsupported) return { text: 'off', dim: true }
+  if (ranOut(state)) return { text: 'no decision', dim: true }
+  if (state.mode === 'picker') return { text: 'off', dim: true }
   if (state.phase === 'locked' && state.level) return { text: `using ${state.level}`, color: LEVEL_COLOR[state.level], dim: false }
-  return { text: 'deciding', dim: true }
+  return { text: 'undecided', dim: true }
 }
+
+/**
+ * Whether the router stopped because its prompts ran out with nothing
+ * decided, as opposed to being turned off. Its footer reads `no decision`, not
+ * `off`, which read as if someone had switched it off.
+ */
+export const ranOut = (state: RouterState): boolean => state.gaveUp === true && /^(no clear task|not sure enough) after /.test(state.offReason ?? '')
 
 export type BandAction = {
   /**
@@ -1448,8 +1557,35 @@ export type BandAction = {
 /** The band consent `auto` opens by itself once, after locking a level other than the picker's. */
 export type Notice = Proposal & { from?: Level }
 
-export const noticeHeadline = (notice: Notice): string =>
-  `Effort router: ${notice.from && notice.from !== notice.level ? `changed from ${notice.from} to ${notice.level}` : `using ${notice.level}`} for this session (${notice.reason}).${notice.why ? ` ${notice.why}` : ''}`
+export function noticeHeadline(notice: Notice): string {
+  const moved = notice.from !== undefined && notice.from !== notice.level
+  const what = moved ? `changed from ${notice.from} to ${notice.level}` : `using ${notice.level}`
+  // How sure the check was that the old level was wrong, in the direction it moved.
+  const sure =
+    moved && notice.confidence !== undefined && notice.from
+      ? `, ${Math.round(notice.confidence * 100)}% sure ${notice.from} was too ${rank(notice.level) > rank(notice.from) ? 'low' : 'high'}`
+      : ''
+  return `Effort router: ${what} for this session (${notice.reason}${sure}).${notice.why ? ` ${notice.why}` : ''}`
+}
+
+/**
+ * The line the `showChecks` option prints after each automatic check: what
+ * it said, and what the router did with it.
+ */
+export function checkLine(input: { n: number; of: number; proposal?: Proposal; inForce?: Level; threshold: number; sure: boolean; consent: 'ask' | 'auto' }): string {
+  const head = `Effort router: check ${input.n} of ${input.of}:`
+  const on = input.inForce ? ` on ${input.inForce}` : ' on your setting'
+  const { proposal } = input
+  if (!proposal) return `${head} no clear task yet, so staying${on}.`
+  const spread = proposal.spread ? `${spreadText(proposal.spread)}. ` : `${proposal.level}. `
+  const pct = proposal.confidence === undefined ? undefined : Math.round(proposal.confidence * 100)
+  const moving = input.inForce !== undefined && proposal.level !== input.inForce
+  const direction = moving && input.inForce ? ` ${input.inForce} is too ${rank(proposal.level) > rank(input.inForce) ? 'low' : 'high'}` : ` ${proposal.level} is right`
+  const sureText = pct === undefined ? '' : `${pct}% sure${direction}`
+  if (!input.sure) return `${head} ${spread}${sureText}${sureText ? ', ' : ''}below the ${Math.round(input.threshold * 100)}% bar, so staying${on}.`
+  if (!moving) return `${head} ${spread}${sureText}, so keeping ${proposal.level}.`
+  return `${head} ${spread}${sureText}, so ${input.consent === 'auto' ? 'moving to' : 'asking about'} ${proposal.level}.`
+}
 
 /** `Stop routing (back to medium)`: the router off, the user's effort setting back. */
 const stopLabel = (setting: Level | undefined): string => `Stop routing${setting ? ` (back to ${setting})` : ''}`
@@ -1473,10 +1609,11 @@ export function bandHeadline(state: RouterState): string {
   const label = footerLabel(state).text
   if (state.unsupported) return `Effort router: off on ${state.unsupported}. It works with ${SUPPORTED_NAMES}.`
   if (state.asking) return `Effort router: ${label} Waiting for your answer.`
+  if (ranOut(state)) return `Effort router: no decision (${state.offReason}). Your effort setting applies.`
   if (state.mode === 'picker') return `Effort router: off${state.offReason ? ` (${state.offReason})` : ''}. Your effort setting applies.`
   if (state.phase === 'locked') return `Effort router: ${label} for this session (${state.reason ?? 'router'}).${state.why ? ` ${state.why}` : ''}`
   if (state.gaveUp) return 'Effort router: stopped checking (no clear task yet). Your effort setting applies.'
-  return 'Effort router: deciding. Your effort setting applies until the task is clear.'
+  return 'Effort router: undecided. Your effort setting applies until the task is clear.'
 }
 
 /**

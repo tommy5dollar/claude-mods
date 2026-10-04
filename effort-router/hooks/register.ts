@@ -23,7 +23,9 @@ import {
   afterBudget,
   agentFileDefinition,
   appliedLevel,
+  checkLine,
   clampLevel,
+  judgeSpread,
   levelsUpTo,
   classifierPrompt,
   classifierSystem,
@@ -131,6 +133,8 @@ type Settings = {
   highestLevel: Level
   /** How sure (0 to 1) a check must be before the router acts on it. */
   confidence: number
+  /** Print a line in the transcript after each automatic check: what it said and what the router did. */
+  showChecks: boolean
   /** A session the router first sees with more than this many tokens of conversation is left alone. */
   skipAboveTokens: number
   /** Send the session's instructions (CLAUDE.md, rules, memory) with the first prompt's check. */
@@ -162,7 +166,7 @@ type Session = {
   bandOpen: boolean
   /** Consent `auto` locked a level other than the picker's: the band shows it once, with Revert. */
   notice?: Notice
-  /** The band's Assess now / Reassess is running: the footer reads `checking…`. */
+  /** A check is running (automatic, or the band's Assess now / Reassess now): the footer reads `deciding…`. */
   checking: boolean
   /** What the band's Assess now / Reassess found, shown in the band until it is hidden. */
   result?: string
@@ -252,6 +256,7 @@ function settingsOf(options: PluginOptions): Settings {
     classifierModel: checkModelOf(options.classifierModel),
     highestLevel: isLevel(options.highestLevel) && options.highestLevel !== 'low' ? options.highestLevel : DEFAULT_HIGHEST,
     confidence: confidenceOf(options.confidence) ?? 0.7,
+    showChecks: options.showChecks === true || options.showChecks === 'true',
     skipAboveTokens: typeof options.skipAboveTokens === 'number' || typeof options.skipAboveTokens === 'string' ? num(options.skipAboveTokens, 20000) : 20000,
     firstCheckInstructions: options.firstCheckInstructions !== false && options.firstCheckInstructions !== 'false',
     syncPicker: options.syncPicker !== false && options.syncPicker !== 'false',
@@ -546,12 +551,14 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
     if (rendered.text.trim() === '' && !input.hint) return undefined
     const notes = await modelNotes($, model)
     const levels = levelsFor(settings)
+    // The level in force now: a check's spread is judged against it (a kept level, else the picker's).
+    const inForce = appliedLevel(session.state) ?? (isLevel(session.picker) ? session.picker : undefined)
     const separate = async (checkModel: string, instructions?: string) => {
       session.sent = { sentChars: rendered.sentChars, fullChars: rendered.fullChars, maxChars: settings.classifierMaxChars, omitted: rendered.omitted }
       return $.model.complete({
         model: checkModel,
         system: classifierSystem(rules.composed.text, notes, levels),
-        prompt: classifierPrompt(rendered.text, input.hint, instructions),
+        prompt: classifierPrompt(rendered.text, input.hint, instructions, inForce),
         maxTokens: SESSION_CHECK_MAX_TOKENS,
         timeoutMs: settings.classifyTimeoutMs,
       })
@@ -569,6 +576,7 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
           hint: input.hint,
           answered: input.answer?.text,
           levels,
+          inForce,
         }),
       })
       check = { kind: 'fork', model }
@@ -589,7 +597,8 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
       $.ui.log(`effort-router: ${session.error.text}`, { to: 'debug' })
       return check
     }
-    const decision = parseDecision(reply.text)
+    const parsed = parseDecision(reply.text)
+    const decision = parsed.decision === 'lock' && parsed.spread ? { ...parsed, ...judgeSpread(parsed.spread, inForce, levels) } : parsed
     const checkedAt = await now()
     session.verdict = { at: checkedAt, trigger: input.trigger, raw: reply.text, decision, kind: check.kind }
     $.ui.log(`effort-router: ${check.kind} check on ${check.model} said (${input.trigger}) ${reply.text.trim().slice(0, 200)}`, { to: 'debug' })
@@ -640,6 +649,10 @@ async function afterRead($: EngineInterface, id: string, session: Session, setti
   const proposal = check?.proposal
   const sure = proposal !== undefined && isConfident(proposal, settings.confidence)
   if (check) recordVerdict($, session, check, !proposal ? 'undecided' : !sure ? 'below the bar' : consent === 'auto' ? 'acted' : 'waiting')
+  if (check && settings.showChecks) {
+    const inForce = isLevel(session.picker) ? session.picker : undefined
+    $.ui.log(checkLine({ n: session.state.prompts, of: settings.decideWithin, proposal, inForce, threshold: settings.confidence, sure, consent }))
+  }
   if (consent === 'auto' && sure) {
     await lockAuto($, id, session, settings, proposal)
     return
@@ -668,6 +681,8 @@ async function spendBudget($: EngineInterface, id: string, session: Session, set
 async function readAfter($: EngineInterface, id: string, session: Session, settings: Settings, consent: Consent, input: ReadInput): Promise<void> {
   if (session.reading) return
   session.reading = true
+  session.checking = true // the footer reads `deciding…` while the turn waits for the check
+  show($)
   const started = await $.clock.now().catch(() => Date.now())
   let outcome = 'failed'
   try {
@@ -684,6 +699,8 @@ async function readAfter($: EngineInterface, id: string, session: Session, setti
     $.ui.log(`effort-router: classification failed: ${String(error)}`, { to: 'debug' })
   } finally {
     session.reading = false
+    session.checking = false
+    show($)
     const took = (await $.clock.now().catch(() => Date.now())) - started
     session.lastReadMs = took
     $.ui.log(`effort-router: read settled in ${took} ms (${input.trigger}): ${outcome}`, { to: 'debug' })
@@ -1352,7 +1369,7 @@ export function register(on: On, options: PluginOptions): void {
   // that opens the band. (Desktop silently drops a Select here, so no Select.)
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     const { session } = await sessionOf($)
-    const label = session.checking ? { text: 'checking…', dim: true } : footerLabel(view(session))
+    const label = session.checking ? { text: 'deciding…', dim: false } : footerLabel(view(session))
     const theirs = await next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     const mine =

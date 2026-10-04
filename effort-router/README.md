@@ -24,14 +24,16 @@ The footer, right beside the native model and effort pickers, shows the router's
 
 | Footer | What it means | Band buttons (press the footer) |
 | --- | --- | --- |
-| `deciding` (dim) | The router is reading your prompts. Requests run at the picker's level | `Assess now`, `Stop routing (back to medium)` |
-| `high?` | The question is open: the turn waits for your answer | `Assess now`, `Stop routing (back to medium)` |
+| `undecided` (dim) | Nothing decided yet. Your setting applies, and each prompt you send is checked. Nothing to wait for | `Assess now`, `Stop routing (back to medium)` |
+| `deciding…` | A check is running now. The turn starts when it's done, in a few seconds | |
+| `high?` | With consent `ask`: the question is open and the turn waits for your answer | `Assess now`, `Stop routing (back to medium)` |
 | `using high` | Decided: every main-thread request runs at high, and the router stops checking by itself | `Reassess now`, `Reassess with my next prompt`, `Stop routing (back to medium)` |
-| `off` (dim) | The router does nothing; the picker is in charge | `Start routing` |
+| `no decision` (dim) | The router ran out of prompts without being sure. Your setting applies for the rest of the session | `Start routing` |
+| `off` (dim) | You stopped routing, so the picker is in charge | `Start routing` |
 
 `Stop routing` turns the router off for this session: no more checks, subagents aren't routed and your effort setting (named in the button) applies again. `/route` still answers, and `Start routing` or `/route on` starts it again. New sessions are routed as usual.
 
-<!-- screenshot: footer showing "deciding" beside the gauge and the native pickers -->
+<!-- screenshot: footer showing "undecided" beside the gauge and the native pickers -->
 <!-- screenshot: the question card "Effort router: ... Use high effort instead of medium?" with the footer reading "high?" -->
 
 The footer state is a plain button. Pressing it opens the router's band above the prompt: a line such as `Effort router: using high for this session (bug fix in existing code). The crash needs tracing through the parser, but the fix is local.`, then the buttons and `Hide` (hotkey `x`). The words in brackets are what the check took the task to be, and the sentence after is why it chose that level. The buttons are numbered `1`, `2`. Any action closes the band, and pressing the footer again closes it too. With consent `ask` the band never opens by itself: the question card is where you agree.
@@ -53,7 +55,7 @@ A `turn.step` hook that waits on an ordinary promise is abandoned after about 10
 - **Before your prompt runs.** While the router is deciding, each prompt you send waits for one check before the turn starts. It happens at most `decideWithin` times per session. If the check takes longer than `classifyTimeoutMs` (15 s) or fails, the turn runs at the picker's level and `/route status` shows why.
 - **Checks run on your session's model.** The model you chose to work in judges the task, because it judges better than a small model and the savings from getting the level right scale with it. From the second prompt on, a check is a fork of the conversation: the session's own request (system prompt, tools, CLAUDE.md, memory and the whole conversation) with one question added, served from the session's prompt cache. Measured on Opus 5.5 with a 72k-token conversation: 1.6 s, the whole conversation read from cache, about 2.8k fresh input tokens and 40 output tokens, so about 3 cents. The fork runs at the effort the session last used.
 - **The first prompt is a separate call.** Before the session has sent anything there is no request to fork, and a mod can't build one with Claude Code's system prompt and tools. So the first check is one call to the same model with your CLAUDE.md files, rules and memory (as Claude Code hands them to the conversation) and your prompt, at the model's default effort. It isn't cached: about 13k tokens with a large set of instructions, so roughly 5 cents on Opus 5.5 or 13 cents on Fable 5.1, once per session (1.4 s measured). `firstCheckInstructions: false` sends only the prompt. A prompt sent while a turn is still running isn't checked (that case hasn't been tested live); the next prompt is.
-- **How sure it is.** Each check gives a level and a confidence from 0 to 1. The router acts only when a check is at least `confidence` sure (0.7 by default). Below that it changes nothing and checks again after your next prompt, which by then carries more of the conversation. The bar is a starting point: every check's level, confidence and outcome is kept in the spend ledger, so the bar can be set from how often a confident level was kept or overruled.
+- **How sure it is.** Each check gives every level a probability of being the right one, for example `medium 10%, high 50%, xhigh 40%`. The router asks how sure the check is that the level you're on is wrong in one direction: here 90% that medium is too low. When that clears `confidence` (0.7 by default), it moves to the middle of the spread, the lowest level at least as likely as not to be enough. Here that's high. So a check torn between high and xhigh still moves you off medium, to high, rather than leaving you on the one level it's sure is wrong. When it's sure enough your level is right, it keeps it. Below the bar it changes nothing and checks again after your next prompt, which by then carries more of the conversation. Every check's spread, confidence and outcome is kept in the spend ledger, so the bar can be set from how often a confident move was kept or overruled. Turn on `showChecks` to see a line after each check.
 - **Up to xhigh.** The router picks up to `highestLevel`, xhigh by default, and the checks aren't offered max: on all three models max rarely beats xhigh and can overthink. Set `highestLevel` to `max` to allow it.
 - **The levels in between.** When the router's level is two or more away from yours, the question offers the levels in between too: from medium, a check that picks xhigh asks `Use xhigh`, `Use high` or `Keep medium`.
 - **Another check model.** Set `classifierModel` to another supported model (`opus`, `sonnet` or `fable`) for separate calls that read a shortened copy of the conversation. Haiku is never used: any other name falls back to your session's model.
@@ -152,7 +154,8 @@ Set them in `/config`, or under `pluginConfigs["effort-router@tommy-mods"].optio
 | `classifierMaxChars` | 24000 | Most transcript characters a separate check sends |
 | `classifierModel` | `session` | `session`: your session's own model, as a fork from the second prompt. Or another supported model (`opus`, `sonnet`, `fable`) for separate checks. Haiku is never used |
 | `highestLevel` | `xhigh` | The highest level the router picks. `max` allows max, which rarely beats xhigh on the current models |
-| `confidence` | 0.7 | How sure (0 to 1) a check must be before the router acts on it. 0 acts on any level |
+| `confidence` | 0.7 | How sure (0 to 1) a check must be that your current level is wrong in one direction (or right) before the router acts. 0 acts on any check |
+| `showChecks` | `false` | Print a line after each automatic check: its spread, how sure it was and what the router did |
 | `skipAboveTokens` | 20000 | A session first seen with more conversation than this keeps your effort setting |
 | `firstCheckInstructions` | true | Send your CLAUDE.md files, rules and memory with the first prompt's check. `false`: the prompt only |
 | `syncPicker` | true | Run `/effort <level>` so the terminal's picker label matches |

@@ -21,7 +21,8 @@
 //   bun run eval -- --set subagent     # one set: session | subagent
 //   bun run eval -- --only finance     # fixtures whose name contains "finance"
 //   bun run eval -- --runs 3           # each fixture 3 times (the model is not deterministic)
-//   bun run eval -- --confidence 0.7   # the bar a pass must clear to count as acted on (default 0.8)
+//   bun run eval -- --confidence 0.7   # the bar a pass must clear to count as acted on (default 0.7)
+//   bun run eval -- --setting high     # the level the session is on, which a spread is judged against (default medium)
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -30,6 +31,8 @@ import {
   classifierPrompt,
   classifierSystem,
   isConfident,
+  isLevel,
+  judgeSpread,
   parseDecision,
   parseSubagentReply,
   percent,
@@ -47,7 +50,10 @@ const flag = (name: string): string | undefined => {
 }
 const model = flag('model') ?? 'opus'
 const effort = flag('effort')
-const bar = Number(flag('confidence') ?? 0.8)
+const bar = Number(flag('confidence') ?? 0.7)
+const settingFlag = flag('setting') ?? 'medium'
+if (!isLevel(settingFlag)) throw new Error(`--setting must be a level, got ${settingFlag}`)
+const setting = settingFlag
 const only = flag('only')
 const set = flag('set')
 const concurrency = Number(flag('concurrency') ?? 4)
@@ -99,9 +105,11 @@ const cases: Case[] = [
     set: 'session',
     name: fixture.name,
     system: sessionSystem,
-    prompt: classifierPrompt(trimTranscript(fixture.messages, fixture.current)),
+    prompt: classifierPrompt(trimTranscript(fixture.messages, fixture.current), undefined, undefined, setting),
     read: raw => {
-      const decision = parseDecision(raw)
+      const parsed = parseDecision(raw)
+      // As the router does: a spread is judged against the level the session is on.
+      const decision = parsed.decision === 'lock' && parsed.spread ? { ...parsed, ...judgeSpread(parsed.spread, setting) } : parsed
       return decision.decision === 'lock' ? { got: decision.level, reason: decision.reason, confidence: decision.confidence } : { got: 'undecided' }
     },
     expect: (modelKey && fixture.expectOn?.[modelKey]) || fixture.expect,

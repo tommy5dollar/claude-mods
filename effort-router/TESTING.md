@@ -25,7 +25,7 @@ bun test                            # 97 tests: trimming (incl. the last assista
                                     # 0.11: no example or rule names a level, levels held to highestLevel (xhigh unless
                                     # set) in the frame, contract and capLevel, the fork's answers block, the subagent read
                                     # told its model with that model's notes, the subagent fork message, definitions' model
-claude plugin test .                # 69 tests in the engine's kit, among them, for the main thread: undecided runs at the
+claude plugin test .                # 71 tests in the engine's kit, among them, for the main thread: undecided runs at the
                                     # picker level with no question; the picker's level locks with no question and reading
                                     # stops; a different level holds the request on the question, Use locks it and syncs
                                     # /effort, Keep locks the picker level; the footer reads high? while the request waits;
@@ -60,7 +60,7 @@ claude plugin test .                # 69 tests in the engine's kit, among them, 
                                     # a subagent's read is a fork of its parent told the subagent's model; a subagent on
                                     # Haiku (the call's model or its definition's) is left alone; Check now shows its result
                                     # in the band
-"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 69 under Desktop's engine
+"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 71 under Desktop's engine
 claude plugin validate . --strict
 bun run eval -- --runs 3            # opt-in, real model: 23 session fixtures and 14 subagent briefs, see below
                                     # (both sets as separate calls on --model, default opus, with its notes; the session
@@ -107,6 +107,25 @@ case: the router asks a fork of the parent, which knows the task, and this can't
 - All three gave medium for the web-research subagent (expected low). Fable's notes support it (at low it searches
   less), so that fixture accepts medium on Fable. Opus and Sonnet left as misses.
 - The subagent set did much better than the light variant on haiku (79% / 61% / 64% there).
+
+### 0.16 eval: the spread (2026-10-05, `bun run eval -- --set session --runs 2 --model <m> --setting <level>`)
+
+Each check now gives a probability for every level. The eval judges it as the router does: against the level in force
+(`--setting`), moving to the median when it's sure enough the setting is wrong in one direction. Opus and Sonnet ran
+against medium, Fable against high (Tommy's usual settings).
+
+| Model | Setting | Session reads | Over the 70% bar | Right of those |
+|---|---|---|---|---|
+| Opus 5.5 | medium | 46/46 | 18/46 | 18/18 |
+| Sonnet 5.5 | medium | 44/46 | 23/46 | 23/23 |
+| Fable 5.1 | high | 42/46 | 17/46 | 15/17 |
+
+- Fable sometimes ends its reply before the last `}`. Those replies used to fail to parse and count as undecided (39/46
+  on the first run). The parser now closes braces left open and ignores text after the object.
+- Fable's two wrong moves were both down from high in the right direction, one level short: medium for the mechanical
+  rename and the one-constant extraction, where low was expected.
+- Sonnet and Fable put edge-case tests at medium with high close behind (for example medium 45%, high 40%), expected high or
+  xhigh. Below the bar, so the router would stay on the setting and check again.
 
 ### Prompt variants (2026-10-04, `--variant shipped|light|hybrid`, 2 runs per fixture; the light variant became the 0.11 prompt and the flag was removed)
 
