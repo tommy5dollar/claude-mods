@@ -8,13 +8,15 @@ Requires Claude Code 2.1.287 or later (Claude Mods).
 
 ## The rule
 
-Your effort picker's level is the default, and the router only changes it with your say-so. After each prompt, until the task is clear, your session's own model looks at the conversation and names the level the task needs, with how sure it is. Then:
+Your effort picker's level is the default. After each prompt, until the task is clear, your session's own model looks at the conversation and names the level the task needs, with how sure it is. Then:
 
-- **No clear task yet, or not sure enough:** the turn runs at your picker's level. Nothing is asked, and the next prompt is checked again.
-- **The router names your picker's level:** the turn runs, nothing is asked, and that level is kept for the session.
-- **The router names a different level:** the turn waits, and Claude's own question card asks: "Effort router: Multi-platform finance integration. Use high effort instead of medium?" `Use high` runs the turn at high and keeps high. `Keep medium` runs it at medium and keeps medium. Either way the session is decided and the router stops reading.
+- **No clear task yet, or not sure enough:** the turn runs at your picker's level, and the next prompt is checked again.
+- **The router names your picker's level:** the turn runs, and that level is kept for the session.
+- **The router names a different level:** the turn runs at the router's level, which is kept for the session. The band above the prompt opens once to say so, with why, and a button to stop routing and go back to your setting.
 
-The reason is simple: a prompt run at the wrong effort can do a lot of work that has to be thrown away and redone, so it is worth one question before the turn starts. If you dismiss the question, the turn runs at your picker's level, the router stays undecided, and a later prompt can ask again.
+Either way, once a level is kept the session is decided and the router stops checking by itself. `Reassess` in the band, or `/route`, asks again.
+
+With consent `ask`, a different level waits for your answer instead. Claude's own question card asks "Effort router: Multi-platform finance integration. Use high effort instead of medium?", with any levels in between as options too. `Use high` runs the turn at high and keeps high. `Keep medium` runs it at medium and keeps medium. If you dismiss the question, the turn runs at your picker's level, the router stays undecided, and a later prompt can ask again.
 
 ## The states
 
@@ -32,9 +34,9 @@ The footer, right beside the native model and effort pickers, shows the router's
 <!-- screenshot: footer showing "deciding" beside the gauge and the native pickers -->
 <!-- screenshot: the question card "Effort router: ... Use high effort instead of medium?" with the footer reading "high?" -->
 
-The footer state is a plain button. Pressing it opens the router's band above the prompt: a line such as `Effort router: using high for this session (bug fix in existing code). The crash needs tracing through the parser, but the fix is local.`, then the buttons and `Hide` (hotkey `x`). The words in brackets are what the check took the task to be, and the sentence after is why it chose that level. The buttons are numbered `1`, `2`. Any action closes the band, and pressing the footer again closes it too. With consent `ask` (the default) the band never opens by itself: the question card is where you agree.
+The footer state is a plain button. Pressing it opens the router's band above the prompt: a line such as `Effort router: using high for this session (bug fix in existing code). The crash needs tracing through the parser, but the fix is local.`, then the buttons and `Hide` (hotkey `x`). The words in brackets are what the check took the task to be, and the sentence after is why it chose that level. The buttons are numbered `1`, `2`. Any action closes the band, and pressing the footer again closes it too. With consent `ask` the band never opens by itself: the question card is where you agree.
 
-With consent `auto` the router doesn't ask. When it locks a level that differs from your picker's, the band opens by itself once, reading `Effort router: using high for this session (<task>). <why>` with `Stop routing (back to medium)` and `Hide` (keep high). Pressing the footer shows the same band as under `ask`.
+With consent `auto` (the default) the router doesn't ask. When it keeps a level that differs from your picker's, the band opens by itself once, reading `Effort router: using high for this session (<task>). <why>` with `Stop routing (back to medium)` and `Hide` (keep high). Pressing the footer shows the same band as under `ask`.
 
 The footer is a button, not a dropdown, because the Desktop app silently drops a `Select` in the footer: it is not drawn, and nothing reports an error (verified live on the 2.1.286 app; the test kit accepts it, so the kit cannot catch this). The footer truncates with `…` when space runs out, so the label stays short.
 
@@ -61,10 +63,10 @@ A `turn.step` hook that waits on an ordinary promise is abandoned after about 10
 - **Undecided only before there is a task.** The model answers "undecided" only for opening filler: greetings, housekeeping such as "pull the latest code", or questions before any work. Once you state a real task it picks the level that task most likely needs, even while the details are open. The prompt's worked examples teach reading the conversation (filler, a narrowed scope, a short reply to a numbered question, answered questions), and none of them names a level.
 - **The latest exchange counts most.** A later clarification overrides an earlier ask, and a short reply is read against the question it answers. If you dismissed the question for "refactor the payment retry logic" and then answer Claude's "1. full rewrite or 2. just extract the constant?" with "2", the next read names low.
 - **Decided is decided.** Once a level is kept, every later main-thread request runs at it and the router stops reading. Subagents get their own level ([below](#subagents)). When the kept level isn't the picker's, the terminal also runs `/effort <level>` once the session is idle, so the native picker label matches. In the Desktop app the picker belongs to the app, so its label stays where you set it; trust the footer. A kept level survives `claude --resume`. Choosing `Keep medium` keeps medium even if you move the picker later; `/route off` hands control back to the picker.
-- **It stops after `decideWithin` prompts** (6 by default), counted from the start of the session. If nothing is decided by then, the router turns off with the reason `no clear task after 6 prompts`, after asking any question still waiting. It never calls the model again on its own.
+- **It stops after `decideWithin` prompts** (6 by default), counted from the start of the session. If nothing is decided by then, the router turns off with the reason `no clear task after 6 prompts`, or `not sure enough after 6 prompts, last check high at 65%` when the checks named a level they weren't sure of, after asking any question still waiting. It never calls the model again on its own.
 - **Existing sessions are left alone.** The first time the router sees a session that already has `decideWithin` or more prompts in it, or more than `skipAboveTokens` (20,000) tokens of conversation (a long chat from before the router was installed, say), it starts `off` with the reason `session started before the router`: no question, no model calls. Fewer earlier prompts count toward the budget. A resumed session with saved router state keeps that state.
 - **`/route` asks now.** It reads the whole conversation in any state, ignoring the budget. If the answer is the level already in use, it says so and changes nothing. If it is your picker's level while a different one is kept, it keeps the picker's level without asking. Otherwise the question card opens straight away ("Use low effort instead of high?", naming the level in force now, with any levels in between), and your answer is kept. Add a hint to steer it: `/route this is a security review`, `/route keep it quick`. The hint is weighed strongly and kept for later reads until a level is kept. The band's `Assess now` (`Reassess` once decided) is the same as bare `/route`: it asks the session's model, so it takes a couple of seconds and uses your plan like any request. The footer reads `checking…` while it runs, then the band shows what it found ("high still fits (bug fix, 90% sure). Nothing changed.") until you hide it.
-- **Consent `auto`.** For headless runs, or if you trust the router: its level is kept at once, without a question (shown once in the band when it differs from your picker's). Set it in `/config`, or with `EFFORT_ROUTER_CONSENT=auto`.
+- **Consent `ask`.** If you'd rather approve each change: a level other than your picker's waits on the question card. Set it in `/plugin configure`, or with `EFFORT_ROUTER_CONSENT=ask`. Headless runs (`-p`) have no one to answer, so leave them on `auto`.
 
 ## Models
 
@@ -143,7 +145,7 @@ Set them in `/config`, or under `pluginConfigs["effort-router@tommy-mods"].optio
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `consent` | `ask` | When the router wants a different level from your picker: `ask` holds the turn and asks (Use the router's level or Keep yours). `auto` uses the router's level without asking and shows it once in the band, with Undo. A value saved by an older version reads as unset, so `ask` |
+| `consent` | `auto` | When the router wants a different level from your picker: `auto` uses the router's level without asking and shows it once in the band, with a button to stop routing. `ask` holds the turn and asks (Use the router's level, a level in between or Keep yours) |
 | `decideWithin` | 6 | Prompts (and answered questions) the router reads automatically, counted from the session's start |
 | `classifyTimeoutMs` | 15000 | How long a prompt waits for the check before it runs anyway |
 | `classifierMaxChars` | 24000 | Most transcript characters a separate check sends |

@@ -83,7 +83,12 @@ const AUTO = { EFFORT_ROUTER_CONSENT: 'auto' }
 const slashed = (path: string): string => path.replace(/\\/g, '/').replace(/^[A-Za-z]:\//, '/')
 
 /** Answers every `$` call the mod makes, beneath it. */
-function worldOf(on: On, reply = BUG_REPLY, sources: Record<string, unknown> = {}, env: Record<string, string> = {}): World {
+// Most tests exercise the question card, so the world runs under consent ask unless a test passes its own env
+// (AUTO, or {} with DEFAULT_CONSENT for the plugin's own default, auto).
+const ASK = { EFFORT_ROUTER_CONSENT: 'ask' }
+const DEFAULT_CONSENT = {}
+
+function worldOf(on: On, reply = BUG_REPLY, sources: Record<string, unknown> = {}, env: Record<string, string> = ASK): World {
   const clock = mock.clock(on)
   const world: World = {
     sent: [], efforts: [], lines: [], debug: [], classifierCalls: 0, reply, messages: [], prompts: [], toasts: [], clock, callsAtSubmit: [],
@@ -603,6 +608,26 @@ describe('effort-router', () => {
     expect(world.sent).toEqual(['high'])
   })
 
+  test('consent defaults to auto: a sure level is used without a question, and the band offers to stop routing', async ($, on) => {
+    const world = worldOf(on, BUG_REPLY, {}, DEFAULT_CONSENT)
+    await $.session.start(STARTED)
+    await submit($, 'fix the crash in the parser')
+    await step($, 0)
+    expect(world.asked).toEqual([])
+    expect(world.sent).toEqual(['high'])
+    expect(await route($, 'status')).toContain('it switches without asking (consent: auto).')
+    const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
+    expect((await bandOf(band)).buttons).toEqual(['Stop routing (back to medium)', 'Hide'])
+  })
+
+  test('out of prompts with checks below the bar: the reason names the last check, not "no clear task"', { options: { decideWithin: 1 } }, async ($, on) => {
+    worldOf(on, '{"decision":"level","level":"high","confidence":0.6,"reason":"tax advice"}')
+    await $.session.start(STARTED)
+    await submit($, 'work out the CGT base cost for the cottage')
+    await step($, 0)
+    expect(await route($, 'status')).toStartWith('Off (not sure enough after 1 prompt, last check high at 60%)')
+  })
+
   test('EFFORT_ROUTER_CONSENT: the old names map to ask and auto', async ($, on) => {
     const world = worldOf(on, BUG_REPLY, {}, { EFFORT_ROUTER_CONSENT: 'apply' })
     await $.session.start(STARTED)
@@ -867,7 +892,7 @@ describe('effort-router', () => {
     })
 
     test('each verdict is recorded with its kind, model, confidence and what came of it', async ($, on) => {
-      const world = worldOf(on, '{"decision":"level","level":"high","confidence":0.6,"reason":"bug fix"}', {}, { HOME: '/home/t', USERPROFILE: '/home/t' })
+      const world = worldOf(on, '{"decision":"level","level":"high","confidence":0.6,"reason":"bug fix"}', {}, { ...ASK, HOME: '/home/t', USERPROFILE: '/home/t' })
       await $.session.start(STARTED)
       await $.prompt.context({ blocks: [{ name: 'claudeMd', text: INSTRUCTIONS }] } as never)
       await submit($, 'something is off in checkout')
@@ -1118,7 +1143,7 @@ describe('effort-router', () => {
   })
 
   describe("subagents whose definition sets an effort", () => {
-    const HOME = { HOME: '/home/t', USERPROFILE: '/home/t' }
+    const HOME = { ...ASK, HOME: '/home/t', USERPROFILE: '/home/t' }
     const def = (name: string, effort?: string) =>
       `---\nname: ${name}\ndescription: test agent\n${effort ? `effort: ${effort}\n` : ''}tools: Read, Grep\n---\n\nYou are a test agent.\n`
 
@@ -1197,7 +1222,7 @@ describe('effort-router', () => {
   // --- the spend report -----------------------------------------------------------------
 
   describe('the spend report', () => {
-    const HOME = { HOME: '/home/t', USERPROFILE: '/home/t' }
+    const HOME = { ...ASK, HOME: '/home/t', USERPROFILE: '/home/t' }
     const LEDGER = '/home/t/.claude/effort-router/spend/session-1.json'
     const complete = ($: Engine) => $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
 

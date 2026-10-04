@@ -1178,12 +1178,17 @@ export function wantsRead(state: RouterState, decideWithin: number): boolean {
  * After an automatic read (and after a question is settled): once the budget
  * is spent with nothing locked, stop reading. A verdict still waiting for its
  * question keeps the router on until it is settled; otherwise the router turns
- * off (or, when the organisation keeps it on, idles as deciding).
+ * off (or, when the organisation keeps it on, idles as deciding). The reason
+ * names the last check when it picked a level below the bar ("not sure enough
+ * after 6 prompts, last check high at 65%"), so a clear task the checks were
+ * unsure about doesn't read as no task at all.
  */
-export function afterBudget(state: RouterState, decideWithin: number, allowOff: boolean): RouterState {
+export function afterBudget(state: RouterState, decideWithin: number, allowOff: boolean, last?: Proposal): RouterState {
   if (state.mode !== 'auto' || state.phase === 'locked' || state.prompts < decideWithin) return state
   if (state.pending || state.asking) return state.gaveUp ? state : { ...state, gaveUp: true }
-  const offReason = `no clear task after ${decideWithin} prompt${decideWithin === 1 ? '' : 's'}`
+  const after = `after ${decideWithin} prompt${decideWithin === 1 ? '' : 's'}`
+  const sure = last?.confidence === undefined ? '' : ` at ${Math.round(last.confidence * 100)}%`
+  const offReason = last ? `not sure enough ${after}, last check ${last.level}${sure}` : `no clear task ${after}`
   if (state.gaveUp && state.offReason === offReason) return state
   return allowOff
     ? { ...state, mode: 'picker', gaveUp: true, offReason, hint: undefined }

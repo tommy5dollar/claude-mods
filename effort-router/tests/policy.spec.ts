@@ -484,6 +484,9 @@ describe('state', () => {
   test('reasons and status', () => {
     expect(routeReport(afterBudget({ ...DECIDING, prompts: 6 }, 6, true), 6)).toStartWith('Off (no clear task after 6 prompts), so your effort setting applies. /route on turns it back on.')
     expect(afterBudget({ ...DECIDING, prompts: 1 }, 1, true).offReason).toBe('no clear task after 1 prompt')
+    expect(afterBudget({ ...DECIDING, prompts: 6 }, 6, true, { level: 'high', reason: 'tax advice', confidence: 0.65 }).offReason).toBe(
+      'not sure enough after 6 prompts, last check high at 65%',
+    )
     expect(routeReport(LOCKED, 6)).toStartWith('Using high for this session (bug fix in existing code). Subagents use it too.')
     expect(routeReport(ASKING, 6)).toStartWith('high? Waiting for your answer: use high effort instead of medium (bug fix in existing code)?')
     expect(routeReport(PENDING, 6, 'medium')).toStartWith("Deciding. The last check suggested high (bug fix in existing code). If that isn't your setting, you'll be asked before Claude carries on.")

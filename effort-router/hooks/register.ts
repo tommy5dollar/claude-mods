@@ -91,7 +91,7 @@ import {
  * cache), and on the first prompt, when there is no request yet to fork, as
  * one separate call carrying the session's instructions (CLAUDE.md, rules,
  * memory, from `prompt.context`). A check below the bar changes nothing and
- * the next prompt is checked again. With consent `ask` (the default) a sure
+ * the next prompt is checked again. With consent `ask` a sure
  * verdict waits for the next main-thread request, where the picker's level is
  * known: the same level locks; a different level holds the request on a
  * question (Use <level> / Keep <picker>), and either answer locks. With
@@ -238,7 +238,7 @@ function checkModelOf(value: unknown): string {
 }
 
 function settingsOf(options: PluginOptions): Settings {
-  const consent = consentOf(options.consent) ?? 'ask'
+  const consent = consentOf(options.consent) ?? 'auto'
   const num = (value: unknown, fallback: number): number => {
     const n = typeof value === 'number' ? value : Number(value)
     return Number.isFinite(n) && n >= 1 ? Math.floor(n) : fallback
@@ -645,7 +645,10 @@ async function afterRead($: EngineInterface, id: string, session: Session, setti
 /** Once the budget is spent with nothing locked: stop reading, and turn off (or idle when the organisation keeps the router on). */
 async function spendBudget($: EngineInterface, id: string, session: Session, settings: Settings): Promise<void> {
   const was = session.state
-  const spent = afterBudget(was, settings.decideWithin, allowOff)
+  // A last check below the bar names itself in the reason; a sure one whose question went unanswered doesn't.
+  const verdict = session.verdict?.decision
+  const unsure = verdict?.decision === 'lock' && !isConfident(verdict, settings.confidence) ? verdict : undefined
+  const spent = afterBudget(was, settings.decideWithin, allowOff, unsure)
   if (spent === was) return
   await commit($, id, session, spent)
   if (spent.mode === 'picker') restorePicker($, session, settings)
