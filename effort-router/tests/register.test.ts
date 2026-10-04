@@ -163,28 +163,24 @@ describe('effort-router', () => {
     expect(world.classifierCalls).toBe(1)
   })
 
-  test('/route commands: show, fix, off, decide, old aliases, rules', async ($, on) => {
+  test('/route commands: show, off, decide, old alias, rules; no level-setting', async ($, on) => {
     const world = worldOf(on, '{"decision":"undecided"}')
     await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
 
     expect((await $.command.run({ command: 'route' } as never)).text).toContain('medium · deciding.')
-    expect((await $.command.run({ command: 'route', args: 'fix max' } as never)).text).toContain('max 🔒')
-    await step($, 0)
-    expect(world.sent).toEqual(['max'])
-    expect((await $.command.run({ command: 'route' } as never)).text).toContain('max 🔒 (you chose max)')
 
     expect((await $.command.run({ command: 'route', args: 'off' } as never)).text).toContain('router off')
-    await step($, 1)
-    expect(world.sent.at(-1)).toBe('medium')
+    await step($, 0)
+    expect(world.sent).toEqual(['medium'])
 
     expect((await $.command.run({ command: 'route', args: 'decide' } as never)).text).toContain('deciding')
-    expect((await $.command.run({ command: 'route', args: 'pin low' } as never)).text).toContain('low 🔒') // 0.1 alias
     expect((await $.command.run({ command: 'route', args: 'pin picker' } as never)).text).toContain('router off') // 0.1 alias
-    expect((await $.command.run({ command: 'route', args: 'fix ultra' } as never)).text).toContain('usage: /route')
+    expect((await $.command.run({ command: 'route', args: 'fix max' } as never)).text).toContain('usage: /route') // removed
+    expect((await $.command.run({ command: 'route', args: 'pin max' } as never)).text).toContain('usage: /route') // removed
     expect((await $.command.run({ command: 'route', args: 'rules' } as never)).text).toContain('base: shipped defaults')
   })
 
-  test('footer: the label is a dropdown on terminal and desktop; picking options changes state and label', async ($, on) => {
+  test('footer: the label is a dropdown on terminal and desktop; its options change state and label', async ($, on) => {
     const world = worldOf(on)
     await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
     for (const surface of ['terminal', 'desktop'] as const) {
@@ -192,36 +188,55 @@ describe('effort-router', () => {
       const state = await footerOf(footer)
       expect(state.type).toBe('Select')
       expect(state.shown).toBe('medium · deciding')
-      expect(state.labels).toEqual(['Low 🔒', 'Medium 🔒', 'High 🔒', 'XHigh 🔒', 'Max 🔒', 'medium · deciding', 'Router off'])
+      expect(state.labels).toEqual(['medium · deciding', 'Router off — use the effort picker'])
       await footer.unmount()
     }
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'desktop', ...FOOTER } as never)
 
-    // fix a level from the footer
-    await (footer as any).select({ key: 'route-state', value: 'fix max' })
-    await step($, 0)
-    expect(world.sent).toEqual(['max'])
-    expect((await footerOf(footer)).shown).toBe('max 🔒')
-    expect((await footerOf(footer)).labels).toContain('Decide again')
+    // a suggestion arrives: Accept / Not now lead the dropdown
+    await submit($, 'the checkout total is wrong when a coupon expires, fix it')
+    await settle($)
+    let shown = await footerOf(footer)
+    expect(shown.shown).toBe('medium → high?')
+    expect(shown.labels.slice(0, 2)).toEqual(['Accept high', 'Not now'])
 
-    // router off
+    // Not now: back to deciding, effort untouched
+    await (footer as any).select({ key: 'route-state', value: 'notnow' })
+    await step($, 0)
+    expect(world.sent).toEqual(['medium'])
+    expect((await footerOf(footer)).shown).toBe('medium · deciding')
+
+    // Decide again reads at once; Accept fixes the router's level
     await (footer as any).select({ key: 'route-state', value: 'off' })
-    await step($, 1)
-    expect(world.sent.at(-1)).toBe('medium')
     expect((await footerOf(footer)).shown).toBe('router off')
     expect((await footerOf(footer)).labels).toContain('Let the router decide')
-
-    // back to deciding: the router reads at once and offers high; the footer offers Accept first
     await (footer as any).select({ key: 'route-state', value: 'decide' })
     await settle($)
-    const offered = await footerOf(footer)
-    expect(offered.shown).toBe('medium → high?')
-    expect(offered.labels[0]).toBe('Accept high')
+    expect((await footerOf(footer)).shown).toBe('medium → high?')
     await (footer as any).select({ key: 'route-state', value: 'accept' })
-    await step($, 2)
+    await step($, 1)
     expect(world.sent.at(-1)).toBe('high')
-    expect((await footerOf(footer)).shown).toBe('high 🔒')
+    shown = await footerOf(footer)
+    expect(shown.shown).toBe('high 🔒')
+    expect(shown.labels).toEqual(['high 🔒', 'Decide again', 'Router off — use the effort picker'])
     expect((await $.command.run({ command: 'route' } as never)).text).toContain('router: bug fix in existing code')
+
+    // Router off: the picker's level goes out again
+    await (footer as any).select({ key: 'route-state', value: 'off' })
+    await step($, 2)
+    expect(world.sent.at(-1)).toBe('medium')
+  })
+
+  test('band: picking a different level than suggested records it as your choice', async ($, on) => {
+    const world = worldOf(on)
+    await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+    await submit($, 'fix the crash in the parser')
+    await settle($)
+    const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
+    await band.press({ key: 'lock-medium' })
+    await step($, 0)
+    expect(world.sent).toEqual(['medium'])
+    expect((await $.command.run({ command: 'route' } as never)).text).toContain('medium 🔒 (you chose medium over the suggested high)')
   })
 
   test('footerControl: label draws plain text', { options: { footerControl: 'label' } }, async ($, on) => {
@@ -244,9 +259,9 @@ describe('effort-router', () => {
     expect(world.efforts).toEqual([])
   })
 
-  test('org layer from policy settings: enforce is final, allowPin false stops fixing', async ($, on) => {
+  test('org layer from policy settings: enforce is final, allowOff false keeps the router on', async ($, on) => {
     const sources = {
-      policy: { pluginConfigs: { 'effort-router@tommy-mods': { options: { rules: '$defaults\nORG: payments code, never below high', rulesMode: 'enforce', allowPin: false } } } },
+      policy: { pluginConfigs: { 'effort-router@tommy-mods': { options: { rules: '$defaults\nORG: payments code, never below high', rulesMode: 'enforce', allowOff: false } } } },
       user: { pluginConfigs: { 'effort-router': { options: { rules: 'USER REPLACES EVERYTHING' } } } },
     }
     worldOf(on, BUG_REPLY, sources)
@@ -256,10 +271,10 @@ describe('effort-router', () => {
     expect(rules).toContain('ORG: payments code, never below high')
     expect(rules).not.toContain('USER REPLACES')
     expect(rules).toContain('organisation enforces')
-    expect((await $.command.run({ command: 'route', args: 'fix low' } as never)).text).toContain('allowPin: false')
+    expect((await $.command.run({ command: 'route', args: 'off' } as never)).text).toContain('allowOff: false')
     expect((await $.command.run({ command: 'route', args: 'rules init' } as never)).text).toContain('enforces its routing rules')
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
-    expect((await footerOf(footer)).labels).toEqual(['medium · deciding', 'Router off'])
+    expect((await footerOf(footer)).labels).toEqual(['medium · deciding'])
   })
 
   test('without enforce, a user settings option layers over the org', async ($, on) => {

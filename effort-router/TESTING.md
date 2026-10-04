@@ -3,10 +3,10 @@
 ## Automated
 
 ```
-bun test                            # 46 tests: trimming, reply parsing, $defaults layering, settings layers, /route grammar, state
-claude plugin test .                # 11 tests in the engine's kit: band render + button presses, the footer Select drawn in
-                                    # SessionMode on terminal and desktop with options picked (fix, off, decide, accept),
-                                    # turn.step rewrites for main loop and subagents, /route, org enforce/allowPin, fail-open
+bun test                            # 42 tests: trimming, reply parsing, $defaults layering, settings layers, /route grammar, state
+claude plugin test .                # 12 tests in the engine's kit: band render + button presses, the footer Select drawn in
+                                    # SessionMode on terminal and desktop with options picked (accept, not now, off, decide),
+                                    # turn.step rewrites for main loop and subagents, /route, org enforce/allowOff, a different level picked in the band, fail-open
 claude plugin validate . --strict
 ```
 
@@ -33,9 +33,10 @@ Run `claude --plugin-dir D:/code/mods/effort-router --model sonnet --debug-file 
 3. Real task: type a bug-fix request. Within about a second the band shows `Route this session at HIGH — ...` with `1: Lock high  2: medium  3: low  4: max  x: Not now`, and the footer reads `medium → high?`.
 4. Press `1` in the empty prompt. The band disappears, the transcript shows `effort fixed: high 🔒 (router: ...) · /route to change`, the footer reads `high 🔒`, and in the terminal a `/effort high` line appears at turn end. `grep "medium -> high\|high -> high" router.log` shows the requests after the click.
 5. Ask for something that spawns a subagent. `grep "agent=" router.log` shows the subagent's steps at high.
-6. Footer dropdown: click `high 🔒`. It opens with `Low 🔒 … Max 🔒`, `Decide again`, `Router off`. Pick `Max 🔒`: the footer reads `max 🔒`, `/route` says `you chose max`, and the next steps log `-> max`.
-7. Pick `Router off`: the footer reads `router off` (dim), the next steps log `medium -> medium`.
-8. Pick `Let the router decide`: the footer reads `medium · deciding`; the router reads the transcript at once and may offer a level (`medium → high?`, with `Accept high` first in the dropdown).
+6. Footer dropdown: click `high 🔒`. It opens with `high 🔒`, `Decide again`, `Router off — use the effort picker`, and no level options.
+7. Pick `Router off — use the effort picker`: the footer reads `router off` (dim). Set the native picker to Low: the next steps log `low -> low`.
+8. Pick `Let the router decide`: the footer reads `medium · deciding` (or the picker's level); the router reads the transcript at once and may offer a level (`medium → high?`, with `Accept high` and `Not now` first in the dropdown). Pick `Not now`: the footer goes back to deciding and no new offer comes for 5 prompts.
+8a. In a fresh session, when the band offers HIGH press `2` (medium): `/route` says `medium 🔒 (you chose medium over the suggested high)`.
 9. "Not now": in a fresh session, get an offer, then focus the band (ctrl+x tab or a click) and press `x` (a letter hotkey needs the band focused; only digits work from the empty prompt). No new offer for 5 prompts.
 10. `consent: ask`: set it in `/config`, start fresh, type a bug-fix request. A question dialog with `Lock high / Lock medium / Lock low / Not now` appears before the turn runs.
 11. Rules: `/route rules init project`, add a line after `$defaults`, run `/route rules`. It lists `spliced: <path>` and shows your line.
@@ -44,4 +45,4 @@ Run `claude --plugin-dir D:/code/mods/effort-router --model sonnet --debug-file 
 
 ## Org layer
 
-Verified live: a `--settings` file (the `flag` source) carrying `pluginConfigs["effort-router@tommy-mods"].options` with the undeclared `rulesMode`/`allowPin` keys, and a custom top-level `effortRouter` key, both reach `$.settings.read({ source })` intact. The router reads the org layer from the `policy` source only. A real managed-settings file was not written (it needs admin rights). The kit test `org layer from policy settings` covers the policy path with a mocked source. To check by hand, put the README's example in the managed-settings.json for your OS, then run `/route rules`, `/route fix low` and `/route rules init`, and open the footer dropdown (no levels listed under `allowPin: false`).
+Verified live: a `--settings` file (the `flag` source) carrying `pluginConfigs["effort-router@tommy-mods"].options` with the undeclared `rulesMode`/`allowPin` keys (now `allowOff`; same mechanism), and a custom top-level `effortRouter` key, both reach `$.settings.read({ source })` intact. The router reads the org layer from the `policy` source only. A real managed-settings file was not written (it needs admin rights). The kit test `org layer from policy settings` covers the policy path with a mocked source. To check by hand, put the README's example in the managed-settings.json for your OS, then run `/route rules`, `/route off` and `/route rules init`, and open the footer dropdown (no `Router off` under `allowOff: false`).

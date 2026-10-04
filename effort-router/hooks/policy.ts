@@ -241,7 +241,6 @@ export function parseDecision(reply: string | undefined | null): Decision {
 export type RouteCommand =
   | { kind: 'show' }
   | { kind: 'decide' }
-  | { kind: 'fix'; level: Level }
   | { kind: 'off' }
   | { kind: 'rules' }
   | { kind: 'rules-init'; scope: 'user' | 'project' }
@@ -249,11 +248,12 @@ export type RouteCommand =
   | { kind: 'error'; message: string }
 
 export const ROUTE_USAGE =
-  'usage: /route [decide | fix <low|medium|high|xhigh|max> | off | rules [init [user|project] | critique]]'
+  'usage: /route [decide | off | rules [init [user|project] | critique]]'
 
 /**
- * `/route` arguments. `decide`, `fix <level>` and `off` are the names shown;
- * the 0.1 names (`auto`, `pin <level>`, `pin picker`) stay as hidden aliases.
+ * `/route` arguments. `decide` and `off` are the names shown; the 0.1 names
+ * `auto` and `pin picker` stay as hidden aliases. There is no way to set a
+ * level here: for a specific level, turn the router off and use the picker.
  */
 export function parseRoute(args: string): RouteCommand {
   const words = args.trim().toLowerCase().split(/\s+/).filter(Boolean)
@@ -261,10 +261,7 @@ export function parseRoute(args: string): RouteCommand {
   const [verb, arg, extra, more] = words
   if ((verb === 'decide' || verb === 'auto') && arg === undefined) return { kind: 'decide' }
   if (verb === 'off' && arg === undefined) return { kind: 'off' }
-  if ((verb === 'fix' || verb === 'pin') && arg !== undefined && extra === undefined) {
-    if (verb === 'pin' && arg === 'picker') return { kind: 'off' }
-    if (isLevel(arg)) return { kind: 'fix', level: arg }
-  }
+  if (verb === 'pin' && arg === 'picker' && extra === undefined) return { kind: 'off' }
   if (verb === 'rules') {
     if (arg === undefined) return { kind: 'rules' }
     if (arg === 'critique' && extra === undefined) return { kind: 'rules-critique' }
@@ -334,7 +331,7 @@ export function viewOf(state: RouterState): View {
 export function reasonText(state: RouterState): string {
   const view = viewOf(state)
   if (view.kind === 'off') return "router off: the effort picker decides"
-  if (view.kind === 'fixed') return view.byRouter ? `router: ${view.reason ?? 'classifier'}` : `you chose ${view.level}`
+  if (view.kind === 'fixed') return view.byRouter ? `router: ${view.reason ?? 'classifier'}` : (state.reason ?? `you chose ${view.level}`)
   if (view.proposal) return `router suggests ${view.proposal.level}: ${view.proposal.reason}`
   return "deciding: the picker's effort applies until the task is clear"
 }
@@ -418,7 +415,6 @@ export function restored(saved: unknown): RouterState {
   return state
 }
 
-const capital = (level: Level): string => (level === 'xhigh' ? 'XHigh' : level[0]!.toUpperCase() + level.slice(1))
 
 /**
  * The compact state the footer shows beside the native effort picker:
@@ -441,37 +437,29 @@ export type FooterMenu = {
 }
 
 /**
- * The footer dropdown. The closed dropdown shows the selected option's label,
- * so the current state's option is labelled with the compact state text.
- * Values are `/route` arguments (`accept` aside). `allowFix: false` (an
- * organisation's `allowPin: false`) leaves out the fixed levels.
+ * The footer dropdown. It never sets a level (the effort picker does that,
+ * with the router off). The closed dropdown shows the selected option's
+ * label, so the current state's option is labelled with the state text.
+ * Values: `accept`, `notnow`, `fixed` (the current fixed state, a no-op),
+ * and the `/route` arguments `decide` and `off`. `allowOff: false` (an
+ * organisation's setting) leaves out `Router off`.
  */
-export function footerMenu(state: RouterState, inForce?: string | number, allowFix = true): FooterMenu {
+export function footerMenu(state: RouterState, inForce?: string | number, allowOff = true): FooterMenu {
   const view = viewOf(state)
   const label = footerLabel(state, inForce).text
   const options: { value: string; label: string }[] = []
   if (view.kind === 'deciding' && view.proposal) {
     options.push({ value: 'accept', label: `Accept ${view.proposal.level}` })
+    options.push({ value: 'notnow', label: 'Not now' })
   }
-  if (allowFix) {
-    for (const level of LEVELS) {
-      const isCurrent = view.kind === 'fixed' && view.level === level
-      options.push({ value: `fix ${level}`, label: isCurrent ? label : `${capital(level)} 🔒` })
-    }
-  }
+  if (view.kind === 'fixed') options.push({ value: 'fixed', label })
   options.push({
     value: 'decide',
     label: view.kind === 'deciding' ? label : view.kind === 'fixed' ? 'Decide again' : 'Let the router decide',
   })
-  options.push({ value: 'off', label: view.kind === 'off' ? label : 'Router off' })
-  const value = view.kind === 'fixed'
-    ? (allowFix ? `fix ${view.level}` : 'decide')
-    : view.kind === 'off' ? 'off' : 'decide'
-  // a fixed level with fixing disallowed still needs its state shown
-  if (view.kind === 'fixed' && !allowFix) {
-    options.unshift({ value: `fix ${view.level}`, label })
-    return { options, value: `fix ${view.level}` }
-  }
+  if (view.kind === 'off') options.push({ value: 'off', label })
+  else if (allowOff) options.push({ value: 'off', label: 'Router off — use the effort picker' })
+  const value = view.kind === 'fixed' ? 'fixed' : view.kind === 'off' ? 'off' : 'decide'
   return { options, value }
 }
 
@@ -482,8 +470,8 @@ export type SettingsRules = {
   rules?: string
   /** Org only: `enforce` makes the org layer final. */
   rulesMode?: 'extend' | 'enforce'
-  /** Org only: false stops users fixing a level (`/route fix`, the footer's levels). */
-  allowPin?: boolean
+  /** Org only: false stops users turning the router off, so the org's routing always applies. */
+  allowOff?: boolean
 }
 
 /**
@@ -510,7 +498,7 @@ export function settingsRulesOf(source: unknown, pluginName = 'effort-router'): 
     const c = candidate as Record<string, unknown>
     if (out.rules === undefined && typeof c.rules === 'string' && c.rules.trim() !== '') out.rules = c.rules
     if (out.rulesMode === undefined && (c.rulesMode === 'extend' || c.rulesMode === 'enforce')) out.rulesMode = c.rulesMode
-    if (out.allowPin === undefined && typeof c.allowPin === 'boolean') out.allowPin = c.allowPin
+    if (out.allowOff === undefined && typeof c.allowOff === 'boolean') out.allowOff = c.allowOff
   }
   return out
 }

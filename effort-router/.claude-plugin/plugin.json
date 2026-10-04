@@ -1,7 +1,7 @@
 {
   "name": "effort-router",
-  "version": "0.2.0",
-  "description": "Decides the session's reasoning effort once the task is clear (a Haiku read of the transcript against Anthropic's 'Spending your effort' guidance and your own rules), asks you to confirm, then fixes it for every request and subagent. The footer shows the state (deciding, fixed, off) and is a dropdown to change it; /route does the same.",
+  "version": "0.3.0",
+  "description": "Decides the session's reasoning effort once the task is clear (a Haiku read of the transcript against Anthropic's 'Spending your effort' guidance and your own rules), asks you to confirm, then holds it for every request and subagent. The footer shows the state (deciding, fixed, off) and is a dropdown to accept, decide again or turn the router off; for a specific level, turn it off and use the effort picker.",
   "author": {
     "name": "Tommy Long"
   },

@@ -72,8 +72,8 @@ const SESSIONS = new Map<string, Session>()
  * replace the run's printed result, so headless runs rely on turn.step alone.
  */
 let isInteractive = true
-/** The organisation's `allowPin`, as the last rules read found it. */
-let allowFix = true
+/** The organisation's `allowOff`, as the last rules read found it. */
+let allowOff = true
 
 const FALLBACK_RULES =
   'low: quick in-the-loop work, questions, chores. medium: regular feature work (default). ' +
@@ -152,6 +152,21 @@ async function apply($: EngineInterface, id: string, session: Session, settings:
   await persist($, id, session.state)
 }
 
+/**
+ * Takes a choice made at consent time: the suggested level is the router's,
+ * a different one is yours (`you chose medium over the suggested high`).
+ */
+async function choose($: EngineInterface, id: string, session: Session, settings: Settings, proposal: Proposal, level: Level): Promise<void> {
+  if (level === proposal.level) await apply($, id, session, settings, 'lock', level, proposal.reason)
+  else await apply($, id, session, settings, 'pin', level, `you chose ${level} over the suggested ${proposal.level}`)
+}
+
+/** Snoozes the router: no new suggestion for `snoozePrompts` prompts. */
+function snooze($: EngineInterface, session: Session, settings: Settings): void {
+  session.state = { ...session.state, phase: 'undecided', proposal: undefined, snoozedUntil: session.state.prompts + settings.snoozePrompts }
+  show($, session)
+}
+
 /** Runs /effort now if the session is idle; otherwise it waits for turn.complete. */
 function flushSync($: EngineInterface, session: Session): void {
   const level = session.pendingSync
@@ -199,7 +214,7 @@ async function settingsSource($: EngineInterface, source: 'user' | 'project' | '
   }
 }
 
-type LoadedRules = { composed: ComposedRules; defaults: string; enforced: boolean; allowPin: boolean }
+type LoadedRules = { composed: ComposedRules; defaults: string; enforced: boolean; allowOff: boolean }
 
 /**
  * Shipped defaults → org (policy settings) → user → project, re-read on every
@@ -227,8 +242,8 @@ async function loadRules($: EngineInterface): Promise<LoadedRules> {
   })
   const composed = composeRules(layers)
   $.ui.log(`effort-router: rules from ${composed.contributors.map(c => `${c.source} (${c.how})`).join(' → ')}${enforced ? ' [org enforce]' : ''}`, { to: 'debug' })
-  allowFix = org.allowPin !== false
-  return { composed, defaults: defaults ?? FALLBACK_RULES, enforced, allowPin: allowFix }
+  allowOff = org.allowOff !== false
+  return { composed, defaults: defaults ?? FALLBACK_RULES, enforced, allowOff }
 }
 
 // --- deciding ----------------------------------------------------------------------
@@ -275,10 +290,9 @@ async function propose($: EngineInterface, id: string, session: Session, setting
     }
     const picked = answer?.match(/^Lock (\w+)$/)?.[1]
     if (isLevel(picked)) {
-      await apply($, id, session, settings, 'lock', picked, picked === proposal.level ? proposal.reason : `chosen over ${proposal.level}`)
+      await choose($, id, session, settings, proposal, picked)
     } else {
-      session.state = { ...session.state, phase: 'undecided', snoozedUntil: session.state.prompts + settings.snoozePrompts }
-      show($, session)
+      snooze($, session, settings)
     }
     return
   }
@@ -318,14 +332,8 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
       return routeReport(session.state, session.lastSent)
     case 'error':
       return command.message
-    case 'fix': {
-      const { allowPin } = await loadRules($)
-      if (!allowPin) return "your organisation's settings stop users fixing a level (allowPin: false). /route decide and /route off still work."
-      await apply($, id, session, settings, 'pin', command.level, `you chose ${command.level}`)
-      flushSync($, session)
-      return `${command.level} 🔒 for every request and subagent in this session (you chose it). /route decide hands it back to the router.`
-    }
     case 'off': {
+      if (!(await loadRules($)).allowOff) return "your organisation's settings keep the router on (allowOff: false). /route decide still works."
       session.state = { ...session.state, mode: 'picker', phase: 'undecided', level: undefined, reason: undefined, proposal: undefined }
       if (settings.syncPicker && session.baseline) {
         session.pendingSync = session.baseline
@@ -385,15 +393,16 @@ export function register(on: On, options: PluginOptions): void {
     try {
       await $.command.register({
         name: 'route',
-        description: 'Effort router: show the state, let the router decide, fix a level, turn it off, or edit the rules',
-        argumentHint: '[decide | fix <level> | off | rules [init|critique]]',
+        description: 'Effort router: show the state, let the router decide again, turn it off, or edit the rules',
+        argumentHint: '[decide | off | rules [init|critique]]',
       })
       const { session } = await sessionOf($)
       if (session.lastSent === undefined) {
         const configured = (await $.settings.read().catch(() => ({}))) as { effortLevel?: unknown }
         if (isLevel(configured.effortLevel)) session.lastSent = configured.effortLevel
       }
-      await loadRules($).catch(() => undefined) // learns allowFix for the footer
+      await loadRules($).catch(() => undefined) // learns allowOff for the footer
+      if (!allowOff && session.state.mode === 'picker') session.state = { ...session.state, mode: 'auto', phase: 'undecided' }
       show($, session)
     } catch (error) {
       $.ui.log(`effort-router: start failed: ${String(error)}`, { to: 'debug' })
@@ -485,18 +494,23 @@ export function register(on: On, options: PluginOptions): void {
       return Box({ flexDirection: 'row', columnGap: 1, children: [theirs, mine] })
     }
     const { Box, Select } = $.ui.resolve(e)
-    const menu = footerMenu(session.state, session.lastSent, allowFix)
+    const menu = footerMenu(session.state, session.lastSent, allowOff)
     const mine = Select({
       key: 'route-state',
       options: menu.options,
       value: menu.value,
       onSelect: async (value: string) => {
         if (value === menu.value) return
+        const proposal = session.state.phase === 'proposed' ? session.state.proposal : undefined
         if (value === 'accept') {
-          const proposal = session.state.proposal
-          if (proposal && session.state.phase === 'proposed') await apply($, id, session, settings, 'lock', proposal.level, proposal.reason)
+          if (proposal) await choose($, id, session, settings, proposal, proposal.level)
           return
         }
+        if (value === 'notnow') {
+          if (proposal) snooze($, session, settings)
+          return
+        }
+        if (value === 'fixed') return
         const text = await route($, value, settings).catch((error: unknown) => `effort-router: ${String(error)}`)
         $.ui.log(text, { to: 'debug' })
       },
@@ -533,7 +547,7 @@ export function register(on: On, options: PluginOptions): void {
                 hotkey: String(index + 1),
                 plain: true,
                 onPress: async () => {
-                  await apply($, id, session, settings, 'lock', level, level === proposal.level ? proposal.reason : `chosen over ${proposal.level}`)
+                  await choose($, id, session, settings, proposal, level)
                 },
               }),
             ),
@@ -543,10 +557,7 @@ export function register(on: On, options: PluginOptions): void {
               hotkey: 'x',
               plain: true,
               dimColor: true,
-              onPress: () => {
-                session.state = { ...session.state, phase: 'undecided', proposal: undefined, snoozedUntil: session.state.prompts + settings.snoozePrompts }
-                show($, session)
-              },
+              onPress: () => snooze($, session, settings),
             }),
           ],
         }),

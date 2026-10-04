@@ -14,7 +14,7 @@ The footer, beside the native model and effort pickers, always shows one of thre
 | --- | --- | --- |
 | Deciding | `medium · deciding` (dim) | The router is watching. Nothing is fixed, so the level in use (here medium) is the picker's |
 | | `medium → high?` | The router suggests high and is waiting for you (the band above the prompt has the buttons) |
-| Fixed | `high 🔒` | Every request and subagent runs at high. The router fixed it, or you did; `/route` says which |
+| Fixed | `high 🔒` | Every request and subagent runs at high, the level you accepted. `/route` says why |
 | Off | `router off` (dim) | The router does nothing. The picker decides |
 
 <!-- screenshot: footer showing "medium · deciding" beside the gauge and the native pickers -->
@@ -22,10 +22,11 @@ The footer, beside the native model and effort pickers, always shows one of thre
 
 The footer label is itself a dropdown. Open it to choose:
 
-- `Low 🔒`, `Medium 🔒`, `High 🔒`, `XHigh 🔒`, `Max 🔒`: fix that level yourself
-- `Accept high`: shown first while the router is suggesting a level
-- `Let the router decide` (or `Decide again` when a level is fixed): unfix it and go back to deciding
-- `Router off`: hand effort back to the picker
+- `Accept high` and `Not now`: shown first while the router is suggesting a level
+- `Let the router decide` (or `Decide again` when a level is fixed): go back to deciding
+- `Router off — use the effort picker`: hand effort back to the picker
+
+The router never sets a level you pick by hand: that is what the native effort picker is for. To run at a specific level, turn the router off and use the picker; with the router off, every request goes out at the picker's level. The one exception is the band at consent time, where you can take a different level than the one suggested (`2: medium` instead of `1: Lock high`).
 
 The closed dropdown shows the current state, so the option you're on reads `medium · deciding`, `high 🔒` or `router off`.
 
@@ -58,15 +59,14 @@ xhigh earns its place because the article's own worked examples (the HTML saniti
 
 | Command | What it does |
 | --- | --- |
-| `/route` | Shows the state and why (`router: bug fix in existing code` or `you chose high`) |
+| `/route` | Shows the state and why (`router: bug fix in existing code`, or `you chose medium over the suggested high` after picking another level in the band) |
 | `/route decide` | Unfixes the level and lets the router decide again from the transcript so far |
-| `/route fix <low\|medium\|high\|xhigh\|max>` | Fixes that level for every request until changed |
 | `/route off` | Turns the router off and restores the picker's earlier level |
 | `/route rules` | Prints the effective rules and which layers contributed |
 | `/route rules init [user\|project]` | Writes a starter rules file that keeps the defaults |
 | `/route rules critique` | Asks Sonnet to critique your custom rules |
 
-`/route` is registered with `$.command.register`, so it shows in the typeahead. State is per session. The 0.1 names (`/route auto`, `/route pin <level>`, `/route pin picker`) still work as hidden aliases.
+`/route` is registered with `$.command.register`, so it shows in the typeahead. State is per session. The 0.1 names `/route auto` and `/route pin picker` still work as hidden aliases. There is no command to set a level: turn the router off and use the effort picker.
 
 ## Options
 
@@ -114,7 +114,7 @@ An organisation can set routing rules centrally in managed settings (`managed-se
       "options": {
         "rules": "$defaults\n\n- Code under payments/ or ledger/ is never routed below high.\n- Infrastructure changes (terraform/, k8s/) are high.",
         "rulesMode": "enforce",
-        "allowPin": false
+        "allowOff": false
       }
     }
   }
@@ -123,9 +123,9 @@ An organisation can set routing rules centrally in managed settings (`managed-se
 
 - `rulesMode: "extend"` (the default) layers the org rules over the shipped defaults. Users and projects can add to them with `$defaults`, or replace them.
 - `rulesMode: "enforce"` makes the org layer final. Personal and project rules are ignored, and `/route rules init` says so.
-- `allowPin: false` stops users fixing a level: `/route fix` refuses and the footer dropdown leaves out the levels. `/route decide` and `/route off` still work.
+- `allowOff: false` stops users turning the router off, so the organisation's routing always applies. `/route off` refuses, the footer dropdown has no `Router off`, and a session saved as off comes back deciding. `/route decide` still works.
 
-A top-level `"effortRouter": { "rules": ..., "rulesMode": ..., "allowPin": ... }` object works too. The router reads these three settings only from the policy source, so a user cannot claim `enforce` for themselves.
+A top-level `"effortRouter": { "rules": ..., "rulesMode": ..., "allowOff": ... }` object works too. The router reads these three settings only from the policy source, so a user cannot claim `enforce` for themselves.
 
 ## Install
 
@@ -140,12 +140,12 @@ For development, run `claude --plugin-dir ./effort-router`.
 
 - In the Desktop app the native effort picker never changes: the app owns it and nothing a mod can call sets it. The requests still go out at the routed level; trust the footer label.
 - In the terminal the router can't set the picker label directly either. It runs `/effort <level>` when the session is idle, which prints a line in the transcript, and the footer shows the true level until then. Headless (`-p`) runs skip the sync because its output would replace the run's printed result. The per-request override still applies there.
-- The prompt that triggers the decision usually sends its first request before the classifier answers (about a second later), so that one request goes at the picker's level. Every request after the fix is covered.
+- The prompt that triggers the decision usually sends its first request before the classifier answers (about a second later), so that one request goes at the picker's level. Every request after the level is fixed is covered.
 - The router changes effort only, never the model. A request to a model that takes no effort is left alone.
 - Each read is one Haiku call per prompt while undecided, capped by `maxReads`. Nothing more is spent once a level is fixed.
-- The router does not notice a change of phase (for example "now verify it" after an implementation). Use `/route decide` or `/route fix high`. Suggesting a new level would need a classifier call on every prompt, so it is left as future work.
+- The router does not notice a change of phase (for example "now verify it" after an implementation). Use `/route decide`, or turn the router off and set the picker. Suggesting a new level would need a classifier call on every prompt, so it is left as future work.
 - The router adds no note about the chosen level to the system prompt, because changing a cached prompt section would break the prompt cache. The `/effort` echo tells the model instead, and it is appended to the transcript, so the cache holds.
-- The band and footer draw in the terminal and the Desktop app. VS Code and `-p` run the hooks without the UI, so use `consent: none` or `/route fix` there.
+- The band and footer draw in the terminal and the Desktop app. VS Code and `-p` run the hooks without the UI, so use `consent: none` there, or `/route off` and the picker.
 
 ## Development
 

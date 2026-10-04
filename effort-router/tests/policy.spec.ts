@@ -131,17 +131,14 @@ describe('parseRoute', () => {
     ['', 'show'],
     ['  ', 'show'],
     ['decide', 'decide'],
-    ['fix high', 'fix', 'high'],
-    ['FIX XHigh', 'fix', 'xhigh'],
-    ['off', 'off'],
-    ['fix', 'error'],
-    ['fix ultra', 'error'],
-    ['fix picker', 'error'],
+    ['OFF', 'off'],
     ['off now', 'error'],
     ['decide now', 'error'],
+    // setting a level is the picker's job, not the router's
+    ['fix high', 'error'],
+    ['pin max', 'error'],
     // 0.1 names, kept as hidden aliases
     ['auto', 'decide'],
-    ['pin max', 'fix', 'max'],
     ['pin picker', 'off'],
     ['rules', 'rules'],
     ['rules init', 'rules-init', 'user'],
@@ -153,7 +150,6 @@ describe('parseRoute', () => {
     test(`/route ${args}`, () => {
       const parsed = parseRoute(args)
       expect(parsed.kind).toBe(kind)
-      if (parsed.kind === 'fix') expect(parsed.level).toBe(arg as never)
       if (parsed.kind === 'rules-init') expect(parsed.scope).toBe(arg as never)
     })
   }
@@ -185,46 +181,42 @@ describe('state', () => {
 
   test('the reason keeps who fixed it', () => {
     expect(reasonText(BY_ROUTER)).toBe('router: bug fix in existing code')
-    expect(reasonText(BY_YOU)).toBe('you chose max')
-    expect(routeReport(BY_YOU)).toStartWith('max 🔒 (you chose max)')
+    const chosen = { ...BY_YOU, reason: 'you chose max over the suggested high' }
+    expect(reasonText(chosen)).toBe('you chose max over the suggested high')
+    expect(routeReport(chosen)).toStartWith('max 🔒 (you chose max over the suggested high)')
     expect(routeReport(DECIDING, 'medium')).toStartWith('medium · deciding.')
-    for (const state of [DECIDING, PROPOSED, BY_ROUTER, BY_YOU, OFF]) {
-      expect(routeReport(state, 'medium')).not.toMatch(/\bauto\b|\bpin(ned)?\b/)
+    for (const state of [DECIDING, PROPOSED, BY_ROUTER, OFF]) {
+      expect(routeReport(state, 'medium')).not.toMatch(/\bauto\b|\bpin(ned)?\b|\/route fix/)
     }
   })
 
-  test('footer menu: the closed dropdown reads as the state', () => {
+  test('footer menu: never sets a level; the closed dropdown reads as the state', () => {
     const label = (menu: ReturnType<typeof footerMenu>) => menu.options.find(o => o.value === menu.value)?.label
     const deciding = footerMenu(DECIDING, 'medium')
-    expect(deciding.options.map(o => o.label)).toEqual(['Low 🔒', 'Medium 🔒', 'High 🔒', 'XHigh 🔒', 'Max 🔒', 'medium · deciding', 'Router off'])
+    expect(deciding.options.map(o => o.label)).toEqual(['medium · deciding', 'Router off — use the effort picker'])
     expect(label(deciding)).toBe('medium · deciding')
 
     const proposed = footerMenu(PROPOSED, 'medium')
-    expect(proposed.options[0]).toEqual({ value: 'accept', label: 'Accept high' })
+    expect(proposed.options.map(o => o.label)).toEqual(['Accept high', 'Not now', 'medium → high?', 'Router off — use the effort picker'])
     expect(label(proposed)).toBe('medium → high?')
 
     const fixed = footerMenu(BY_ROUTER, 'medium')
-    expect(fixed.value).toBe('fix high')
+    expect(fixed.options.map(o => o.label)).toEqual(['high 🔒', 'Decide again', 'Router off — use the effort picker'])
     expect(label(fixed)).toBe('high 🔒')
-    expect(fixed.options.map(o => o.label)).toContain('Decide again')
-    expect(fixed.options.map(o => o.label)).toContain('Max 🔒')
 
     const off = footerMenu(OFF, 'medium')
+    expect(off.options.map(o => o.label)).toEqual(['Let the router decide', 'router off'])
     expect(label(off)).toBe('router off')
-    expect(off.options.map(o => o.label)).toContain('Let the router decide')
 
     for (const menu of [deciding, proposed, fixed, off]) {
       expect(new Set(menu.options.map(o => o.value)).size).toBe(menu.options.length)
-      expect(menu.options.every(o => o.value === 'accept' || parseRoute(o.value).kind !== 'error')).toBe(true)
+      expect(menu.options.some(o => /🔒$/.test(o.label) && o.value !== 'fixed')).toBe(false)
     }
   })
 
-  test('footer menu without fixing (org allowPin: false)', () => {
-    const deciding = footerMenu(DECIDING, 'medium', false)
-    expect(deciding.options.map(o => o.value)).toEqual(['decide', 'off'])
-    const fixed = footerMenu(BY_ROUTER, 'medium', false)
-    expect(fixed.options.map(o => o.value)).toEqual(['fix high', 'decide', 'off'])
-    expect(fixed.options[0]?.label).toBe('high 🔒')
+  test('footer menu with an org allowOff: false has no Router off', () => {
+    expect(footerMenu(DECIDING, 'medium', false).options.map(o => o.value)).toEqual(['decide'])
+    expect(footerMenu(BY_ROUTER, 'medium', false).options.map(o => o.value)).toEqual(['fixed', 'decide'])
   })
 
   test('the band offers the proposal first, four choices', () => {
@@ -249,11 +241,11 @@ describe('state', () => {
 
 describe('settings-borne rules', () => {
   test('reads pluginConfigs options under any marketplace key, then a top-level effortRouter object', () => {
-    expect(settingsRulesOf({ pluginConfigs: { 'effort-router@tommy-mods': { options: { rules: 'R', rulesMode: 'enforce', allowPin: false } } } }))
-      .toEqual({ rules: 'R', rulesMode: 'enforce', allowPin: false })
+    expect(settingsRulesOf({ pluginConfigs: { 'effort-router@tommy-mods': { options: { rules: 'R', rulesMode: 'enforce', allowOff: false } } } }))
+      .toEqual({ rules: 'R', rulesMode: 'enforce', allowOff: false })
     expect(settingsRulesOf({ effortRouter: { rules: 'TOP' } })).toEqual({ rules: 'TOP' })
     expect(settingsRulesOf({ pluginConfigs: { 'other@x': { options: { rules: 'NO' } } } })).toEqual({})
-    expect(settingsRulesOf({ effortRouter: { rules: '  ', rulesMode: 'bogus', allowPin: 'no' } })).toEqual({})
+    expect(settingsRulesOf({ effortRouter: { rules: '  ', rulesMode: 'bogus', allowOff: 'no' } })).toEqual({})
     expect(settingsRulesOf(undefined)).toEqual({})
   })
 
