@@ -1,7 +1,7 @@
 {
   "name": "effort-router",
-  "version": "0.3.0",
-  "description": "Decides the session's reasoning effort once the task is clear (a Haiku read of the transcript against Anthropic's 'Spending your effort' guidance and your own rules), asks you to confirm, then holds it for every request and subagent. The footer shows the state (deciding, fixed, off) and is a dropdown to accept, decide again or turn the router off; for a specific level, turn it off and use the effort picker.",
+  "version": "0.4.0",
+  "description": "Decides the session's reasoning effort once the task is clear (a Haiku read of the transcript against Anthropic's 'Spending your effort' guidance and your own rules), asks you to confirm, then locks it for every request and subagent. The footer shows the state (deciding, high?, high 🔒, off) and is a dropdown to accept, reset for a new task, or turn the router off or on.",
   "author": {
     "name": "Tommy Long"
   },
@@ -23,10 +23,10 @@
     },
     "snoozePrompts": {
       "type": "number",
-      "title": "Not-now snooze (prompts)",
-      "description": "After \"Not now\", how many of your prompts pass before the router reads the transcript again.",
+      "title": "Not-yet snooze (prompts)",
+      "description": "After \"Not yet\", how many of your prompts the router skips before it reads the transcript again (with the extra context).",
       "required": false,
-      "default": 5
+      "default": 2
     },
     "maxReads": {
       "type": "number",

@@ -203,6 +203,38 @@ export function trimTranscript(
   return [...head, '[… earlier messages omitted …]', ...tail].join('\n')
 }
 
+/**
+ * Where "Reset (new task)" was pressed: how many messages the transcript held,
+ * and the last one (as an anchor that survives the 4096-message window).
+ */
+export type ResetMark = { count: number; anchor?: { role: 'user' | 'assistant'; text: string } }
+
+const ANCHOR_CHARS = 200
+
+/** The mark for a transcript as it stands now. */
+export function resetMarkOf(messages: readonly TranscriptMessage[]): ResetMark {
+  const last = messages.at(-1)
+  return last ? { count: messages.length, anchor: { role: last.role, text: (last.text ?? '').slice(0, ANCHOR_CHARS) } } : { count: 0 }
+}
+
+/**
+ * The messages after a reset, so the classifier judges the new task rather
+ * than re-locking on the old one. Finds the anchor message from the end; if
+ * it is gone (the window moved or a compaction rewrote history), falls back
+ * to the count, and past that to the whole transcript as it now stands.
+ */
+export function sinceReset(messages: readonly TranscriptMessage[], mark: ResetMark | undefined): readonly TranscriptMessage[] {
+  if (!mark) return messages
+  if (mark.anchor) {
+    const { role, text } = mark.anchor
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i] as TranscriptMessage
+      if (m.role === role && (m.text ?? '').slice(0, ANCHOR_CHARS) === text && i + 1 <= mark.count) return messages.slice(i + 1)
+    }
+  }
+  return mark.count <= messages.length ? messages.slice(mark.count) : messages
+}
+
 /** The user message sent to the classifier. */
 export const classifierPrompt = (transcript: string): string =>
   `Transcript so far (oldest first):\n<transcript>\n${transcript}\n</transcript>\n\nPick the session's effort level now, or answer undecided. JSON only.`
@@ -240,27 +272,29 @@ export function parseDecision(reply: string | undefined | null): Decision {
 
 export type RouteCommand =
   | { kind: 'show' }
-  | { kind: 'decide' }
+  | { kind: 'reset' }
   | { kind: 'off' }
+  | { kind: 'on' }
   | { kind: 'rules' }
   | { kind: 'rules-init'; scope: 'user' | 'project' }
   | { kind: 'rules-critique' }
   | { kind: 'error'; message: string }
 
 export const ROUTE_USAGE =
-  'usage: /route [decide | off | rules [init [user|project] | critique]]'
+  'usage: /route [reset | off | on | rules [init [user|project] | critique]]'
 
 /**
- * `/route` arguments. `decide` and `off` are the names shown; the 0.1 names
- * `auto` and `pin picker` stay as hidden aliases. There is no way to set a
- * level here: for a specific level, turn the router off and use the picker.
+ * `/route` arguments. `reset`, `off` and `on` are the names shown; older
+ * names stay as hidden aliases (`decide`, `auto` → reset; `pin picker` → off).
+ * There is no way to set a level here: turn the router off and use the picker.
  */
 export function parseRoute(args: string): RouteCommand {
   const words = args.trim().toLowerCase().split(/\s+/).filter(Boolean)
   if (words.length === 0) return { kind: 'show' }
   const [verb, arg, extra, more] = words
-  if ((verb === 'decide' || verb === 'auto') && arg === undefined) return { kind: 'decide' }
+  if ((verb === 'reset' || verb === 'decide' || verb === 'auto') && arg === undefined) return { kind: 'reset' }
   if (verb === 'off' && arg === undefined) return { kind: 'off' }
+  if (verb === 'on' && arg === undefined) return { kind: 'on' }
   if (verb === 'pin' && arg === 'picker' && extra === undefined) return { kind: 'off' }
   if (verb === 'rules') {
     if (arg === undefined) return { kind: 'rules' }
@@ -298,8 +332,10 @@ export type RouterState = {
   proposal?: Proposal
   /** Human prompts seen this session. */
   prompts: number
-  /** Under `auto` + `undecided`: no classifier call before this prompt count. */
+  /** Under `auto` + `undecided`: no classifier call until the prompt count passes this. */
   snoozedUntil?: number
+  /** Set by "Reset (new task)": the classifier reads only messages after it. */
+  resetMark?: ResetMark
 }
 
 export const freshState = (): RouterState => ({ mode: 'auto', phase: 'undecided', prompts: 0 })
@@ -343,12 +379,13 @@ export function routeReport(state: RouterState, inForce?: string | number): stri
   if (view.kind === 'fixed') {
     lines.push(`${view.level} 🔒 (${reasonText(state)}). Every request and subagent runs at ${view.level}.`)
   } else if (view.kind === 'off') {
-    lines.push(`router off. Effort is whatever /effort or the picker sets${inForce === undefined ? '' : ` (now ${inForce})`}.`)
+    lines.push(`off. The router does nothing; effort is whatever /effort or the picker sets${inForce === undefined ? '' : ` (now ${inForce})`}. /route on turns it back on.`)
   } else {
     const now = inForce === undefined ? 'the picker\'s level' : String(inForce)
     lines.push(view.proposal
-      ? `${now} → ${view.proposal.level}? The router suggests ${view.proposal.level} (${view.proposal.reason}); choose in the band above the prompt.`
-      : `${now} · deciding. The router fixes a level once the task is clear.`)
+      ? `${view.proposal.level}? The router suggests ${view.proposal.level} (${view.proposal.reason}); accept it in the band above the prompt or the footer. Until then ${now} applies.`
+      : `deciding. The router locks a level once the task is clear; until then ${now} applies.`)
+    if (state.resetMark) lines.push('Reset: only messages after the reset count.')
     if (state.snoozedUntil !== undefined && state.snoozedUntil > state.prompts) {
       lines.push(`Snoozed: next read after ${state.snoozedUntil - state.prompts} more prompt(s).`)
     }
@@ -379,7 +416,7 @@ export const LEVEL_COLOR: Record<Level, string> = {
 // --- persistence ------------------------------------------------------------------
 
 /** What `$.store` keeps per session id so a resume finds its lock. */
-export type SavedState = Pick<RouterState, 'mode' | 'phase' | 'level' | 'reason'> & { savedAt: number }
+export type SavedState = Pick<RouterState, 'mode' | 'phase' | 'level' | 'reason' | 'resetMark'> & { savedAt: number }
 
 export const MAX_SAVED_SESSIONS = 100
 
@@ -395,6 +432,7 @@ export function withSaved(
   const saved: SavedState = { mode: state.mode, phase: state.phase === 'proposed' ? 'undecided' : state.phase, savedAt: now }
   if (state.level !== undefined) saved.level = state.level
   if (state.reason !== undefined) saved.reason = state.reason
+  if (state.resetMark !== undefined) saved.resetMark = state.resetMark
   next[sessionId] = saved
   const ids = Object.keys(next).sort((a, b) => (next[a]?.savedAt ?? 0) - (next[b]?.savedAt ?? 0))
   while (ids.length > MAX_SAVED_SESSIONS) delete next[ids.shift() as string]
@@ -403,9 +441,11 @@ export function withSaved(
 
 /** Rebuilds state from a saved entry; anything malformed starts fresh. */
 export function restored(saved: unknown): RouterState {
-  const state = freshState()
-  if (typeof saved !== 'object' || saved === null) return state
+  const fresh = freshState()
+  if (typeof saved !== 'object' || saved === null) return fresh
   const record = saved as Record<string, unknown>
+  const mark = record.resetMark as ResetMark | undefined
+  const state: RouterState = typeof mark === 'object' && mark !== null && typeof mark.count === 'number' ? { ...fresh, resetMark: mark } : fresh
   const mode = record.mode
   if (mode === 'picker') return { ...state, mode }
   if (mode === 'pinned' && isLevel(record.level)) return { ...state, mode, level: record.level }
@@ -417,50 +457,47 @@ export function restored(saved: unknown): RouterState {
 
 
 /**
- * The compact state the footer shows beside the native effort picker:
- * `medium · deciding`, `medium → high?`, `high 🔒` or `router off`.
- * `dim` for the states where nothing is fixed.
+ * The compact state the footer shows beside the native effort picker. The
+ * level in use is the picker's own label, a few pixels away, so it is not
+ * repeated: `deciding`, `high?`, `high 🔒` or `off`. `dim` where nothing is fixed.
  */
-export function footerLabel(state: RouterState, inForce?: string | number): { text: string; color?: string; dim: boolean } {
+export function footerLabel(state: RouterState): { text: string; color?: string; dim: boolean } {
   const view = viewOf(state)
-  const now = inForce === undefined ? 'default' : String(inForce)
-  if (view.kind === 'off') return { text: 'router off', dim: true }
+  if (view.kind === 'off') return { text: 'off', dim: true }
   if (view.kind === 'fixed') return { text: `${view.level} 🔒`, color: LEVEL_COLOR[view.level], dim: false }
-  if (view.proposal) return { text: `${now} → ${view.proposal.level}?`, color: LEVEL_COLOR[view.proposal.level], dim: false }
-  return { text: `${now} · deciding`, dim: true }
+  if (view.proposal) return { text: `${view.proposal.level}?`, color: LEVEL_COLOR[view.proposal.level], dim: false }
+  return { text: 'deciding', dim: true }
 }
 
 export type FooterMenu = {
   options: { value: string; label: string }[]
-  /** The option for the current state; its label is the compact state text. */
+  /** The option for the current state (`current`, a no-op); its label is the state text. */
   value: string
 }
 
 /**
- * The footer dropdown. It never sets a level (the effort picker does that,
- * with the router off). The closed dropdown shows the selected option's
- * label, so the current state's option is labelled with the state text.
- * Values: `accept`, `notnow`, `fixed` (the current fixed state, a no-op),
- * and the `/route` arguments `decide` and `off`. `allowOff: false` (an
- * organisation's setting) leaves out `Router off`.
+ * The footer dropdown. The closed dropdown shows the selected option, so the
+ * first option is the current state (value `current`, a no-op). Then:
+ * deciding: Reset (new task), Turn off. Suggestion pending: Accept <level>,
+ * Not yet, Turn off. Locked: Reset (new task), Turn off. Off: Turn on.
+ * `allowOff: false` (an organisation's setting) leaves out Turn off.
+ * It never sets a level: that is the effort picker's job.
  */
-export function footerMenu(state: RouterState, inForce?: string | number, allowOff = true): FooterMenu {
+export function footerMenu(state: RouterState, allowOff = true): FooterMenu {
   const view = viewOf(state)
-  const label = footerLabel(state, inForce).text
-  const options: { value: string; label: string }[] = []
-  if (view.kind === 'deciding' && view.proposal) {
-    options.push({ value: 'accept', label: `Accept ${view.proposal.level}` })
-    options.push({ value: 'notnow', label: 'Not now' })
+  const options: { value: string; label: string }[] = [{ value: 'current', label: footerLabel(state).text }]
+  if (view.kind === 'off') {
+    options.push({ value: 'on', label: 'Turn on' })
+  } else {
+    if (view.kind === 'deciding' && view.proposal) {
+      options.push({ value: 'accept', label: `Accept ${view.proposal.level}` })
+      options.push({ value: 'notyet', label: 'Not yet' })
+    } else {
+      options.push({ value: 'reset', label: 'Reset (new task)' })
+    }
+    if (allowOff) options.push({ value: 'off', label: 'Turn off' })
   }
-  if (view.kind === 'fixed') options.push({ value: 'fixed', label })
-  options.push({
-    value: 'decide',
-    label: view.kind === 'deciding' ? label : view.kind === 'fixed' ? 'Decide again' : 'Let the router decide',
-  })
-  if (view.kind === 'off') options.push({ value: 'off', label })
-  else if (allowOff) options.push({ value: 'off', label: 'Router off — use the effort picker' })
-  const value = view.kind === 'fixed' ? 'fixed' : view.kind === 'off' ? 'off' : 'decide'
-  return { options, value }
+  return { options, value: 'current' }
 }
 
 // --- settings-borne rules (org / user / project) --------------------------------------

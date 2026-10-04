@@ -24,6 +24,8 @@ import {
   proposalChoices,
   proposalText,
   restored,
+  resetMarkOf,
+  sinceReset,
   routeReport,
   trimTranscript,
   withSaved,
@@ -90,7 +92,7 @@ function settingsOf(options: PluginOptions): Settings {
   }
   return {
     consent,
-    snoozePrompts: num(options.snoozePrompts, 5),
+    snoozePrompts: num(options.snoozePrompts, 2),
     maxReads: num(options.maxReads, 8),
     classifierModel: typeof options.classifierModel === 'string' && options.classifierModel !== '' ? options.classifierModel : 'haiku',
     syncPicker: options.syncPicker !== false && options.syncPicker !== 'false',
@@ -161,10 +163,18 @@ async function choose($: EngineInterface, id: string, session: Session, settings
   else await apply($, id, session, settings, 'pin', level, `you chose ${level} over the suggested ${proposal.level}`)
 }
 
-/** Snoozes the router: no new suggestion for `snoozePrompts` prompts. */
+/** "Not yet": back to deciding; skip `snoozePrompts` prompts, then read again with the extra context. */
 function snooze($: EngineInterface, session: Session, settings: Settings): void {
   session.state = { ...session.state, phase: 'undecided', proposal: undefined, snoozedUntil: session.state.prompts + settings.snoozePrompts }
   show($, session)
+}
+
+/** Puts the picker back where it was before the router first synced it. */
+function restorePicker($: EngineInterface, session: Session, settings: Settings): void {
+  if (settings.syncPicker && session.baseline) {
+    session.pendingSync = session.baseline
+    flushSync($, session)
+  }
 }
 
 /** Runs /effort now if the session is idle; otherwise it waits for turn.complete. */
@@ -254,7 +264,8 @@ async function classifyNow($: EngineInterface, settings: Settings, current: stri
     $.session.messages().catch(() => []),
     loadRules($),
   ])
-  const transcript = trimTranscript(messages, current)
+  const { session } = await sessionOf($)
+  const transcript = trimTranscript(sinceReset(messages, session.state.resetMark), current)
   if (transcript.trim() === '') return undefined
   const reply = await $.model.complete({
     model: settings.classifierModel,
@@ -281,7 +292,7 @@ async function propose($: EngineInterface, id: string, session: Session, setting
   }
   if (consent === 'ask') {
     const choices = proposalChoices(proposal).slice(0, 3)
-    const labels = [...choices.map(level => `Lock ${level}`), 'Not now']
+    const labels = [...choices.map(level => `Lock ${level}`), 'Not yet']
     let answer: string | undefined
     try {
       answer = await $.ui.ask(`${proposalText(proposal)}. Lock it?`, { options: labels, header: 'Effort' })
@@ -333,31 +344,40 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
     case 'error':
       return command.message
     case 'off': {
-      if (!(await loadRules($)).allowOff) return "your organisation's settings keep the router on (allowOff: false). /route decide still works."
+      if (!(await loadRules($)).allowOff) return "your organisation's settings keep the router on (allowOff: false). /route reset still works."
       session.state = { ...session.state, mode: 'picker', phase: 'undecided', level: undefined, reason: undefined, proposal: undefined }
-      if (settings.syncPicker && session.baseline) {
-        session.pendingSync = session.baseline
-        flushSync($, session)
-      }
+      restorePicker($, session, settings)
       show($, session)
       await persist($, id, session.state)
-      return `router off: effort is the picker's${session.baseline ? ` (restored to ${session.baseline})` : ''}. /route decide turns it back on.`
+      return `router off: effort is the picker's${session.baseline ? ` (restored to ${session.baseline})` : ''}. /route on turns it back on.`
     }
-    case 'decide': {
-      session.state = { ...session.state, mode: 'auto', phase: 'undecided', level: undefined, reason: undefined, proposal: undefined, snoozedUntil: undefined }
+    case 'on': {
+      if (session.state.mode !== 'picker') return `the router is already on (${footerLabel(session.state).text}).`
+      session.state = { ...session.state, mode: 'auto', phase: 'undecided', snoozedUntil: undefined }
       session.announced = false
       session.reads = 0
-      if (settings.syncPicker && session.baseline) {
-        session.pendingSync = session.baseline
-        flushSync($, session)
-      }
       show($, session)
       await persist($, id, session.state)
-      const consent = await consentFor($, settings)
-      await decide($, id, session, settings, consent, undefined)
-      return session.state.phase === 'undecided'
-        ? 'deciding: the router reads the transcript again after your next prompt.'
-        : footerLabel(session.state, session.lastSent).text
+      return 'router on: deciding. It reads the transcript after your next prompt.'
+    }
+    case 'reset': {
+      const messages = await $.session.messages().catch(() => [])
+      session.state = {
+        ...session.state,
+        mode: 'auto',
+        phase: 'undecided',
+        level: undefined,
+        reason: undefined,
+        proposal: undefined,
+        snoozedUntil: undefined,
+        resetMark: resetMarkOf(messages),
+      }
+      session.announced = false
+      session.reads = 0
+      restorePicker($, session, settings)
+      show($, session)
+      await persist($, id, session.state)
+      return 'reset: deciding. The router judges the new task from your next prompt on, ignoring what came before.'
     }
     case 'rules': {
       const { composed, enforced } = await loadRules($)
@@ -393,8 +413,8 @@ export function register(on: On, options: PluginOptions): void {
     try {
       await $.command.register({
         name: 'route',
-        description: 'Effort router: show the state, let the router decide again, turn it off, or edit the rules',
-        argumentHint: '[decide | off | rules [init|critique]]',
+        description: 'Effort router: show the state, reset for a new task, turn it off or on, or edit the rules',
+        argumentHint: '[reset | off | on | rules [init|critique]]',
       })
       const { session } = await sessionOf($)
       if (session.lastSent === undefined) {
@@ -427,7 +447,7 @@ export function register(on: On, options: PluginOptions): void {
         const { id, session } = await sessionOf($)
         session.state = { ...session.state, prompts: session.state.prompts + 1 }
         const { state } = session
-        const snoozed = state.snoozedUntil !== undefined && state.prompts < state.snoozedUntil
+        const snoozed = state.snoozedUntil !== undefined && state.prompts <= state.snoozedUntil
         const wanted = state.mode === 'auto' && state.phase === 'undecided' && !snoozed && session.reads < settings.maxReads
         if (wanted) {
           const consent = await consentFor($, settings)
@@ -485,7 +505,7 @@ export function register(on: On, options: PluginOptions): void {
   // closed dropdown shows the current option, labelled with the state text.
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     const { id, session } = await sessionOf($)
-    const label = footerLabel(session.state, session.lastSent)
+    const label = footerLabel(session.state)
     const theirs = await next(e)
     const canSelect = settings.footerControl === 'select' && (e.surface === 'terminal' || e.surface === 'desktop')
     if (!canSelect) {
@@ -494,7 +514,7 @@ export function register(on: On, options: PluginOptions): void {
       return Box({ flexDirection: 'row', columnGap: 1, children: [theirs, mine] })
     }
     const { Box, Select } = $.ui.resolve(e)
-    const menu = footerMenu(session.state, session.lastSent, allowOff)
+    const menu = footerMenu(session.state, allowOff)
     const mine = Select({
       key: 'route-state',
       options: menu.options,
@@ -506,11 +526,10 @@ export function register(on: On, options: PluginOptions): void {
           if (proposal) await choose($, id, session, settings, proposal, proposal.level)
           return
         }
-        if (value === 'notnow') {
+        if (value === 'notyet') {
           if (proposal) snooze($, session, settings)
           return
         }
-        if (value === 'fixed') return
         const text = await route($, value, settings).catch((error: unknown) => `effort-router: ${String(error)}`)
         $.ui.log(text, { to: 'debug' })
       },
@@ -552,8 +571,8 @@ export function register(on: On, options: PluginOptions): void {
               }),
             ),
             Button({
-              key: 'not-now',
-              label: 'Not now',
+              key: 'not-yet',
+              label: 'Not yet',
               hotkey: 'x',
               plain: true,
               dimColor: true,
