@@ -12,32 +12,28 @@ The footer, right beside the native model and effort pickers, shows the router's
 
 | Footer | What it means | Dropdown |
 | --- | --- | --- |
-| `deciding` (dim) | The router is watching. Nothing is locked, so the picker's level applies | `Reset (new task)`, `Turn off` |
-| `high?` | The router suggests high and is waiting for you (the band above the prompt has buttons too) | `Accept high`, `Not yet`, `Turn off` |
-| `high 🔒` | Locked: every request and subagent runs at high. `/route` says why | `Reset (new task)`, `Turn off` |
-| `off` (dim) | The router does nothing; the picker is in charge | `Turn on` |
+| `deciding` (dim) | The router is watching. Nothing is locked, so the picker's level applies | `Suggest now`, `Turn off` |
+| `high?` | The router suggests high and is waiting for you. The band above the prompt has `1: Accept high` and `x: Turn off` | `Accept high`, `Suggest now`, `Turn off` |
+| `high 🔒` | Locked: every request and subagent runs at high. `/route status` says why | `Suggest now`, `Turn off` |
+| `high 🔒 → low?` | Locked, and a manual `/route` suggests switching to low | `Accept low`, `Suggest now`, `Turn off` |
+| `off` (dim) | The router does nothing; the picker is in charge | `Suggest now`, `Turn on` |
 
 <!-- screenshot: footer showing "deciding" beside the gauge and the native pickers -->
-<!-- screenshot: footer showing "high 🔒" -->
+<!-- screenshot: footer showing "high?" with the band above the prompt -->
 <!-- screenshot: the open footer dropdown -->
 
 The footer label is itself the dropdown, and the closed dropdown shows the current state.
 
-- **Accept high** locks the suggested level.
-- **Not yet** says the suggestion came too early. The router goes back to deciding, skips the next 2 prompts (`snoozePrompts`), then reads again with the extra context. It may suggest the same level again, which is fine.
-- **Reset (new task)** unlocks and goes back to deciding. It also remembers where in the transcript you reset, so the router judges only what comes after: the new task, not the one it locked on. The reset point is saved with the session, so it survives `--resume`.
-- **Turn off** works before or during routing and hands effort to the picker. **Turn on** goes back to deciding.
+The router never sets a level you pick by hand: that is what the native effort picker is for. To run at a specific level, turn the router off and use the picker; with the router off, every request goes out at the picker's level.
 
-The router never sets a level you pick by hand: that is what the native effort picker is for. To run at a specific level, turn the router off and use the picker; with the router off, every request goes out at the picker's level. The one exception is the band at consent time, where you can take a different level than the one suggested (`2: medium` instead of `1: Lock high`).
+## How it decides
 
-## How it works
-
-1. **Deciding.** While the task is unclear, the router leaves effort alone and the effort picker's level applies. Sessions often open with filler ("pull the latest code"), so the first message is not enough.
-2. **Reading.** After each prompt you type, a small model (Haiku by default) reads the transcript so far. It sees your prompts in full, Claude's replies truncated and tool calls as names only. It answers "undecided" or a level with a one-line reason, using the [routing rules](#customising-the-rules), and it is told to stay undecided until the real task is clear. The read runs beside your turn and never holds your prompt up.
-3. **Consent.** With the default `band` consent, the router offers the level in the band above the prompt: `Route this session at HIGH — bug fix in existing code`, with buttons `1: Lock high`, `2: medium`, `3: low`, `4: max` and `x: Not yet`. A digit typed in an empty prompt presses a button. The turn carries on at the picker's level meanwhile, and a click applies from the very next model request, even mid-turn. "Not yet" goes back to deciding and reads again after 2 more prompts.
-4. **Locked.** Every later model request in the session runs at the locked level, subagents included. The classifier is not called again. In the terminal the router also runs `/effort <level>` once the session is idle, so the native picker label matches. In the Desktop app the picker belongs to the app, not the engine, so its label stays where you set it; the footer shows the level actually in use (verified: Desktop's transcript records `effort: high` on every request after a lock while the picker still reads Medium).
-
-A fixed level survives `claude --resume`.
+- **After each prompt you type**, while it is deciding or a suggestion is pending, a small model (Haiku by default) reads the whole conversation again: your prompts in full, Claude's replies truncated (the last one less so) and tool calls as names only. It answers "undecided" or a level with a one-line reason, using the [routing rules](#customising-the-rules). The read runs beside your turn and never holds your prompt up.
+- **The latest exchange counts most.** A later clarification overrides an earlier ask, and a short reply is read against the question it answers. Say "refactor the payment retry logic" and the router may suggest `high?`; if Claude then asks "1. full rewrite or 2. just extract the constant?" and you answer "2", the next read can move the suggestion to `low?`. A read that finds nothing clear withdraws the suggestion. Ignoring the band is the natural "not yet".
+- **Accept locks.** Every later request in the session, subagents included, runs at the locked level, and the router stops reading. In the terminal it also runs `/effort <level>` once the session is idle, so the native picker label matches. In the Desktop app the picker belongs to the app, so its label stays where you set it; trust the footer (verified: Desktop's transcript records `effort: high` on every request after a lock while the picker still reads Medium). A lock survives `claude --resume`.
+- **It gives up after `decideWithin` prompts** (6 by default). If nothing is locked by then it stops reading and never calls the model again on its own. A pending suggestion stays pending; otherwise the router turns off with the reason `no clear task after 6 prompts — /route to ask again`.
+- **`/route` asks now.** It reads the whole conversation in any state, ignoring the budget, and goes through the same consent. Add a hint to steer it: `/route this is a security review`, `/route keep it quick`. The hint is weighed strongly and kept for re-reads while that suggestion is pending. If the router still finds no clear task, it says so and changes nothing. While locked, a different answer offers a switch (`Switch from HIGH to LOW`, with `1: Accept low` and `x: Keep high`); the same answer just confirms. The footer's `Suggest now` is the same as bare `/route`.
+- **Consent.** `band` (default) shows the band and the footer offer; nothing changes until you accept. `ask` asks a blocking question whenever a new level is suggested. `none` locks at once.
 
 ## Policy
 
@@ -57,15 +53,16 @@ xhigh earns its place because the article's own worked examples (the HTML saniti
 
 | Command | What it does |
 | --- | --- |
-| `/route` | Shows the state and why (`router: bug fix in existing code`, or `you chose medium over the suggested high` after picking another level in the band) |
-| `/route reset` | Reset (new task): unlocks and decides again from the messages after this point only |
+| `/route` | Runs the router now over the whole conversation, in any state |
+| `/route <hint>` | The same, with a hint for the classifier (`/route this is a security review`) |
+| `/route status` | Shows the state, why, and how many automatic reads are left |
 | `/route off` | Turns the router off and restores the picker's earlier level |
-| `/route on` | Turns the router back on (deciding) |
+| `/route on` | Turns the router back on: deciding over the whole conversation, with a fresh budget |
 | `/route rules` | Prints the effective rules and which layers contributed |
 | `/route rules init [user\|project]` | Writes a starter rules file that keeps the defaults |
 | `/route rules critique` | Asks Sonnet to critique your custom rules |
 
-`/route` is registered with `$.command.register`, so it shows in the typeahead. State is per session. Older names still work as hidden aliases: `/route decide` and `/route auto` (reset), `/route pin picker` (off). There is no command to set a level: turn the router off and use the effort picker.
+`/route` is registered with `$.command.register`, so it shows in the typeahead. State is per session. `/route decide` is a hidden alias of bare `/route`. There is no command to set a level: turn the router off and use the effort picker.
 
 ## Options
 
@@ -73,9 +70,8 @@ Set them in `/config`, or under `pluginConfigs["effort-router@tommy-mods"].optio
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `consent` | `band` | `band` offers buttons above the prompt. `ask` asks a blocking question before the turn runs, and is skipped where nobody can answer (`-p`). `none` fixes the level without asking |
-| `snoozePrompts` | 2 | Prompts the router skips after "Not yet" before reading again |
-| `maxReads` | 8 | Most classifier reads while undecided |
+| `consent` | `band` | `band` offers the level above the prompt and in the footer. `ask` asks a blocking question when a new level is suggested (skipped where nobody can answer, such as `-p`). `none` locks without asking |
+| `decideWithin` | 6 | Prompts the router reads automatically before it stops |
 | `classifierModel` | `haiku` | The model that reads the transcript |
 | `syncPicker` | true | Run `/effort <level>` so the terminal's picker label matches |
 | `footerControl` | `select` | `select` makes the footer label a dropdown. `label` draws plain text, and `/route` is the control |
@@ -122,7 +118,7 @@ An organisation can set routing rules centrally in managed settings (`managed-se
 
 - `rulesMode: "extend"` (the default) layers the org rules over the shipped defaults. Users and projects can add to them with `$defaults`, or replace them.
 - `rulesMode: "enforce"` makes the org layer final. Personal and project rules are ignored, and `/route rules init` says so.
-- `allowOff: false` stops users turning the router off, so the organisation's routing always applies. `/route off` refuses, the footer dropdown has no `Turn off`, and a session saved as off comes back deciding. `/route reset` still works.
+- `allowOff: false` stops users turning the router off, so the organisation's routing always applies. `/route off` refuses, the footer dropdown has no `Turn off`, and a session saved as off comes back deciding. When the budget runs out with nothing suggested, the router idles as `deciding` (no more reads) instead of turning off. `/route` still works.
 
 A top-level `"effortRouter": { "rules": ..., "rulesMode": ..., "allowOff": ... }` object works too. The router reads these three settings only from the policy source, so a user cannot claim `enforce` for themselves.
 
@@ -139,10 +135,10 @@ For development, run `claude --plugin-dir ./effort-router`.
 
 - In the Desktop app the native effort picker never changes: the app owns it and nothing a mod can call sets it. The requests still go out at the routed level; trust the footer label.
 - In the terminal the router can't set the picker label directly either. It runs `/effort <level>` when the session is idle, which prints a line in the transcript, and the footer shows the true level until then. Headless (`-p`) runs skip the sync because its output would replace the run's printed result. The per-request override still applies there.
-- The prompt that triggers the decision usually sends its first request before the classifier answers (about a second later), so that one request goes at the picker's level. Every request after the level is fixed is covered.
+- The prompt that triggers the decision usually sends its first request before the classifier answers (about a second later), so that one request goes at the picker's level. Every request after the lock is covered.
 - The router changes effort only, never the model. A request to a model that takes no effort is left alone.
-- Each read is one Haiku call per prompt while undecided, capped by `maxReads`. Nothing more is spent once a level is fixed.
-- The router does not notice a change of phase (for example "now verify it" after an implementation). Use `/route reset` (or the footer's Reset) when you start a new task, or turn the router off and set the picker. Suggesting a new level would need a classifier call on every prompt, so it is left as future work.
+- Each automatic read is one Haiku call per prompt while deciding or suggesting, for at most `decideWithin` prompts. Nothing more is spent once a level is locked or the budget is spent, except when you run `/route`.
+- Once locked, the router does not notice a change of phase on its own (for example "now verify it" after an implementation). Run `/route` (or the footer's Suggest now), optionally with a hint, to get a switch offered.
 - The router adds no note about the chosen level to the system prompt, because changing a cached prompt section would break the prompt cache. The `/effort` echo tells the model instead, and it is appended to the transcript, so the cache holds.
 - The band and footer draw in the terminal and the Desktop app. VS Code and `-p` run the hooks without the UI, so use `consent: none` there, or `/route off` and the picker.
 

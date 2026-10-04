@@ -7,33 +7,36 @@ import {
   type RouterState,
   LEVEL_COLOR,
   STARTER_RULES,
+  afterBudget,
   appliedLevel,
-  footerLabel,
-  footerMenu,
-  reasonText,
   classifierPrompt,
   classifierSystem,
   composeRules,
-  ruleLayers,
-  settingsRulesOf,
   critiquePrompt,
-  freshState,
+  footerLabel,
+  footerMenu,
   isLevel,
+  lockedAt,
   parseDecision,
   parseRoute,
-  proposalChoices,
   proposalText,
+  reasonText,
   restored,
-  resetMarkOf,
-  sinceReset,
   routeReport,
+  ruleLayers,
+  settingsRulesOf,
   trimTranscript,
+  turnedOff,
+  turnedOn,
+  wantsRead,
+  withReading,
   withSaved,
 } from './policy'
 
 /**
- * effort-router: decides the session's reasoning effort once the task is
- * clear, asks (or not) for consent, then locks it for every request.
+ * effort-router: reads the conversation after each human prompt until the
+ * task is clear, suggests a level, and locks it once accepted (or at once
+ * under consent `none`). `/route` runs it on demand, with an optional hint.
  *
  * Fail open everywhere: any error leaves the request at the picker's effort.
  */
@@ -42,8 +45,8 @@ type Consent = 'band' | 'ask' | 'none'
 
 type Settings = {
   consent: Consent
-  snoozePrompts: number
-  maxReads: number
+  /** Human prompts the router reads automatically before it stops. */
+  decideWithin: number
   classifierModel: string
   syncPicker: boolean
   /** `select`: the footer label is a dropdown. `label`: plain text, /route is the control. */
@@ -53,8 +56,6 @@ type Settings = {
 /** Per-session runtime facts that are not persisted. */
 type Session = {
   state: RouterState
-  /** Classifier calls made this session. */
-  reads: number
   /** A classification is in flight. */
   reading: boolean
   /** The effort the session had before the router first ran /effort. */
@@ -63,8 +64,6 @@ type Session = {
   lastSent?: string | number
   /** An /effort sync to run when the session is next idle. */
   pendingSync?: Level
-  /** Whether the lock was announced in the transcript. */
-  announced: boolean
 }
 
 const STORE_KEY = 'sessions'
@@ -88,12 +87,11 @@ function settingsOf(options: PluginOptions): Settings {
   const consent = options.consent === 'ask' || options.consent === 'none' ? options.consent : 'band'
   const num = (value: unknown, fallback: number): number => {
     const n = typeof value === 'number' ? value : Number(value)
-    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : fallback
   }
   return {
     consent,
-    snoozePrompts: num(options.snoozePrompts, 2),
-    maxReads: num(options.maxReads, 8),
+    decideWithin: num(options.decideWithin, 6),
     classifierModel: typeof options.classifierModel === 'string' && options.classifierModel !== '' ? options.classifierModel : 'haiku',
     syncPicker: options.syncPicker !== false && options.syncPicker !== 'false',
     footerControl: options.footerControl === 'label' ? 'label' : 'select',
@@ -108,7 +106,7 @@ async function sessionOf($: EngineInterface): Promise<{ id: string; session: Ses
   if (!session) {
     const all = (await $.store.get(STORE_KEY).catch(() => undefined)) as Record<string, unknown> | undefined
     const state = restored(all?.[id])
-    session = { state, reads: 0, reading: false, announced: state.phase === 'locked' || state.mode !== 'auto' }
+    session = { state, reading: false }
     if (appliedLevel(state)) session.pendingSync = appliedLevel(state)
     SESSIONS.set(id, session)
   }
@@ -124,9 +122,9 @@ async function persist($: EngineInterface, id: string, state: RouterState): Prom
   }
 }
 
-// --- showing ---------------------------------------------------------------------
+// --- showing and applying ----------------------------------------------------------
 
-function show($: EngineInterface, session: Session): void {
+function show($: EngineInterface): void {
   try {
     $.ui.invalidate('ui.render')
   } catch {
@@ -134,39 +132,29 @@ function show($: EngineInterface, session: Session): void {
   }
 }
 
-/** Fixes a level for the session (by the router, or by you), syncs the picker, announces once. */
-async function apply($: EngineInterface, id: string, session: Session, settings: Settings, how: 'lock' | 'pin', level: Level, reason: string): Promise<void> {
-  session.state = how === 'pin'
-    ? { ...session.state, mode: 'pinned', phase: 'locked', level, reason, proposal: undefined }
-    : { ...session.state, mode: 'auto', phase: 'locked', level, reason, proposal: undefined }
-  if (settings.syncPicker) session.pendingSync = level
-  if (!session.announced || how === 'pin') {
-    session.announced = true
-    const line = `effort fixed: ${level} 🔒 (${reasonText(session.state)}) · /route to change`
-    try {
-      $.ui.log(line)
-    } catch {
-      // headless
-    }
+/** Sets a new state, redraws and saves it. */
+async function commit($: EngineInterface, id: string, session: Session, state: RouterState): Promise<void> {
+  session.state = state
+  show($)
+  await persist($, id, state)
+}
+
+/** Locks the suggested level, syncs the picker, says so in the transcript. */
+async function accept($: EngineInterface, id: string, session: Session, settings: Settings, proposal: Proposal): Promise<void> {
+  await commit($, id, session, lockedAt(session.state, proposal))
+  if (settings.syncPicker) session.pendingSync = proposal.level
+  try {
+    $.ui.log(`effort locked: ${proposal.level} 🔒 (${reasonText(session.state)}) · /route status`)
+  } catch {
+    // headless
   }
-  $.ui.log(`effort-router: ${how} ${level} (${reason})`, { to: 'debug' })
-  show($, session)
-  await persist($, id, session.state)
+  $.ui.log(`effort-router: lock ${proposal.level} (${proposal.reason})`, { to: 'debug' })
 }
 
-/**
- * Takes a choice made at consent time: the suggested level is the router's,
- * a different one is yours (`you chose medium over the suggested high`).
- */
-async function choose($: EngineInterface, id: string, session: Session, settings: Settings, proposal: Proposal, level: Level): Promise<void> {
-  if (level === proposal.level) await apply($, id, session, settings, 'lock', level, proposal.reason)
-  else await apply($, id, session, settings, 'pin', level, `you chose ${level} over the suggested ${proposal.level}`)
-}
-
-/** "Not yet": back to deciding; skip `snoozePrompts` prompts, then read again with the extra context. */
-function snooze($: EngineInterface, session: Session, settings: Settings): void {
-  session.state = { ...session.state, phase: 'undecided', proposal: undefined, snoozedUntil: session.state.prompts + settings.snoozePrompts }
-  show($, session)
+/** Turns the router off and puts the picker back where it was. */
+async function turnOff($: EngineInterface, id: string, session: Session, settings: Settings): Promise<void> {
+  await commit($, id, session, turnedOff(session.state))
+  restorePicker($, session, settings)
 }
 
 /** Puts the picker back where it was before the router first synced it. */
@@ -258,19 +246,18 @@ async function loadRules($: EngineInterface): Promise<LoadedRules> {
 
 // --- deciding ----------------------------------------------------------------------
 
-/** One classifier read of the transcript. Undefined = undecided (or failed). */
-async function classifyNow($: EngineInterface, settings: Settings, current: string | undefined): Promise<Proposal | undefined> {
+/** One classifier read of the whole conversation. Undefined = undecided (or failed). */
+async function classifyNow($: EngineInterface, settings: Settings, current: string | undefined, hint: string | undefined): Promise<Proposal | undefined> {
   const [messages, rules] = await Promise.all([
     $.session.messages().catch(() => []),
     loadRules($),
   ])
-  const { session } = await sessionOf($)
-  const transcript = trimTranscript(sinceReset(messages, session.state.resetMark), current)
-  if (transcript.trim() === '') return undefined
+  const transcript = trimTranscript(messages, current)
+  if (transcript.trim() === '' && !hint) return undefined
   const reply = await $.model.complete({
     model: settings.classifierModel,
     system: classifierSystem(rules.composed.text),
-    prompt: classifierPrompt(transcript),
+    prompt: classifierPrompt(transcript, hint),
     maxTokens: 200,
     effort: 'low',
     timeoutMs: 20000,
@@ -284,49 +271,95 @@ async function classifyNow($: EngineInterface, settings: Settings, current: stri
   return decision.decision === 'lock' ? { level: decision.level, reason: decision.reason } : undefined
 }
 
-/** Turns a proposal into a lock, a band offer or a blocking question, per consent. */
-async function propose($: EngineInterface, id: string, session: Session, settings: Settings, proposal: Proposal, consent: Consent): Promise<void> {
+/**
+ * Applies a read's answer, then consent: `none` locks a new suggestion at
+ * once; `ask` asks when the suggested level is new; `band` shows the band.
+ */
+async function settle($: EngineInterface, id: string, session: Session, settings: Settings, consent: Consent, proposal: Proposal | undefined): Promise<void> {
+  const before = session.state.proposal?.level
+  const next = withReading(session.state, proposal)
+  await commit($, id, session, next)
+  const offer = next.proposal
+  if (!offer) return
   if (consent === 'none') {
-    await apply($, id, session, settings, 'lock', proposal.level, proposal.reason)
+    await accept($, id, session, settings, offer)
     return
   }
-  if (consent === 'ask') {
-    const choices = proposalChoices(proposal).slice(0, 3)
-    const labels = [...choices.map(level => `Lock ${level}`), 'Not yet']
+  if (consent === 'ask' && offer.level !== before) {
+    const labels = allowOff ? [`Accept ${offer.level}`, 'Turn off'] : [`Accept ${offer.level}`, 'Later']
     let answer: string | undefined
     try {
-      answer = await $.ui.ask(`${proposalText(proposal)}. Lock it?`, { options: labels, header: 'Effort' })
+      answer = await $.ui.ask(`${proposalText(offer)}?`, { options: labels, header: 'Effort' })
     } catch {
-      answer = undefined // dismissed, or no one to ask: stay undecided
+      answer = undefined // dismissed, or no one to ask: the suggestion stays pending
     }
-    const picked = answer?.match(/^Lock (\w+)$/)?.[1]
-    if (isLevel(picked)) {
-      await choose($, id, session, settings, proposal, picked)
-    } else {
-      snooze($, session, settings)
-    }
-    return
+    if (answer === labels[0]) await accept($, id, session, settings, offer)
+    else if (answer === 'Turn off') await turnOff($, id, session, settings)
   }
-  session.state = { ...session.state, phase: 'proposed', proposal }
-  show($, session)
 }
 
-async function decide($: EngineInterface, id: string, session: Session, settings: Settings, consent: Consent, current: string | undefined): Promise<void> {
+/** An automatic read after a human prompt, within the budget. */
+async function readAfterPrompt($: EngineInterface, id: string, session: Session, settings: Settings, consent: Consent, current: string): Promise<void> {
   if (session.reading) return
   session.reading = true
-  session.reads += 1
   try {
-    const proposal = await classifyNow($, settings, current)
-    const stillOpen = session.state.mode === 'auto' && session.state.phase === 'undecided'
-    if (proposal && stillOpen) await propose($, id, session, settings, proposal, consent)
+    const proposal = await classifyNow($, settings, current, session.state.hint)
+    if (session.state.mode === 'auto' && session.state.phase !== 'locked') {
+      await settle($, id, session, settings, consent, proposal)
+    }
   } catch (error) {
     $.ui.log(`effort-router: classification failed: ${String(error)}`, { to: 'debug' })
   } finally {
     session.reading = false
   }
+  const spent = afterBudget(session.state, settings.decideWithin, allowOff)
+  if (spent !== session.state) {
+    await commit($, id, session, spent)
+    if (spent.mode === 'picker') restorePicker($, session, settings)
+    $.ui.log(`effort-router: ${spent.offReason ?? 'budget spent'}`, { to: 'debug' })
+  }
 }
 
-/** Consent as configured, `none` under the test override, `ask`/`band` need a UI. */
+/**
+ * A manual run (`/route [hint]`, the footer's Suggest now): reads the whole
+ * conversation now, in any state, ignoring the budget. Undecided leaves the
+ * state as it is.
+ */
+async function suggestNow($: EngineInterface, id: string, session: Session, settings: Settings, hint: string | undefined): Promise<string> {
+  if (session.reading) return 'the router is already reading; try again in a moment.'
+  session.reading = true
+  let proposal: Proposal | undefined
+  try {
+    proposal = await classifyNow($, settings, undefined, hint)
+  } finally {
+    session.reading = false
+  }
+  if (!proposal) {
+    const text = `no clear task yet${hint ? ', even with your hint' : ''}; nothing changed (${footerLabel(session.state).text}).`
+    try {
+      $.ui.toast(`effort-router: ${text}`)
+    } catch {
+      // headless
+    }
+    return text
+  }
+  const { state } = session
+  if (state.mode === 'auto' && state.phase === 'locked' && state.level === proposal.level) {
+    await commit($, id, session, { ...state, proposal: undefined })
+    return `confirmed: ${proposal.level} 🔒 still fits (${proposal.reason}).`
+  }
+  const consent = await consentFor($, settings)
+  const withHint = hint ? { ...session.state, hint } : session.state
+  session.state = withHint
+  await settle($, id, session, settings, consent, proposal)
+  const after = session.state
+  if (after.phase === 'locked' && after.level === proposal.level && !after.proposal) return `${proposal.level} 🔒 (${proposal.reason}).`
+  return after.phase === 'locked'
+    ? `${after.level} 🔒 now; a switch to ${proposal.level} is on offer (${proposal.reason}). Accept it in the band or the footer.`
+    : `suggesting ${proposal.level} (${proposal.reason}). Accept it in the band or the footer.`
+}
+
+/** Consent as configured; `EFFORT_ROUTER_CONSENT` overrides it (handy headless). */
 async function consentFor($: EngineInterface, settings: Settings): Promise<Consent> {
   const override = await $.env.get('EFFORT_ROUTER_CONSENT').catch(() => undefined)
   if (override === 'none' || override === 'ask' || override === 'band') return override
@@ -339,45 +372,19 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
   const { id, session } = await sessionOf($)
   const command = parseRoute(args)
   switch (command.kind) {
-    case 'show':
-      return routeReport(session.state, session.lastSent)
-    case 'error':
-      return command.message
+    case 'suggest':
+      return suggestNow($, id, session, settings, command.hint)
+    case 'status':
+      return routeReport(session.state, settings.decideWithin, session.lastSent)
     case 'off': {
-      if (!(await loadRules($)).allowOff) return "your organisation's settings keep the router on (allowOff: false). /route reset still works."
-      session.state = { ...session.state, mode: 'picker', phase: 'undecided', level: undefined, reason: undefined, proposal: undefined }
-      restorePicker($, session, settings)
-      show($, session)
-      await persist($, id, session.state)
+      if (!(await loadRules($)).allowOff) return "your organisation's settings keep the router on (allowOff: false)."
+      await turnOff($, id, session, settings)
       return `router off: effort is the picker's${session.baseline ? ` (restored to ${session.baseline})` : ''}. /route on turns it back on.`
     }
     case 'on': {
-      if (session.state.mode !== 'picker') return `the router is already on (${footerLabel(session.state).text}).`
-      session.state = { ...session.state, mode: 'auto', phase: 'undecided', snoozedUntil: undefined }
-      session.announced = false
-      session.reads = 0
-      show($, session)
-      await persist($, id, session.state)
-      return 'router on: deciding. It reads the transcript after your next prompt.'
-    }
-    case 'reset': {
-      const messages = await $.session.messages().catch(() => [])
-      session.state = {
-        ...session.state,
-        mode: 'auto',
-        phase: 'undecided',
-        level: undefined,
-        reason: undefined,
-        proposal: undefined,
-        snoozedUntil: undefined,
-        resetMark: resetMarkOf(messages),
-      }
-      session.announced = false
-      session.reads = 0
-      restorePicker($, session, settings)
-      show($, session)
-      await persist($, id, session.state)
-      return 'reset: deciding. The router judges the new task from your next prompt on, ignoring what came before.'
+      if (session.state.mode !== 'picker' && !session.state.gaveUp) return `the router is already on (${footerLabel(session.state).text}).`
+      await commit($, id, session, turnedOn(session.state))
+      return `router on: deciding, over the whole conversation, for up to ${settings.decideWithin} prompts.`
     }
     case 'rules': {
       const { composed, enforced } = await loadRules($)
@@ -413,8 +420,8 @@ export function register(on: On, options: PluginOptions): void {
     try {
       await $.command.register({
         name: 'route',
-        description: 'Effort router: show the state, reset for a new task, turn it off or on, or edit the rules',
-        argumentHint: '[reset | off | on | rules [init|critique]]',
+        description: 'Effort router: suggest a level now (optionally with a hint), status, off/on, or edit the rules',
+        argumentHint: '[hint] | status | off | on | rules [init|critique]',
       })
       const { session } = await sessionOf($)
       if (session.lastSent === undefined) {
@@ -422,8 +429,8 @@ export function register(on: On, options: PluginOptions): void {
         if (isLevel(configured.effortLevel)) session.lastSent = configured.effortLevel
       }
       await loadRules($).catch(() => undefined) // learns allowOff for the footer
-      if (!allowOff && session.state.mode === 'picker') session.state = { ...session.state, mode: 'auto', phase: 'undecided' }
-      show($, session)
+      if (!allowOff && session.state.mode === 'picker') session.state = turnedOn(session.state)
+      show($)
     } catch (error) {
       $.ui.log(`effort-router: start failed: ${String(error)}`, { to: 'debug' })
     }
@@ -438,20 +445,20 @@ export function register(on: On, options: PluginOptions): void {
     }
   })
 
-  // Read the transcript after each human prompt while undecided. Not awaited
-  // under band/none consent, so the prompt is never held up: the decision lands
-  // whenever the classifier answers and applies from the next request.
+  // After each human prompt while deciding or suggesting (and within the
+  // budget), read the whole conversation again: a suggestion may change level
+  // or be withdrawn. Not awaited under band/none consent, so the prompt is
+  // never held up.
   on('prompt.submit', async ($, e, next) => {
     try {
       if (HUMAN_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) {
         const { id, session } = await sessionOf($)
-        session.state = { ...session.state, prompts: session.state.prompts + 1 }
-        const { state } = session
-        const snoozed = state.snoozedUntil !== undefined && state.prompts <= state.snoozedUntil
-        const wanted = state.mode === 'auto' && state.phase === 'undecided' && !snoozed && session.reads < settings.maxReads
-        if (wanted) {
+        if (session.state.mode === 'auto' && session.state.phase !== 'locked' && !session.state.gaveUp) {
+          session.state = { ...session.state, prompts: session.state.prompts + 1 }
+        }
+        if (wantsRead(session.state, settings.decideWithin)) {
           const consent = await consentFor($, settings)
-          const reading = decide($, id, session, settings, consent, e.text)
+          const reading = readAfterPrompt($, id, session, settings, consent, e.text)
           if (consent === 'ask') await reading
         }
       }
@@ -461,8 +468,8 @@ export function register(on: On, options: PluginOptions): void {
     return next(e)
   })
 
-  // Every model request, main loop and subagents alike: the locked or pinned
-  // level, or the request untouched.
+  // Every model request, main loop and subagents alike: the locked level, or
+  // the request untouched.
   on('turn.step', async function* ($, e, next) {
     let effort = e.effort
     try {
@@ -474,7 +481,7 @@ export function register(on: On, options: PluginOptions): void {
       if (level !== undefined && e.effort !== undefined) effort = level
       if (e.agentId === undefined && session.lastSent !== effort) {
         session.lastSent = effort
-        show($, session)
+        show($)
       }
       $.ui.log(
         `effort-router: step ${e.agentId ? `agent=${e.agentId} ` : ''}index=${e.index} model=${e.model} effort ${String(e.effort)} -> ${String(effort)}`,
@@ -500,9 +507,8 @@ export function register(on: On, options: PluginOptions): void {
     return result
   })
 
-  // The footer, beside the native effort picker: the compact state, and on
-  // the terminal and Desktop a dropdown of the same choices as /route. The
-  // closed dropdown shows the current option, labelled with the state text.
+  // The footer, beside the native effort picker: the state, and on the
+  // terminal and Desktop a dropdown whose closed face is that state.
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     const { id, session } = await sessionOf($)
     const label = footerLabel(session.state)
@@ -521,63 +527,60 @@ export function register(on: On, options: PluginOptions): void {
       value: menu.value,
       onSelect: async (value: string) => {
         if (value === menu.value) return
-        const proposal = session.state.phase === 'proposed' ? session.state.proposal : undefined
         if (value === 'accept') {
-          if (proposal) await choose($, id, session, settings, proposal, proposal.level)
+          if (session.state.proposal) await accept($, id, session, settings, session.state.proposal)
           return
         }
-        if (value === 'notyet') {
-          if (proposal) snooze($, session, settings)
-          return
-        }
-        const text = await route($, value, settings).catch((error: unknown) => `effort-router: ${String(error)}`)
+        const text = await route($, value === 'suggest' ? '' : value, settings).catch((error: unknown) => `effort-router: ${String(error)}`)
         $.ui.log(text, { to: 'debug' })
       },
     })
     return Box({ flexDirection: 'row', columnGap: 1, children: [theirs, mine] })
   })
 
-  // The consent band above the prompt.
+  // The consent band above the prompt: a suggestion, or a switch offered by a
+  // manual run while locked.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const { id, session } = await sessionOf($)
-    const proposal = session.state.phase === 'proposed' ? session.state.proposal : undefined
-    if (!proposal || session.state.mode !== 'auto' || e.props.hasSurvey) return next(e)
+    const offer = session.state.mode === 'auto' ? session.state.proposal : undefined
+    if (!offer || e.props.hasSurvey) return next(e)
+    const isSwitch = session.state.phase === 'locked'
     const { Box, Text, Button } = $.ui.resolve(e)
-    const choices = proposalChoices(proposal)
     const theirs = await next(e)
+    const decline = isSwitch
+      ? Button({
+          key: 'keep',
+          label: `Keep ${session.state.level}`,
+          hotkey: 'x',
+          plain: true,
+          dimColor: true,
+          onPress: () => commit($, id, session, { ...session.state, proposal: undefined, hint: undefined }),
+        })
+      : allowOff
+        ? Button({ key: 'turn-off', label: 'Turn off', hotkey: 'x', plain: true, dimColor: true, onPress: () => turnOff($, id, session, settings) })
+        : undefined
     return Box({
       flexDirection: 'column',
       children: [
         Text({
           children: [
-            'Route this session at ',
-            Text({ color: LEVEL_COLOR[proposal.level], bold: true, children: [proposal.level.toUpperCase()] }),
-            ` — ${proposal.reason}`,
+            isSwitch ? `Switch from ${session.state.level?.toUpperCase()} to ` : 'Route this session at ',
+            Text({ color: LEVEL_COLOR[offer.level], bold: true, children: [offer.level.toUpperCase()] }),
+            ` — ${offer.reason}`,
           ],
         }),
         Box({
           flexDirection: 'row',
           columnGap: 2,
           children: [
-            ...choices.map((level, index) =>
-              Button({
-                key: `lock-${level}`,
-                label: index === 0 ? `Lock ${level}` : level,
-                hotkey: String(index + 1),
-                plain: true,
-                onPress: async () => {
-                  await choose($, id, session, settings, proposal, level)
-                },
-              }),
-            ),
             Button({
-              key: 'not-yet',
-              label: 'Not yet',
-              hotkey: 'x',
+              key: 'accept',
+              label: `Accept ${offer.level}`,
+              hotkey: '1',
               plain: true,
-              dimColor: true,
-              onPress: () => snooze($, session, settings),
+              onPress: () => accept($, id, session, settings, offer),
             }),
+            ...(decline ? [decline] : []),
           ],
         }),
         theirs,

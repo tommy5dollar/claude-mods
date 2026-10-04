@@ -24,9 +24,13 @@ export const rank = (level: Level): number => LEVELS.indexOf(level)
  * this frame holds what the parser depends on, so no rules file can break it:
  * the job, the "wait until the task is clear" bias, and the JSON contract.
  */
-export const CLASSIFIER_FRAME = `You pick the reasoning-effort level for a whole Claude Code session, once, from the start of its transcript. Levels, lowest to highest: low, medium, high, xhigh, max.
+export const CLASSIFIER_FRAME = `You pick the reasoning-effort level for a whole Claude Code session from its transcript. Levels, lowest to highest: low, medium, high, xhigh, max.
 
-Decide only when the session's actual task is clear. Opening filler (greetings, "pull the latest code", "what's in this repo?", setup chatter, a warm-up command) is NOT the task: answer undecided. When unsure, answer undecided; you will be asked again after the next user message.
+Read the transcript as one conversation and judge the task as it stands now:
+- Weigh the latest exchange most. A later clarification of scope overrides an earlier ask: "fix the whole auth system" followed by "actually just the typo in the login message" is a small change.
+- Read short replies against the question they answer. If the assistant asked "1. full rewrite or 2. minimal patch?" and the user replied "2", the task is the minimal patch.
+- Decide only when the actual task is clear. Opening filler (greetings, "pull the latest code", "what's in this repo?", setup chatter, a warm-up command) is NOT the task: answer undecided. When unsure, answer undecided; you will be asked again after the next user message.
+- If a user hint is given, the user asked for this routing explicitly: weigh the hint strongly.
 
 Apply these routing rules. Later rules override earlier ones where they conflict:`
 
@@ -138,11 +142,13 @@ export type TrimLimits = {
   userChars: number
   /** Cap per assistant message's text. */
   assistantChars: number
+  /** Cap for the last assistant message, often the question a short reply answers. */
+  lastAssistantChars: number
   /** Cap on the whole rendered transcript; the middle is dropped first. */
   totalChars: number
 }
 
-export const DEFAULT_TRIM: TrimLimits = { userChars: 4000, assistantChars: 300, totalChars: 16000 }
+export const DEFAULT_TRIM: TrimLimits = { userChars: 4000, assistantChars: 300, lastAssistantChars: 2000, totalChars: 16000 }
 
 const COMMAND_MESSAGE = /^\s*<(command-name|command-message|local-command-stdout|local-command-stderr)>/
 
@@ -160,7 +166,9 @@ export function toolNames(uses: readonly { tool: string }[] | undefined): string
 /**
  * Renders the transcript for the classifier: human prompts in full (capped),
  * assistant text truncated, tool uses as names only, tool results and slash
- * command echoes dropped. `current` is the prompt being submitted, which
+ * command echoes dropped. The last assistant message keeps more of its text
+ * (`lastAssistantChars`): it is often the question that a short reply such as
+ * "2" answers. `current` is the prompt being submitted, which
  * `$.session.messages()` does not hold yet at `prompt.submit`.
  *
  * When over `totalChars`, the first human prompt and the most recent lines
@@ -172,15 +180,20 @@ export function trimTranscript(
   limits: TrimLimits = DEFAULT_TRIM,
 ): string {
   const lines: string[] = []
+  let lastAssistant = -1
+  messages.forEach((message, index) => {
+    if (message.role === 'assistant' && (message.text ?? '').trim() !== '') lastAssistant = index
+  })
 
-  for (const message of messages) {
+  for (const [index, message] of messages.entries()) {
     const text = (message.text ?? '').trim()
     if (message.role === 'user') {
       if (text === '' || COMMAND_MESSAGE.test(text)) continue // tool results, /commands
       lines.push(`USER: ${cut(text, limits.userChars)}`)
     } else {
       const tools = toolNames(message.toolUses)
-      const said = text === '' ? '' : cut(text.replace(/\s+/g, ' '), limits.assistantChars)
+      const cap = index === lastAssistant ? limits.lastAssistantChars : limits.assistantChars
+      const said = text === '' ? '' : cut(text.replace(/\s+/g, ' '), cap)
       if (said === '' && tools === '') continue
       lines.push(`ASSISTANT: ${said}${said && tools ? ' ' : ''}${tools ? `[tools: ${tools}]` : ''}`)
     }
@@ -204,40 +217,14 @@ export function trimTranscript(
 }
 
 /**
- * Where "Reset (new task)" was pressed: how many messages the transcript held,
- * and the last one (as an anchor that survives the 4096-message window).
+ * The user message sent to the classifier. A manual `/route <hint>` adds the
+ * hint after the transcript.
  */
-export type ResetMark = { count: number; anchor?: { role: 'user' | 'assistant'; text: string } }
-
-const ANCHOR_CHARS = 200
-
-/** The mark for a transcript as it stands now. */
-export function resetMarkOf(messages: readonly TranscriptMessage[]): ResetMark {
-  const last = messages.at(-1)
-  return last ? { count: messages.length, anchor: { role: last.role, text: (last.text ?? '').slice(0, ANCHOR_CHARS) } } : { count: 0 }
+export const classifierPrompt = (transcript: string, hint?: string): string => {
+  const said = hint?.trim()
+  const hintBlock = said ? `\n\n<user_hint>\n${said}\n</user_hint>\nThe user asked for this routing explicitly and gave this hint; weigh it strongly.` : ''
+  return `Transcript so far (oldest first):\n<transcript>\n${transcript}\n</transcript>${hintBlock}\n\nPick the session's effort level now, or answer undecided. JSON only.`
 }
-
-/**
- * The messages after a reset, so the classifier judges the new task rather
- * than re-locking on the old one. Finds the anchor message from the end; if
- * it is gone (the window moved or a compaction rewrote history), falls back
- * to the count, and past that to the whole transcript as it now stands.
- */
-export function sinceReset(messages: readonly TranscriptMessage[], mark: ResetMark | undefined): readonly TranscriptMessage[] {
-  if (!mark) return messages
-  if (mark.anchor) {
-    const { role, text } = mark.anchor
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i] as TranscriptMessage
-      if (m.role === role && (m.text ?? '').slice(0, ANCHOR_CHARS) === text && i + 1 <= mark.count) return messages.slice(i + 1)
-    }
-  }
-  return mark.count <= messages.length ? messages.slice(mark.count) : messages
-}
-
-/** The user message sent to the classifier. */
-export const classifierPrompt = (transcript: string): string =>
-  `Transcript so far (oldest first):\n<transcript>\n${transcript}\n</transcript>\n\nPick the session's effort level now, or answer undecided. JSON only.`
 
 // --- parsing the classifier's reply ---------------------------------------------
 
@@ -271,44 +258,46 @@ export function parseDecision(reply: string | undefined | null): Decision {
 // --- /route grammar -------------------------------------------------------------
 
 export type RouteCommand =
-  | { kind: 'show' }
-  | { kind: 'reset' }
+  | { kind: 'suggest'; hint?: string }
+  | { kind: 'status' }
   | { kind: 'off' }
   | { kind: 'on' }
   | { kind: 'rules' }
   | { kind: 'rules-init'; scope: 'user' | 'project' }
   | { kind: 'rules-critique' }
-  | { kind: 'error'; message: string }
 
 export const ROUTE_USAGE =
-  'usage: /route [reset | off | on | rules [init [user|project] | critique]]'
+  'usage: /route [hint] | /route status | /route off | /route on | /route rules [init [user|project] | critique]'
 
 /**
- * `/route` arguments. `reset`, `off` and `on` are the names shown; older
- * names stay as hidden aliases (`decide`, `auto` → reset; `pin picker` → off).
- * There is no way to set a level here: turn the router off and use the picker.
+ * `/route` arguments. Bare `/route` runs the router now; any other text that
+ * is not a subcommand is a hint for that run. `decide` is a hidden alias of
+ * bare `/route`. Setting a level by hand is the effort picker's job.
  */
 export function parseRoute(args: string): RouteCommand {
-  const words = args.trim().toLowerCase().split(/\s+/).filter(Boolean)
-  if (words.length === 0) return { kind: 'show' }
+  const text = args.trim()
+  const words = text.toLowerCase().split(/\s+/).filter(Boolean)
   const [verb, arg, extra, more] = words
-  if ((verb === 'reset' || verb === 'decide' || verb === 'auto') && arg === undefined) return { kind: 'reset' }
-  if (verb === 'off' && arg === undefined) return { kind: 'off' }
-  if (verb === 'on' && arg === undefined) return { kind: 'on' }
-  if (verb === 'pin' && arg === 'picker' && extra === undefined) return { kind: 'off' }
+  if (words.length === 0) return { kind: 'suggest' }
+  if (words.length === 1) {
+    if (verb === 'status') return { kind: 'status' }
+    if (verb === 'off') return { kind: 'off' }
+    if (verb === 'on') return { kind: 'on' }
+    if (verb === 'decide') return { kind: 'suggest' }
+    if (verb === 'rules') return { kind: 'rules' }
+  }
   if (verb === 'rules') {
-    if (arg === undefined) return { kind: 'rules' }
     if (arg === 'critique' && extra === undefined) return { kind: 'rules-critique' }
     if (arg === 'init' && more === undefined && (extra === undefined || extra === 'user' || extra === 'project')) {
       return { kind: 'rules-init', scope: extra ?? 'user' }
     }
   }
-  return { kind: 'error', message: ROUTE_USAGE }
+  return { kind: 'suggest', hint: text }
 }
 
 // --- state and what the mod shows -------------------------------------------------
 
-export type Mode = 'auto' | 'pinned' | 'picker'
+export type Mode = 'auto' | 'picker'
 
 export type Phase = 'undecided' | 'proposed' | 'locked'
 
@@ -317,92 +306,121 @@ export type Proposal = { level: Level; reason: string }
 /**
  * Everything the router remembers about one session.
  *
- * Internally `mode` keeps where a level came from: `auto` + `locked` was fixed
- * by the router, `pinned` was fixed by you, `picker` is the router turned off.
- * The person sees three states only (see `viewOf`): deciding, fixed, off.
+ * `auto` + `undecided` is deciding, `auto` + `proposed` a pending suggestion,
+ * `auto` + `locked` locked, `picker` off. While locked, `proposal` may hold a
+ * switch offered by a manual run.
  */
 export type RouterState = {
   mode: Mode
-  /** Under `auto`: still reading, waiting for a click, or locked. */
   phase: Phase
-  /** The locked or pinned level. */
+  /** The locked level. */
   level?: Level
   reason?: string
-  /** Under `auto` + `proposed`: what the band offers. */
+  /** A pending suggestion (phase `proposed`), or a switch offered while locked. */
   proposal?: Proposal
-  /** Human prompts seen this session. */
+  /** A manual run's hint, kept for re-reads while its suggestion is pending. */
+  hint?: string
+  /** Human prompts counted against the decision budget since the router was (re)started. */
   prompts: number
-  /** Under `auto` + `undecided`: no classifier call until the prompt count passes this. */
-  snoozedUntil?: number
-  /** Set by "Reset (new task)": the classifier reads only messages after it. */
-  resetMark?: ResetMark
+  /** The budget ran out with nothing locked: no automatic reads. */
+  gaveUp?: boolean
+  /** Why the router is off, when it turned itself off. */
+  offReason?: string
 }
 
 export const freshState = (): RouterState => ({ mode: 'auto', phase: 'undecided', prompts: 0 })
 
 /** The level `turn.step` applies, or undefined to leave the request alone. */
 export function appliedLevel(state: RouterState): Level | undefined {
-  if (state.mode === 'pinned') return state.level
-  if (state.mode === 'auto' && state.phase === 'locked') return state.level
-  return undefined
+  return state.mode === 'auto' && state.phase === 'locked' ? state.level : undefined
 }
 
-/** The three states a person sees. */
-export type View =
-  | { kind: 'deciding'; proposal?: Proposal }
-  | { kind: 'fixed'; level: Level; byRouter: boolean; reason?: string }
-  | { kind: 'off' }
+/** Whether an automatic read should follow this human prompt. */
+export function wantsRead(state: RouterState, decideWithin: number): boolean {
+  return state.mode === 'auto' && state.phase !== 'locked' && !state.gaveUp && state.prompts <= decideWithin
+}
 
-export function viewOf(state: RouterState): View {
-  if (state.mode === 'picker') return { kind: 'off' }
-  if (state.mode === 'pinned' && state.level) return { kind: 'fixed', level: state.level, byRouter: false }
-  if (state.mode === 'auto' && state.phase === 'locked' && state.level) {
-    return { kind: 'fixed', level: state.level, byRouter: true, reason: state.reason }
+/**
+ * After an automatic read: once the budget is spent with nothing locked, stop
+ * reading. A pending suggestion stays pending; otherwise the router turns off
+ * (or, when the organisation keeps it on, idles as deciding).
+ */
+export function afterBudget(state: RouterState, decideWithin: number, allowOff: boolean): RouterState {
+  if (state.mode !== 'auto' || state.phase === 'locked' || state.prompts < decideWithin) return state
+  if (state.phase === 'proposed') return { ...state, gaveUp: true }
+  const offReason = `no clear task after ${decideWithin} prompts — /route to ask again`
+  return allowOff
+    ? { ...state, mode: 'picker', gaveUp: true, offReason, proposal: undefined, hint: undefined }
+    : { ...state, gaveUp: true, offReason, proposal: undefined, hint: undefined }
+}
+
+/** What a read's answer does to the state: suggest, withdraw, or offer a switch. */
+export function withReading(state: RouterState, proposal: Proposal | undefined): RouterState {
+  if (state.phase === 'locked') {
+    return proposal && proposal.level !== state.level ? { ...state, proposal } : { ...state, proposal: undefined }
   }
-  if (state.phase === 'proposed' && state.proposal) return { kind: 'deciding', proposal: state.proposal }
-  return { kind: 'deciding' }
+  if (proposal) return { ...state, mode: 'auto', phase: 'proposed', proposal, gaveUp: state.gaveUp, offReason: undefined }
+  // nothing clear: a pending suggestion is withdrawn; off stays off
+  return state.phase === 'proposed' ? { ...state, phase: 'undecided', proposal: undefined, hint: undefined } : state
 }
 
-/** Why the level is what it is: `router: bug fix in existing code` or `you chose high`. */
+/** Locks a level: the router's (or the person's accept of it). */
+export const lockedAt = (state: RouterState, proposal: Proposal): RouterState => ({
+  ...state,
+  mode: 'auto',
+  phase: 'locked',
+  level: proposal.level,
+  reason: proposal.reason,
+  proposal: undefined,
+  hint: undefined,
+  offReason: undefined,
+})
+
+/** Off: the picker is in charge. */
+export const turnedOff = (state: RouterState): RouterState => ({
+  ...state, mode: 'picker', phase: 'undecided', level: undefined, reason: undefined, proposal: undefined, hint: undefined, offReason: undefined,
+})
+
+/** On: deciding again over the whole transcript, with a fresh prompt budget. */
+export const turnedOn = (state: RouterState): RouterState => ({
+  ...state, mode: 'auto', phase: 'undecided', level: undefined, reason: undefined, proposal: undefined, hint: undefined, prompts: 0, gaveUp: false, offReason: undefined,
+})
+
+/** Why the level is what it is. */
 export function reasonText(state: RouterState): string {
-  const view = viewOf(state)
-  if (view.kind === 'off') return "router off: the effort picker decides"
-  if (view.kind === 'fixed') return view.byRouter ? `router: ${view.reason ?? 'classifier'}` : (state.reason ?? `you chose ${view.level}`)
-  if (view.proposal) return `router suggests ${view.proposal.level}: ${view.proposal.reason}`
+  if (state.mode === 'picker') return state.offReason ? `router off: ${state.offReason}` : 'router off: the effort picker decides'
+  if (state.phase === 'locked') return `router: ${state.reason ?? 'classifier'}`
+  if (state.proposal) return `router suggests ${state.proposal.level}: ${state.proposal.reason}`
   return "deciding: the picker's effort applies until the task is clear"
 }
 
-/** What `/route` with no arguments prints. */
-export function routeReport(state: RouterState, inForce?: string | number): string {
-  const view = viewOf(state)
+/** What `/route status` prints. */
+export function routeReport(state: RouterState, decideWithin: number, inForce?: string | number): string {
+  const now = inForce === undefined ? "the picker's level" : String(inForce)
   const lines: string[] = []
-  if (view.kind === 'fixed') {
-    lines.push(`${view.level} 🔒 (${reasonText(state)}). Every request and subagent runs at ${view.level}.`)
-  } else if (view.kind === 'off') {
-    lines.push(`off. The router does nothing; effort is whatever /effort or the picker sets${inForce === undefined ? '' : ` (now ${inForce})`}. /route on turns it back on.`)
+  if (state.mode === 'picker') {
+    lines.push(`off${state.offReason ? ` (${state.offReason})` : ''}. Effort is the picker's (now ${now}). /route on turns it back on; /route asks now.`)
+  } else if (state.phase === 'locked') {
+    lines.push(`${state.level} 🔒 (router: ${state.reason}). Every request and subagent runs at ${state.level}.`)
+    if (state.proposal) lines.push(`A switch to ${state.proposal.level} is on offer (${state.proposal.reason}).`)
+  } else if (state.phase === 'proposed' && state.proposal) {
+    lines.push(`${state.proposal.level}? The router suggests ${state.proposal.level} (${state.proposal.reason}); accept it in the band or the footer. Until then ${now} applies.`)
   } else {
-    const now = inForce === undefined ? 'the picker\'s level' : String(inForce)
-    lines.push(view.proposal
-      ? `${view.proposal.level}? The router suggests ${view.proposal.level} (${view.proposal.reason}); accept it in the band above the prompt or the footer. Until then ${now} applies.`
-      : `deciding. The router locks a level once the task is clear; until then ${now} applies.`)
-    if (state.resetMark) lines.push('Reset: only messages after the reset count.')
-    if (state.snoozedUntil !== undefined && state.snoozedUntil > state.prompts) {
-      lines.push(`Snoozed: next read after ${state.snoozedUntil - state.prompts} more prompt(s).`)
-    }
+    lines.push(`deciding. The router suggests a level once the task is clear; until then ${now} applies.`)
   }
+  if (state.mode === 'auto' && state.phase !== 'locked') {
+    lines.push(state.gaveUp
+      ? `Automatic reads stopped (${state.offReason ?? `budget of ${decideWithin} prompts spent`}). /route asks now.`
+      : `Automatic reads left: ${Math.max(0, decideWithin - state.prompts)} of ${decideWithin} prompts.`)
+  }
+  if (state.hint) lines.push(`Hint: ${state.hint}`)
   lines.push(ROUTE_USAGE)
   return lines.join('\n')
 }
 
-/** The band's headline for a proposal. */
+/** The band's headline. */
 export const proposalText = (proposal: Proposal): string =>
   `Route this session at ${proposal.level.toUpperCase()} — ${proposal.reason}`
-
-/** The band's buttons: the proposal first, then the other common levels. */
-export function proposalChoices(proposal: Proposal): Level[] {
-  const others: Level[] = ['medium', 'low', 'high', 'max', 'xhigh']
-  return [proposal.level, ...others.filter(level => level !== proposal.level)].slice(0, 4)
-}
 
 /** A colour per level for the band (Ink theme keys / named colours). */
 export const LEVEL_COLOR: Record<Level, string> = {
@@ -416,7 +434,7 @@ export const LEVEL_COLOR: Record<Level, string> = {
 // --- persistence ------------------------------------------------------------------
 
 /** What `$.store` keeps per session id so a resume finds its lock. */
-export type SavedState = Pick<RouterState, 'mode' | 'phase' | 'level' | 'reason' | 'resetMark'> & { savedAt: number }
+export type SavedState = Pick<RouterState, 'mode' | 'phase' | 'level' | 'reason' | 'offReason'> & { savedAt: number }
 
 export const MAX_SAVED_SESSIONS = 100
 
@@ -432,40 +450,39 @@ export function withSaved(
   const saved: SavedState = { mode: state.mode, phase: state.phase === 'proposed' ? 'undecided' : state.phase, savedAt: now }
   if (state.level !== undefined) saved.level = state.level
   if (state.reason !== undefined) saved.reason = state.reason
-  if (state.resetMark !== undefined) saved.resetMark = state.resetMark
+  if (state.offReason !== undefined) saved.offReason = state.offReason
   next[sessionId] = saved
   const ids = Object.keys(next).sort((a, b) => (next[a]?.savedAt ?? 0) - (next[b]?.savedAt ?? 0))
   while (ids.length > MAX_SAVED_SESSIONS) delete next[ids.shift() as string]
   return next
 }
 
-/** Rebuilds state from a saved entry; anything malformed starts fresh. */
+/** Rebuilds state from a saved entry; anything malformed starts fresh. A 0.1–0.3 `pinned` entry comes back locked. */
 export function restored(saved: unknown): RouterState {
-  const fresh = freshState()
-  if (typeof saved !== 'object' || saved === null) return fresh
+  const state = freshState()
+  if (typeof saved !== 'object' || saved === null) return state
   const record = saved as Record<string, unknown>
-  const mark = record.resetMark as ResetMark | undefined
-  const state: RouterState = typeof mark === 'object' && mark !== null && typeof mark.count === 'number' ? { ...fresh, resetMark: mark } : fresh
   const mode = record.mode
-  if (mode === 'picker') return { ...state, mode }
-  if (mode === 'pinned' && isLevel(record.level)) return { ...state, mode, level: record.level }
-  if (mode === 'auto' && record.phase === 'locked' && isLevel(record.level)) {
+  if (mode === 'picker') return typeof record.offReason === 'string' ? { ...state, mode, offReason: record.offReason } : { ...state, mode }
+  const locked = (mode === 'auto' && record.phase === 'locked') || mode === 'pinned'
+  if (locked && isLevel(record.level)) {
     return { ...state, phase: 'locked', level: record.level, reason: typeof record.reason === 'string' ? record.reason : 'restored' }
   }
   return state
 }
 
-
 /**
- * The compact state the footer shows beside the native effort picker. The
- * level in use is the picker's own label, a few pixels away, so it is not
- * repeated: `deciding`, `high?`, `high 🔒` or `off`. `dim` where nothing is fixed.
+ * The compact state the footer shows beside the native effort picker (which
+ * shows the level in use): `deciding`, `high?`, `high 🔒` (with `→ low?` when
+ * a switch is on offer) or `off`. `dim` where nothing is suggested or locked.
  */
 export function footerLabel(state: RouterState): { text: string; color?: string; dim: boolean } {
-  const view = viewOf(state)
-  if (view.kind === 'off') return { text: 'off', dim: true }
-  if (view.kind === 'fixed') return { text: `${view.level} 🔒`, color: LEVEL_COLOR[view.level], dim: false }
-  if (view.proposal) return { text: `${view.proposal.level}?`, color: LEVEL_COLOR[view.proposal.level], dim: false }
+  if (state.mode === 'picker') return { text: 'off', dim: true }
+  if (state.phase === 'locked' && state.level) {
+    const offer = state.proposal ? ` → ${state.proposal.level}?` : ''
+    return { text: `${state.level} 🔒${offer}`, color: LEVEL_COLOR[state.level], dim: false }
+  }
+  if (state.phase === 'proposed' && state.proposal) return { text: `${state.proposal.level}?`, color: LEVEL_COLOR[state.proposal.level], dim: false }
   return { text: 'deciding', dim: true }
 }
 
@@ -476,27 +493,18 @@ export type FooterMenu = {
 }
 
 /**
- * The footer dropdown. The closed dropdown shows the selected option, so the
- * first option is the current state (value `current`, a no-op). Then:
- * deciding: Reset (new task), Turn off. Suggestion pending: Accept <level>,
- * Not yet, Turn off. Locked: Reset (new task), Turn off. Off: Turn on.
- * `allowOff: false` (an organisation's setting) leaves out Turn off.
- * It never sets a level: that is the effort picker's job.
+ * The footer dropdown. The first option is the current state (value
+ * `current`, a no-op), which the closed dropdown shows. Then: `Accept <level>`
+ * while a suggestion or switch is on offer, `Suggest now` (bare `/route`) in
+ * every state, and `Turn off` (`Turn on` when off). `allowOff: false` (an
+ * organisation's setting) leaves out Turn off.
  */
 export function footerMenu(state: RouterState, allowOff = true): FooterMenu {
-  const view = viewOf(state)
   const options: { value: string; label: string }[] = [{ value: 'current', label: footerLabel(state).text }]
-  if (view.kind === 'off') {
-    options.push({ value: 'on', label: 'Turn on' })
-  } else {
-    if (view.kind === 'deciding' && view.proposal) {
-      options.push({ value: 'accept', label: `Accept ${view.proposal.level}` })
-      options.push({ value: 'notyet', label: 'Not yet' })
-    } else {
-      options.push({ value: 'reset', label: 'Reset (new task)' })
-    }
-    if (allowOff) options.push({ value: 'off', label: 'Turn off' })
-  }
+  if (state.mode === 'auto' && state.proposal) options.push({ value: 'accept', label: `Accept ${state.proposal.level}` })
+  options.push({ value: 'suggest', label: 'Suggest now' })
+  if (state.mode === 'picker') options.push({ value: 'on', label: 'Turn on' })
+  else if (allowOff) options.push({ value: 'off', label: 'Turn off' })
   return { options, value: 'current' }
 }
 

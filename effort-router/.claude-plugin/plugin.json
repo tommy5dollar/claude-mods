@@ -1,7 +1,7 @@
 {
   "name": "effort-router",
-  "version": "0.4.0",
-  "description": "Decides the session's reasoning effort once the task is clear (a Haiku read of the transcript against Anthropic's 'Spending your effort' guidance and your own rules), asks you to confirm, then locks it for every request and subagent. The footer shows the state (deciding, high?, high 🔒, off) and is a dropdown to accept, reset for a new task, or turn the router off or on.",
+  "version": "0.5.0",
+  "description": "Reads the conversation after each prompt until the task is clear (a Haiku read against Anthropic's 'Spending your effort' guidance and your own rules), suggests a reasoning-effort level, and locks it for every request and subagent once you accept. /route runs it on demand, optionally with a hint. The footer shows the state (deciding, high?, high 🔒, off) and is a dropdown.",
   "author": {
     "name": "Tommy Long"
   },
@@ -12,7 +12,7 @@
     "consent": {
       "type": "string",
       "title": "Consent before locking",
-      "description": "\"band\" (default): offer the level with buttons above the prompt and lock on a click. \"ask\": a blocking question before the turn runs. \"none\": lock without asking.",
+      "description": "\"band\" (default): offer the level above the prompt (Accept or Turn off) and lock on Accept. \"ask\": a blocking question when a new level is suggested. \"none\": lock without asking.",
       "required": false,
       "default": "band",
       "options": [
@@ -21,19 +21,12 @@
         "none"
       ]
     },
-    "snoozePrompts": {
+    "decideWithin": {
       "type": "number",
-      "title": "Not-yet snooze (prompts)",
-      "description": "After \"Not yet\", how many of your prompts the router skips before it reads the transcript again (with the extra context).",
+      "title": "Decide within (prompts)",
+      "description": "How many of your prompts the router reads automatically. If nothing is locked by then it stops reading: a pending suggestion stays pending, otherwise the router turns off. /route asks again at any time.",
       "required": false,
-      "default": 2
-    },
-    "maxReads": {
-      "type": "number",
-      "title": "Classifier reads per session",
-      "description": "Most transcript reads while undecided; after that the picker's effort stands until /route auto.",
-      "required": false,
-      "default": 8
+      "default": 6
     },
     "classifierModel": {
       "type": "string",

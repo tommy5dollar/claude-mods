@@ -5,24 +5,28 @@ import { describe, expect, test } from 'bun:test'
 
 import {
   DEFAULT_TRIM,
+  afterBudget,
   appliedLevel,
+  classifierPrompt,
   classifierSystem,
   composeRules,
   footerLabel,
   footerMenu,
-  reasonText,
-  routeReport,
   freshState,
+  lockedAt,
   parseDecision,
-  resetMarkOf,
-  sinceReset,
+  parseRoute,
+  reasonText,
+  restored,
+  routeReport,
   ruleLayers,
   settingsRulesOf,
-  parseRoute,
-  proposalChoices,
-  restored,
   STARTER_RULES,
   trimTranscript,
+  turnedOff,
+  turnedOn,
+  wantsRead,
+  withReading,
   withSaved,
   type TranscriptMessage,
 } from '../hooks/policy'
@@ -35,6 +39,7 @@ describe('trimTranscript', () => {
       { role: 'assistant', text: long, toolUses: [{ tool: 'Bash' }, { tool: 'Bash' }, { tool: 'Read' }] },
       { role: 'user', text: '', toolResults: [{ text: 'huge tool output' }] },
       { role: 'user', text: '<command-name>/effort</command-name>\n<command-args>high</command-args>' },
+      { role: 'assistant', text: 'Pulled.' },
     ]
     const out = trimTranscript(messages, 'now fix the flaky checkout test')
     const lines = out.split('\n')
@@ -42,7 +47,8 @@ describe('trimTranscript', () => {
     expect(lines[1]).toStartWith('ASSISTANT: xxx')
     expect(lines[1]).toContain(`[${1000 - DEFAULT_TRIM.assistantChars} more chars]`)
     expect(lines[1]).toEndWith('[tools: Bash×2, Read]')
-    expect(lines[2]).toBe('USER: now fix the flaky checkout test')
+    expect(lines[2]).toBe('ASSISTANT: Pulled.')
+    expect(lines[3]).toBe('USER: now fix the flaky checkout test')
     expect(out).not.toContain('huge tool output')
     expect(out).not.toContain('command-name')
   })
@@ -50,11 +56,24 @@ describe('trimTranscript', () => {
   test('drops the middle but keeps the first prompt and the latest lines when too long', () => {
     const messages: TranscriptMessage[] = [{ role: 'user', text: 'FIRST' }]
     for (let i = 0; i < 50; i++) messages.push({ role: 'assistant', text: `reply ${i} ${'y'.repeat(200)}` })
-    const out = trimTranscript(messages, 'LATEST', { userChars: 100, assistantChars: 300, totalChars: 2000 })
+    const out = trimTranscript(messages, 'LATEST', { userChars: 100, assistantChars: 300, lastAssistantChars: 300, totalChars: 2000 })
     expect(out.length).toBeLessThanOrEqual(2000)
     expect(out.split('\n')[0]).toBe('USER: FIRST')
     expect(out).toContain('earlier messages omitted')
     expect(out).toEndWith('USER: LATEST')
+  })
+
+  test('the last assistant message keeps enough text to read a short reply against', () => {
+    const question = 'Before I start: ' + 'context '.repeat(60) + 'Which do you want? 1. full rewrite of the auth module 2. minimal patch to the login message'
+    const out = trimTranscript([
+      { role: 'user', text: 'fix the login bug' },
+      { role: 'assistant', text: 'a'.repeat(1000) },
+      { role: 'assistant', text: question },
+    ], '2')
+    const lines = out.split('\n')
+    expect(lines[1]).toContain('more chars]') // an earlier assistant message is cut at 300
+    expect(lines[2]).toContain('2. minimal patch to the login message') // the question survives
+    expect(lines[3]).toBe('USER: 2')
   })
 
   test('assistant message with only tool uses', () => {
@@ -129,110 +148,142 @@ describe('composeRules ($defaults layering)', () => {
 })
 
 describe('parseRoute', () => {
-  const cases: [string, ReturnType<typeof parseRoute>['kind'], unknown?][] = [
-    ['', 'show'],
-    ['  ', 'show'],
-    ['reset', 'reset'],
-    ['OFF', 'off'],
-    ['on', 'on'],
-    ['off now', 'error'],
-    ['reset now', 'error'],
-    // setting a level is the picker's job, not the router's
-    ['fix high', 'error'],
-    ['pin max', 'error'],
-    // 0.1 names, kept as hidden aliases
-    ['decide', 'reset'],
-    ['auto', 'reset'],
-    ['pin picker', 'off'],
-    ['rules', 'rules'],
-    ['rules init', 'rules-init', 'user'],
-    ['rules init project', 'rules-init', 'project'],
-    ['rules critique', 'rules-critique'],
-    ['rules init team', 'error'],
+  const cases: [string, ReturnType<typeof parseRoute>][] = [
+    ['', { kind: 'suggest' }],
+    ['  ', { kind: 'suggest' }],
+    ['decide', { kind: 'suggest' }],
+    ['status', { kind: 'status' }],
+    ['OFF', { kind: 'off' }],
+    ['on', { kind: 'on' }],
+    ['this is a security review', { kind: 'suggest', hint: 'this is a security review' }],
+    ['keep it quick', { kind: 'suggest', hint: 'keep it quick' }],
+    ['off topic: just a quick question', { kind: 'suggest', hint: 'off topic: just a quick question' }],
+    ['rules', { kind: 'rules' }],
+    ['rules init', { kind: 'rules-init', scope: 'user' }],
+    ['rules init project', { kind: 'rules-init', scope: 'project' }],
+    ['rules critique', { kind: 'rules-critique' }],
+    ['rules are strict here', { kind: 'suggest', hint: 'rules are strict here' }],
+    // removed: reset and fix are now plain hints
+    ['reset', { kind: 'suggest', hint: 'reset' }],
   ]
-  for (const [args, kind, arg] of cases) {
-    test(`/route ${args}`, () => {
-      const parsed = parseRoute(args)
-      expect(parsed.kind).toBe(kind)
-      if (parsed.kind === 'rules-init') expect(parsed.scope).toBe(arg as never)
-    })
+  for (const [args, expected] of cases) {
+    test(`/route ${args}`, () => expect(parseRoute(args)).toEqual(expected))
   }
 })
 
-describe('state', () => {
-  test('only a lock or a pin touches effort', () => {
-    expect(appliedLevel(freshState())).toBeUndefined()
-    expect(appliedLevel({ ...freshState(), phase: 'proposed', proposal: { level: 'high', reason: 'r' } })).toBeUndefined()
-    expect(appliedLevel({ ...freshState(), phase: 'locked', level: 'high' })).toBe('high')
-    expect(appliedLevel({ ...freshState(), mode: 'pinned', level: 'max' })).toBe('max')
-    expect(appliedLevel({ ...freshState(), mode: 'picker', level: 'max' })).toBeUndefined()
+describe('the classifier prompt', () => {
+  test('recency rules live in the fixed frame', () => {
+    const system = classifierSystem('RULES')
+    expect(system).toContain('Weigh the latest exchange most')
+    expect(system).toContain('A later clarification of scope overrides an earlier ask')
+    expect(system).toContain('replied "2"')
   })
 
-  const DECIDING = freshState()
-  const PROPOSED = { ...freshState(), phase: 'proposed' as const, proposal: { level: 'high' as const, reason: 'bug fix in existing code' } }
-  const BY_ROUTER = { ...freshState(), phase: 'locked' as const, level: 'high' as const, reason: 'bug fix in existing code' }
-  const BY_YOU = { ...freshState(), mode: 'pinned' as const, phase: 'locked' as const, level: 'max' as const, reason: 'you chose max' }
-  const OFF = { ...freshState(), mode: 'picker' as const }
+  test('a manual hint is passed and weighted', () => {
+    const prompt = classifierPrompt('USER: hi', 'this is a security review')
+    expect(prompt).toContain('<user_hint>\nthis is a security review\n</user_hint>')
+    expect(prompt).toContain('weigh it strongly')
+    expect(classifierPrompt('USER: hi')).not.toContain('user_hint')
+  })
+})
 
-  test('footer labels: the state only, no level in use (the picker shows that)', () => {
+describe('state', () => {
+  const P_HIGH = { level: 'high' as const, reason: 'bug fix in existing code' }
+  const P_LOW = { level: 'low' as const, reason: 'minimal patch' }
+  const DECIDING = freshState()
+  const PROPOSED = withReading(DECIDING, P_HIGH)
+  const LOCKED = lockedAt(PROPOSED, P_HIGH)
+  const OFF = turnedOff(DECIDING)
+
+  test('only a lock touches effort', () => {
+    expect(appliedLevel(DECIDING)).toBeUndefined()
+    expect(appliedLevel(PROPOSED)).toBeUndefined()
+    expect(appliedLevel(LOCKED)).toBe('high')
+    expect(appliedLevel(OFF)).toBeUndefined()
+  })
+
+  test('a re-read while pending can change the level or withdraw it', () => {
+    expect(PROPOSED).toMatchObject({ phase: 'proposed', proposal: P_HIGH })
+    expect(withReading(PROPOSED, P_LOW)).toMatchObject({ phase: 'proposed', proposal: P_LOW })
+    const withdrawn = withReading({ ...PROPOSED, hint: 'h' }, undefined)
+    expect(withdrawn.phase).toBe('undecided')
+    expect(withdrawn.proposal).toBeUndefined()
+    expect(withdrawn.hint).toBeUndefined()
+    expect(withReading(DECIDING, undefined)).toBe(DECIDING)
+  })
+
+  test('while locked a different level is offered as a switch; the same level confirms', () => {
+    expect(withReading(LOCKED, P_LOW)).toMatchObject({ phase: 'locked', level: 'high', proposal: P_LOW })
+    expect(withReading(LOCKED, P_HIGH).proposal).toBeUndefined()
+    expect(appliedLevel(withReading(LOCKED, P_LOW))).toBe('high')
+  })
+
+  test('a manual read from off brings the router back with a suggestion; undecided leaves it off', () => {
+    expect(withReading(OFF, P_HIGH)).toMatchObject({ mode: 'auto', phase: 'proposed', proposal: P_HIGH })
+    expect(withReading(OFF, undefined)).toBe(OFF)
+  })
+
+  test('the decision budget', () => {
+    expect(wantsRead({ ...DECIDING, prompts: 1 }, 6)).toBe(true)
+    expect(wantsRead({ ...DECIDING, prompts: 6 }, 6)).toBe(true)
+    expect(wantsRead({ ...DECIDING, prompts: 7 }, 6)).toBe(false)
+    expect(wantsRead({ ...PROPOSED, prompts: 3 }, 6)).toBe(true)
+    expect(wantsRead({ ...LOCKED, prompts: 1 }, 6)).toBe(false)
+    expect(wantsRead({ ...OFF, prompts: 1 }, 6)).toBe(false)
+    expect(wantsRead({ ...DECIDING, prompts: 1, gaveUp: true }, 6)).toBe(false)
+
+    expect(afterBudget({ ...DECIDING, prompts: 5 }, 6, true)).toEqual({ ...DECIDING, prompts: 5 })
+    const off = afterBudget({ ...DECIDING, prompts: 6 }, 6, true)
+    expect(off).toMatchObject({ mode: 'picker', gaveUp: true, offReason: 'no clear task after 6 prompts — /route to ask again' })
+    expect(footerLabel(off).text).toBe('off')
+    const idle = afterBudget({ ...DECIDING, prompts: 6 }, 6, false)
+    expect(idle).toMatchObject({ mode: 'auto', phase: 'undecided', gaveUp: true })
+    expect(footerLabel(idle)).toEqual({ text: 'deciding', dim: true })
+    expect(afterBudget({ ...PROPOSED, prompts: 6 }, 6, true)).toMatchObject({ phase: 'proposed', proposal: P_HIGH, gaveUp: true })
+    expect(afterBudget({ ...LOCKED, prompts: 9 }, 6, true)).toEqual({ ...LOCKED, prompts: 9 })
+  })
+
+  test('turn on: deciding over the whole conversation with a fresh budget', () => {
+    expect(turnedOn({ ...OFF, prompts: 6, gaveUp: true, offReason: 'x' })).toMatchObject({ mode: 'auto', phase: 'undecided', prompts: 0, gaveUp: false, offReason: undefined })
+  })
+
+  test('footer labels and menus per state', () => {
+    const labels = (state: typeof DECIDING, allowOff = true) => footerMenu(state, allowOff).options.map(o => o.label)
     expect(footerLabel(DECIDING)).toEqual({ text: 'deciding', dim: true })
     expect(footerLabel(PROPOSED)).toEqual({ text: 'high?', color: 'yellow', dim: false })
-    expect(footerLabel(BY_ROUTER)).toEqual({ text: 'high 🔒', color: 'yellow', dim: false })
-    expect(footerLabel(BY_YOU).text).toBe('max 🔒')
+    expect(footerLabel(LOCKED)).toEqual({ text: 'high 🔒', color: 'yellow', dim: false })
+    expect(footerLabel(withReading(LOCKED, P_LOW)).text).toBe('high 🔒 → low?')
     expect(footerLabel(OFF)).toEqual({ text: 'off', dim: true })
+
+    expect(labels(DECIDING)).toEqual(['deciding', 'Suggest now', 'Turn off'])
+    expect(labels(PROPOSED)).toEqual(['high?', 'Accept high', 'Suggest now', 'Turn off'])
+    expect(labels(LOCKED)).toEqual(['high 🔒', 'Suggest now', 'Turn off'])
+    expect(labels(withReading(LOCKED, P_LOW))).toEqual(['high 🔒 → low?', 'Accept low', 'Suggest now', 'Turn off'])
+    expect(labels(OFF)).toEqual(['off', 'Suggest now', 'Turn on'])
+    expect(labels(DECIDING, false)).toEqual(['deciding', 'Suggest now'])
+    expect(footerMenu(PROPOSED).value).toBe('current')
   })
 
-  test('the reason keeps who fixed it', () => {
-    expect(reasonText(BY_ROUTER)).toBe('router: bug fix in existing code')
-    const chosen = { ...BY_YOU, reason: 'you chose max over the suggested high' }
-    expect(reasonText(chosen)).toBe('you chose max over the suggested high')
-    expect(routeReport(chosen)).toStartWith('max 🔒 (you chose max over the suggested high)')
-    expect(routeReport(DECIDING, 'medium')).toStartWith('deciding.')
-    for (const state of [DECIDING, PROPOSED, BY_ROUTER, OFF]) {
-      expect(routeReport(state, 'medium')).not.toMatch(/\bauto\b|\bpin(ned)?\b|\/route fix/)
-    }
+  test('reasons and status', () => {
+    expect(reasonText(LOCKED)).toBe('router: bug fix in existing code')
+    expect(reasonText(afterBudget({ ...DECIDING, prompts: 6 }, 6, true))).toBe('router off: no clear task after 6 prompts — /route to ask again')
+    expect(routeReport(LOCKED, 6)).toStartWith('high 🔒 (router: bug fix in existing code)')
+    expect(routeReport({ ...DECIDING, prompts: 2 }, 6, 'medium')).toContain('Automatic reads left: 4 of 6 prompts.')
+    expect(routeReport({ ...PROPOSED, hint: 'keep it quick' }, 6)).toContain('Hint: keep it quick')
   })
 
-  test('footer menu per state; the closed dropdown reads as the state', () => {
-    const labels = (menu: ReturnType<typeof footerMenu>) => menu.options.map(o => o.label)
-    const shown = (menu: ReturnType<typeof footerMenu>) => menu.options.find(o => o.value === menu.value)?.label
-    expect(labels(footerMenu(DECIDING))).toEqual(['deciding', 'Reset (new task)', 'Turn off'])
-    expect(labels(footerMenu(PROPOSED))).toEqual(['high?', 'Accept high', 'Not yet', 'Turn off'])
-    expect(labels(footerMenu(BY_ROUTER))).toEqual(['high 🔒', 'Reset (new task)', 'Turn off'])
-    expect(labels(footerMenu(OFF))).toEqual(['off', 'Turn on'])
-    expect(shown(footerMenu(PROPOSED))).toBe('high?')
-    expect(shown(footerMenu(BY_ROUTER))).toBe('high 🔒')
-    for (const state of [DECIDING, PROPOSED, BY_ROUTER, OFF]) {
-      const menu = footerMenu(state)
-      expect(new Set(menu.options.map(o => o.value)).size).toBe(menu.options.length)
-      expect(menu.options.every(o => ['current', 'accept', 'notyet', 'reset', 'off', 'on'].includes(o.value))).toBe(true)
-    }
-  })
-
-  test('footer menu with an org allowOff: false has no Turn off', () => {
-    expect(footerMenu(DECIDING, false).options.map(o => o.value)).toEqual(['current', 'reset'])
-    expect(footerMenu(PROPOSED, false).options.map(o => o.value)).toEqual(['current', 'accept', 'notyet'])
-  })
-
-  test('the band offers the proposal first, four choices', () => {
-    expect(proposalChoices({ level: 'high', reason: '' })).toEqual(['high', 'medium', 'low', 'max'])
-    expect(proposalChoices({ level: 'medium', reason: '' })).toEqual(['medium', 'low', 'high', 'max'])
-  })
-
-  test('saved state round-trips a lock; a pending proposal is not persisted; old sessions are evicted', () => {
-    const locked = { ...freshState(), phase: 'locked' as const, level: 'high' as const, reason: 'bug fix' }
-    const saved = withSaved(undefined, 's1', locked, 1)
-    expect(restored(saved.s1)).toMatchObject({ mode: 'auto', phase: 'locked', level: 'high', reason: 'bug fix' })
-    const proposed = withSaved(undefined, 's2', { ...freshState(), phase: 'proposed', proposal: { level: 'max', reason: 'x' } }, 1)
-    expect(restored(proposed.s2).phase).toBe('undecided')
+  test('saved state round-trips a lock and off; a pending proposal is not persisted; old pinned entries come back locked', () => {
+    const saved = withSaved(undefined, 's1', LOCKED, 1)
+    expect(restored(saved.s1)).toMatchObject({ mode: 'auto', phase: 'locked', level: 'high', reason: 'bug fix in existing code' })
+    expect(restored(withSaved(undefined, 's2', PROPOSED, 1).s2).phase).toBe('undecided')
+    const gaveUp = afterBudget({ ...DECIDING, prompts: 6 }, 6, true)
+    expect(restored(withSaved(undefined, 's3', gaveUp, 1).s3)).toMatchObject({ mode: 'picker', offReason: gaveUp.offReason })
+    expect(restored({ mode: 'pinned', phase: 'locked', level: 'max', reason: 'you chose max' })).toMatchObject({ mode: 'auto', phase: 'locked', level: 'max' })
     expect(restored({ mode: 'pinned', level: 'nope' })).toEqual(freshState())
-    const reset = withSaved(undefined, 's3', { ...freshState(), resetMark: { count: 4, anchor: { role: 'assistant', text: 'done' } } }, 1)
-    expect(restored(reset.s3).resetMark).toEqual({ count: 4, anchor: { role: 'assistant', text: 'done' } })
     let all: ReturnType<typeof withSaved> = {}
-    for (let i = 0; i < 105; i++) all = withSaved(all, `id${i}`, locked, i)
+    for (let i = 0; i < 105; i++) all = withSaved(all, `id${i}`, LOCKED, i)
     expect(Object.keys(all)).toHaveLength(100)
     expect(all.id0).toBeUndefined()
-    expect(all.id104).toBeDefined()
   })
 })
 
@@ -254,44 +305,5 @@ describe('settings-borne rules', () => {
     expect(composeRules(enforced.layers).text).toBe('D\nO')
     expect(ruleLayers({ defaults: 'D', userFile: { path: 'u.md', text: 'FILE' }, userSettings: 'SETTING' }).layers.map(l => l.text)).toEqual(['D', 'FILE'])
     expect(ruleLayers({ defaults: 'D', userFile: { path: 'u.md', text: undefined }, userSettings: 'SETTING' }).layers.map(l => l.text)).toEqual(['D', 'SETTING'])
-  })
-})
-
-describe('reset (new task)', () => {
-  const OLD: TranscriptMessage[] = [
-    { role: 'user', text: 'the checkout total is wrong when a coupon expires, fix it' },
-    { role: 'assistant', text: 'Fixed the coupon expiry bug.', toolUses: [{ tool: 'Edit' }] },
-  ]
-  const NEW: TranscriptMessage[] = [
-    { role: 'user', text: 'new thing: brainstorm names for the settings page' },
-    { role: 'assistant', text: 'Some ideas…' },
-  ]
-
-  test('the classifier reads only messages after the reset', () => {
-    const mark = resetMarkOf(OLD)
-    expect(mark).toEqual({ count: 2, anchor: { role: 'assistant', text: 'Fixed the coupon expiry bug.' } })
-    const after = trimTranscript(sinceReset([...OLD, ...NEW], mark), 'and one more idea please')
-    expect(after).not.toContain('coupon')
-    expect(after.split('\n')).toEqual([
-      'USER: new thing: brainstorm names for the settings page',
-      'ASSISTANT: Some ideas…',
-      'USER: and one more idea please',
-    ])
-  })
-
-  test('right after a reset there is nothing to read, so nothing re-locks', () => {
-    expect(trimTranscript(sinceReset(OLD, resetMarkOf(OLD)))).toBe('')
-  })
-
-  test('the anchor survives the 4096-message window moving; a repeat of its text later is ignored', () => {
-    const mark = resetMarkOf(OLD)
-    const shifted = [OLD[1] as TranscriptMessage, ...NEW, { role: 'assistant' as const, text: 'Fixed the coupon expiry bug.' }]
-    expect(sinceReset(shifted, mark).map(m => m.text)).toEqual(['new thing: brainstorm names for the settings page', 'Some ideas…', 'Fixed the coupon expiry bug.'])
-  })
-
-  test('anchor gone (compaction): falls back to the count, then to the whole transcript', () => {
-    expect(sinceReset([{ role: 'user', text: 'a' }, { role: 'user', text: 'b' }, { role: 'user', text: 'c' }], { count: 2, anchor: { role: 'assistant', text: 'gone' } }).map(m => m.text)).toEqual(['c'])
-    expect(sinceReset([{ role: 'user', text: 'summary' }], { count: 9 }).map(m => m.text)).toEqual(['summary'])
-    expect(sinceReset(OLD, undefined)).toBe(OLD)
   })
 })
