@@ -1,7 +1,7 @@
 {
   "name": "effort-router",
-  "version": "0.1.0",
-  "description": "Decides the session's reasoning effort once the task is clear (a Haiku read of the transcript against Anthropic's 'Spending your effort' guidance and your own rules), asks you to confirm, then locks it for every request and subagent. /route shows, re-decides, pins, hands back to the picker or edits the rules.",
+  "version": "0.2.0",
+  "description": "Decides the session's reasoning effort once the task is clear (a Haiku read of the transcript against Anthropic's 'Spending your effort' guidance and your own rules), asks you to confirm, then fixes it for every request and subagent. The footer shows the state (deciding, fixed, off) and is a dropdown to change it; /route does the same.",
   "author": {
     "name": "Tommy Long"
   },
@@ -45,7 +45,7 @@
     "syncPicker": {
       "type": "boolean",
       "title": "Sync the effort picker",
-      "description": "Run /effort <level> when a level locks so the native picker label matches (its echo also tells the model).",
+      "description": "Run /effort <level> when a level is fixed so the terminal's picker label matches (its echo also tells the model). The Desktop picker is app-owned and does not move.",
       "required": false,
       "default": true
     },
@@ -55,6 +55,17 @@
       "description": "Extra routing rules in plain words. Include a line that is exactly $defaults to keep the rules beneath (shipped defaults, then your organisation's); without it these rules replace them. A ~/.claude/effort-router.md file takes precedence over this option.",
       "required": false,
       "default": ""
+    },
+    "footerControl": {
+      "type": "string",
+      "title": "Footer control",
+      "description": "\"select\" (default): the footer label is a dropdown of the router's choices. \"label\": plain text only; use /route to change the state.",
+      "required": false,
+      "default": "select",
+      "options": [
+        "select",
+        "label"
+      ]
     }
   }
 }

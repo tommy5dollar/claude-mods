@@ -9,6 +9,9 @@ import {
   classifierSystem,
   composeRules,
   footerLabel,
+  footerMenu,
+  reasonText,
+  routeReport,
   freshState,
   parseDecision,
   ruleLayers,
@@ -127,13 +130,19 @@ describe('parseRoute', () => {
   const cases: [string, ReturnType<typeof parseRoute>['kind'], unknown?][] = [
     ['', 'show'],
     ['  ', 'show'],
-    ['auto', 'auto'],
-    ['pin high', 'pin', 'high'],
-    ['PIN Max', 'pin', 'max'],
-    ['pin picker', 'picker'],
-    ['pin', 'error'],
-    ['pin ultra', 'error'],
-    ['auto now', 'error'],
+    ['decide', 'decide'],
+    ['fix high', 'fix', 'high'],
+    ['FIX XHigh', 'fix', 'xhigh'],
+    ['off', 'off'],
+    ['fix', 'error'],
+    ['fix ultra', 'error'],
+    ['fix picker', 'error'],
+    ['off now', 'error'],
+    ['decide now', 'error'],
+    // 0.1 names, kept as hidden aliases
+    ['auto', 'decide'],
+    ['pin max', 'fix', 'max'],
+    ['pin picker', 'off'],
     ['rules', 'rules'],
     ['rules init', 'rules-init', 'user'],
     ['rules init project', 'rules-init', 'project'],
@@ -144,7 +153,7 @@ describe('parseRoute', () => {
     test(`/route ${args}`, () => {
       const parsed = parseRoute(args)
       expect(parsed.kind).toBe(kind)
-      if (parsed.kind === 'pin') expect(parsed.level).toBe(arg as never)
+      if (parsed.kind === 'fix') expect(parsed.level).toBe(arg as never)
       if (parsed.kind === 'rules-init') expect(parsed.scope).toBe(arg as never)
     })
   }
@@ -159,13 +168,63 @@ describe('state', () => {
     expect(appliedLevel({ ...freshState(), mode: 'picker', level: 'max' })).toBeUndefined()
   })
 
-  test('footer labels stay short', () => {
-    expect(footerLabel(freshState(), 'medium')).toEqual({ text: 'auto · medium', color: 'cyan' })
-    expect(footerLabel(freshState()).text).toBe('auto · default')
-    expect(footerLabel({ ...freshState(), phase: 'proposed', proposal: { level: 'high', reason: 'r' } }, 'medium').text).toBe('auto · medium · high?')
-    expect(footerLabel({ ...freshState(), phase: 'locked', level: 'high', reason: 'r' }, 'medium').text).toBe('auto · high 🔒')
-    expect(footerLabel({ ...freshState(), mode: 'pinned', level: 'max' }).text).toBe('pin · max')
-    expect(footerLabel({ ...freshState(), mode: 'picker' }, 'low').text).toBe('picker · low')
+  const DECIDING = freshState()
+  const PROPOSED = { ...freshState(), phase: 'proposed' as const, proposal: { level: 'high' as const, reason: 'bug fix in existing code' } }
+  const BY_ROUTER = { ...freshState(), phase: 'locked' as const, level: 'high' as const, reason: 'bug fix in existing code' }
+  const BY_YOU = { ...freshState(), mode: 'pinned' as const, phase: 'locked' as const, level: 'max' as const, reason: 'you chose max' }
+  const OFF = { ...freshState(), mode: 'picker' as const }
+
+  test('three states, compact labels, no auto/pin jargon', () => {
+    expect(footerLabel(DECIDING, 'medium')).toEqual({ text: 'medium · deciding', dim: true })
+    expect(footerLabel(DECIDING).text).toBe('default · deciding')
+    expect(footerLabel(PROPOSED, 'medium')).toEqual({ text: 'medium → high?', color: 'yellow', dim: false })
+    expect(footerLabel(BY_ROUTER, 'medium')).toEqual({ text: 'high 🔒', color: 'yellow', dim: false })
+    expect(footerLabel(BY_YOU, 'medium').text).toBe('max 🔒')
+    expect(footerLabel(OFF, 'low')).toEqual({ text: 'router off', dim: true })
+  })
+
+  test('the reason keeps who fixed it', () => {
+    expect(reasonText(BY_ROUTER)).toBe('router: bug fix in existing code')
+    expect(reasonText(BY_YOU)).toBe('you chose max')
+    expect(routeReport(BY_YOU)).toStartWith('max 🔒 (you chose max)')
+    expect(routeReport(DECIDING, 'medium')).toStartWith('medium · deciding.')
+    for (const state of [DECIDING, PROPOSED, BY_ROUTER, BY_YOU, OFF]) {
+      expect(routeReport(state, 'medium')).not.toMatch(/\bauto\b|\bpin(ned)?\b/)
+    }
+  })
+
+  test('footer menu: the closed dropdown reads as the state', () => {
+    const label = (menu: ReturnType<typeof footerMenu>) => menu.options.find(o => o.value === menu.value)?.label
+    const deciding = footerMenu(DECIDING, 'medium')
+    expect(deciding.options.map(o => o.label)).toEqual(['Low 🔒', 'Medium 🔒', 'High 🔒', 'XHigh 🔒', 'Max 🔒', 'medium · deciding', 'Router off'])
+    expect(label(deciding)).toBe('medium · deciding')
+
+    const proposed = footerMenu(PROPOSED, 'medium')
+    expect(proposed.options[0]).toEqual({ value: 'accept', label: 'Accept high' })
+    expect(label(proposed)).toBe('medium → high?')
+
+    const fixed = footerMenu(BY_ROUTER, 'medium')
+    expect(fixed.value).toBe('fix high')
+    expect(label(fixed)).toBe('high 🔒')
+    expect(fixed.options.map(o => o.label)).toContain('Decide again')
+    expect(fixed.options.map(o => o.label)).toContain('Max 🔒')
+
+    const off = footerMenu(OFF, 'medium')
+    expect(label(off)).toBe('router off')
+    expect(off.options.map(o => o.label)).toContain('Let the router decide')
+
+    for (const menu of [deciding, proposed, fixed, off]) {
+      expect(new Set(menu.options.map(o => o.value)).size).toBe(menu.options.length)
+      expect(menu.options.every(o => o.value === 'accept' || parseRoute(o.value).kind !== 'error')).toBe(true)
+    }
+  })
+
+  test('footer menu without fixing (org allowPin: false)', () => {
+    const deciding = footerMenu(DECIDING, 'medium', false)
+    expect(deciding.options.map(o => o.value)).toEqual(['decide', 'off'])
+    const fixed = footerMenu(BY_ROUTER, 'medium', false)
+    expect(fixed.options.map(o => o.value)).toEqual(['fix high', 'decide', 'off'])
+    expect(fixed.options[0]?.label).toBe('high 🔒')
   })
 
   test('the band offers the proposal first, four choices', () => {

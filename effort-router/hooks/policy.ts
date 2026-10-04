@@ -240,25 +240,30 @@ export function parseDecision(reply: string | undefined | null): Decision {
 
 export type RouteCommand =
   | { kind: 'show' }
-  | { kind: 'auto' }
-  | { kind: 'pin'; level: Level }
-  | { kind: 'picker' }
+  | { kind: 'decide' }
+  | { kind: 'fix'; level: Level }
+  | { kind: 'off' }
   | { kind: 'rules' }
   | { kind: 'rules-init'; scope: 'user' | 'project' }
   | { kind: 'rules-critique' }
   | { kind: 'error'; message: string }
 
 export const ROUTE_USAGE =
-  'usage: /route [auto | pin <low|medium|high|xhigh|max|picker> | rules [init [user|project] | critique]]'
+  'usage: /route [decide | fix <low|medium|high|xhigh|max> | off | rules [init [user|project] | critique]]'
 
+/**
+ * `/route` arguments. `decide`, `fix <level>` and `off` are the names shown;
+ * the 0.1 names (`auto`, `pin <level>`, `pin picker`) stay as hidden aliases.
+ */
 export function parseRoute(args: string): RouteCommand {
   const words = args.trim().toLowerCase().split(/\s+/).filter(Boolean)
   if (words.length === 0) return { kind: 'show' }
   const [verb, arg, extra, more] = words
-  if (verb === 'auto' && arg === undefined) return { kind: 'auto' }
-  if (verb === 'pin' && arg !== undefined && extra === undefined) {
-    if (arg === 'picker') return { kind: 'picker' }
-    if (isLevel(arg)) return { kind: 'pin', level: arg }
+  if ((verb === 'decide' || verb === 'auto') && arg === undefined) return { kind: 'decide' }
+  if (verb === 'off' && arg === undefined) return { kind: 'off' }
+  if ((verb === 'fix' || verb === 'pin') && arg !== undefined && extra === undefined) {
+    if (verb === 'pin' && arg === 'picker') return { kind: 'off' }
+    if (isLevel(arg)) return { kind: 'fix', level: arg }
   }
   if (verb === 'rules') {
     if (arg === undefined) return { kind: 'rules' }
@@ -278,7 +283,13 @@ export type Phase = 'undecided' | 'proposed' | 'locked'
 
 export type Proposal = { level: Level; reason: string }
 
-/** Everything the router remembers about one session. */
+/**
+ * Everything the router remembers about one session.
+ *
+ * Internally `mode` keeps where a level came from: `auto` + `locked` was fixed
+ * by the router, `pinned` was fixed by you, `picker` is the router turned off.
+ * The person sees three states only (see `viewOf`): deciding, fixed, off.
+ */
 export type RouterState = {
   mode: Mode
   /** Under `auto`: still reading, waiting for a click, or locked. */
@@ -303,35 +314,48 @@ export function appliedLevel(state: RouterState): Level | undefined {
   return undefined
 }
 
-/** One short status line under the prompt. */
-export function statusLine(state: RouterState, hint?: string): string {
-  const tail = hint ? ` · ${hint}` : ''
-  if (state.mode === 'picker') return `effort: picker (router off)${tail}`
-  if (state.mode === 'pinned') return `effort: pinned ${state.level}${tail}`
-  if (state.phase === 'locked') return `effort: locked ${state.level} (${state.reason}) · /route to change${tail}`
-  if (state.phase === 'proposed' && state.proposal) return `effort: suggest ${state.proposal.level}? (${state.proposal.reason})${tail}`
-  return `effort: auto, undecided${tail}`
+/** The three states a person sees. */
+export type View =
+  | { kind: 'deciding'; proposal?: Proposal }
+  | { kind: 'fixed'; level: Level; byRouter: boolean; reason?: string }
+  | { kind: 'off' }
+
+export function viewOf(state: RouterState): View {
+  if (state.mode === 'picker') return { kind: 'off' }
+  if (state.mode === 'pinned' && state.level) return { kind: 'fixed', level: state.level, byRouter: false }
+  if (state.mode === 'auto' && state.phase === 'locked' && state.level) {
+    return { kind: 'fixed', level: state.level, byRouter: true, reason: state.reason }
+  }
+  if (state.phase === 'proposed' && state.proposal) return { kind: 'deciding', proposal: state.proposal }
+  return { kind: 'deciding' }
+}
+
+/** Why the level is what it is: `router: bug fix in existing code` or `you chose high`. */
+export function reasonText(state: RouterState): string {
+  const view = viewOf(state)
+  if (view.kind === 'off') return "router off: the effort picker decides"
+  if (view.kind === 'fixed') return view.byRouter ? `router: ${view.reason ?? 'classifier'}` : `you chose ${view.level}`
+  if (view.proposal) return `router suggests ${view.proposal.level}: ${view.proposal.reason}`
+  return "deciding: the picker's effort applies until the task is clear"
 }
 
 /** What `/route` with no arguments prints. */
-export function routeReport(state: RouterState, sessionEffort?: string | number): string {
-  const picker = sessionEffort === undefined ? 'unknown until the first request' : String(sessionEffort)
+export function routeReport(state: RouterState, inForce?: string | number): string {
+  const view = viewOf(state)
   const lines: string[] = []
-  if (state.mode === 'picker') {
-    lines.push('mode: picker. The router is off; effort is whatever /effort or the picker sets.')
-  } else if (state.mode === 'pinned') {
-    lines.push(`mode: pinned ${state.level}. Every request and subagent runs at ${state.level}.`)
-  } else if (state.phase === 'locked') {
-    lines.push(`mode: auto, locked at ${state.level} (${state.reason}). Every request and subagent runs at ${state.level}.`)
-  } else if (state.phase === 'proposed' && state.proposal) {
-    lines.push(`mode: auto, proposing ${state.proposal.level} (${state.proposal.reason}); waiting for your choice in the band above the prompt.`)
+  if (view.kind === 'fixed') {
+    lines.push(`${view.level} 🔒 (${reasonText(state)}). Every request and subagent runs at ${view.level}.`)
+  } else if (view.kind === 'off') {
+    lines.push(`router off. Effort is whatever /effort or the picker sets${inForce === undefined ? '' : ` (now ${inForce})`}.`)
   } else {
-    const snooze = state.snoozedUntil !== undefined && state.snoozedUntil > state.prompts
-      ? ` Snoozed: next read after ${state.snoozedUntil - state.prompts} more prompt(s).`
-      : ''
-    lines.push(`mode: auto, undecided. The picker's effort applies until the task is clear.${snooze}`)
+    const now = inForce === undefined ? 'the picker\'s level' : String(inForce)
+    lines.push(view.proposal
+      ? `${now} → ${view.proposal.level}? The router suggests ${view.proposal.level} (${view.proposal.reason}); choose in the band above the prompt.`
+      : `${now} · deciding. The router fixes a level once the task is clear.`)
+    if (state.snoozedUntil !== undefined && state.snoozedUntil > state.prompts) {
+      lines.push(`Snoozed: next read after ${state.snoozedUntil - state.prompts} more prompt(s).`)
+    }
   }
-  lines.push(`session effort as last sent: ${picker}`)
   lines.push(ROUTE_USAGE)
   return lines.join('\n')
 }
@@ -394,34 +418,61 @@ export function restored(saved: unknown): RouterState {
   return state
 }
 
+const capital = (level: Level): string => (level === 'xhigh' ? 'XHigh' : level[0]!.toUpperCase() + level.slice(1))
+
 /**
- * The short footer label beside the native effort picker (SessionMode site):
- * the router's mode, then the effort actually in force.
+ * The compact state the footer shows beside the native effort picker:
+ * `medium · deciding`, `medium → high?`, `high 🔒` or `router off`.
+ * `dim` for the states where nothing is fixed.
  */
-export function footerLabel(state: RouterState, inForce?: string | number): { text: string; color?: string } {
+export function footerLabel(state: RouterState, inForce?: string | number): { text: string; color?: string; dim: boolean } {
+  const view = viewOf(state)
   const now = inForce === undefined ? 'default' : String(inForce)
-  const colorOf = (value: unknown) => (isLevel(value) ? LEVEL_COLOR[value] : undefined)
-  if (state.mode === 'picker') return { text: `picker · ${now}`, color: colorOf(inForce) }
-  if (state.mode === 'pinned' && state.level) return { text: `pin · ${state.level}`, color: LEVEL_COLOR[state.level] }
-  if (state.phase === 'locked' && state.level) return { text: `auto · ${state.level} 🔒`, color: LEVEL_COLOR[state.level] }
-  if (state.phase === 'proposed' && state.proposal) return { text: `auto · ${now} · ${state.proposal.level}?`, color: LEVEL_COLOR[state.proposal.level] }
-  return { text: `auto · ${now}`, color: colorOf(inForce) }
+  if (view.kind === 'off') return { text: 'router off', dim: true }
+  if (view.kind === 'fixed') return { text: `${view.level} 🔒`, color: LEVEL_COLOR[view.level], dim: false }
+  if (view.proposal) return { text: `${now} → ${view.proposal.level}?`, color: LEVEL_COLOR[view.proposal.level], dim: false }
+  return { text: `${now} · deciding`, dim: true }
 }
 
-/** The footer menu's choices, each the /route arguments it runs. */
-export const MENU_OPTIONS: readonly { label: string; value: string }[] = [
-  { label: 'Auto (re-decide from the transcript)', value: 'auto' },
-  ...LEVELS.map(level => ({ label: `Pin ${level}`, value: `pin ${level}` })),
-  { label: 'Use the picker (router off)', value: 'pin picker' },
-]
+export type FooterMenu = {
+  options: { value: string; label: string }[]
+  /** The option for the current state; its label is the compact state text. */
+  value: string
+}
 
-/** The "why" line in the footer menu. */
-export function whyLine(state: RouterState): string {
-  if (state.mode === 'picker') return 'Router off: the effort picker decides.'
-  if (state.mode === 'pinned') return `Pinned at ${state.level} by you.`
-  if (state.phase === 'locked') return `Locked at ${state.level}: ${state.reason}.`
-  if (state.phase === 'proposed' && state.proposal) return `Suggesting ${state.proposal.level}: ${state.proposal.reason}. Choose in the band above the prompt.`
-  return "Undecided: the picker's effort applies until the task is clear."
+/**
+ * The footer dropdown. The closed dropdown shows the selected option's label,
+ * so the current state's option is labelled with the compact state text.
+ * Values are `/route` arguments (`accept` aside). `allowFix: false` (an
+ * organisation's `allowPin: false`) leaves out the fixed levels.
+ */
+export function footerMenu(state: RouterState, inForce?: string | number, allowFix = true): FooterMenu {
+  const view = viewOf(state)
+  const label = footerLabel(state, inForce).text
+  const options: { value: string; label: string }[] = []
+  if (view.kind === 'deciding' && view.proposal) {
+    options.push({ value: 'accept', label: `Accept ${view.proposal.level}` })
+  }
+  if (allowFix) {
+    for (const level of LEVELS) {
+      const isCurrent = view.kind === 'fixed' && view.level === level
+      options.push({ value: `fix ${level}`, label: isCurrent ? label : `${capital(level)} 🔒` })
+    }
+  }
+  options.push({
+    value: 'decide',
+    label: view.kind === 'deciding' ? label : view.kind === 'fixed' ? 'Decide again' : 'Let the router decide',
+  })
+  options.push({ value: 'off', label: view.kind === 'off' ? label : 'Router off' })
+  const value = view.kind === 'fixed'
+    ? (allowFix ? `fix ${view.level}` : 'decide')
+    : view.kind === 'off' ? 'off' : 'decide'
+  // a fixed level with fixing disallowed still needs its state shown
+  if (view.kind === 'fixed' && !allowFix) {
+    options.unshift({ value: `fix ${view.level}`, label })
+    return { options, value: `fix ${view.level}` }
+  }
+  return { options, value }
 }
 
 // --- settings-borne rules (org / user / project) --------------------------------------
@@ -431,7 +482,7 @@ export type SettingsRules = {
   rules?: string
   /** Org only: `enforce` makes the org layer final. */
   rulesMode?: 'extend' | 'enforce'
-  /** Org only: false forbids `/route pin <level>`. */
+  /** Org only: false stops users fixing a level (`/route fix`, the footer's levels). */
   allowPin?: boolean
 }
 

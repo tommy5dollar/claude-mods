@@ -9,8 +9,8 @@ import {
   STARTER_RULES,
   appliedLevel,
   footerLabel,
-  MENU_OPTIONS,
-  whyLine,
+  footerMenu,
+  reasonText,
   classifierPrompt,
   classifierSystem,
   composeRules,
@@ -25,7 +25,6 @@ import {
   proposalText,
   restored,
   routeReport,
-  statusLine,
   trimTranscript,
   withSaved,
 } from './policy'
@@ -45,6 +44,8 @@ type Settings = {
   maxReads: number
   classifierModel: string
   syncPicker: boolean
+  /** `select`: the footer label is a dropdown. `label`: plain text, /route is the control. */
+  footerControl: 'select' | 'label'
 }
 
 /** Per-session runtime facts that are not persisted. */
@@ -65,13 +66,14 @@ type Session = {
 }
 
 const STORE_KEY = 'sessions'
-const MENU_PANE = 'effort-router-menu'
 const SESSIONS = new Map<string, Session>()
 /**
  * Whether a person is at a UI. In a -p run the /effort sync's output would
  * replace the run's printed result, so headless runs rely on turn.step alone.
  */
 let isInteractive = true
+/** The organisation's `allowPin`, as the last rules read found it. */
+let allowFix = true
 
 const FALLBACK_RULES =
   'low: quick in-the-loop work, questions, chores. medium: regular feature work (default). ' +
@@ -92,6 +94,7 @@ function settingsOf(options: PluginOptions): Settings {
     maxReads: num(options.maxReads, 8),
     classifierModel: typeof options.classifierModel === 'string' && options.classifierModel !== '' ? options.classifierModel : 'haiku',
     syncPicker: options.syncPicker !== false && options.syncPicker !== 'false',
+    footerControl: options.footerControl === 'label' ? 'label' : 'select',
   }
 }
 
@@ -129,7 +132,7 @@ function show($: EngineInterface, session: Session): void {
   }
 }
 
-/** Applies a level to the session (lock or pin), syncs the picker, announces once. */
+/** Fixes a level for the session (by the router, or by you), syncs the picker, announces once. */
 async function apply($: EngineInterface, id: string, session: Session, settings: Settings, how: 'lock' | 'pin', level: Level, reason: string): Promise<void> {
   session.state = how === 'pin'
     ? { ...session.state, mode: 'pinned', phase: 'locked', level, reason, proposal: undefined }
@@ -137,9 +140,7 @@ async function apply($: EngineInterface, id: string, session: Session, settings:
   if (settings.syncPicker) session.pendingSync = level
   if (!session.announced || how === 'pin') {
     session.announced = true
-    const line = how === 'pin'
-      ? `effort pinned: ${level} · /route auto to re-decide`
-      : `effort locked: ${level} — ${reason} · /route to change`
+    const line = `effort fixed: ${level} 🔒 (${reasonText(session.state)}) · /route to change`
     try {
       $.ui.log(line)
     } catch {
@@ -226,7 +227,8 @@ async function loadRules($: EngineInterface): Promise<LoadedRules> {
   })
   const composed = composeRules(layers)
   $.ui.log(`effort-router: rules from ${composed.contributors.map(c => `${c.source} (${c.how})`).join(' → ')}${enforced ? ' [org enforce]' : ''}`, { to: 'debug' })
-  return { composed, defaults: defaults ?? FALLBACK_RULES, enforced, allowPin: org.allowPin !== false }
+  allowFix = org.allowPin !== false
+  return { composed, defaults: defaults ?? FALLBACK_RULES, enforced, allowPin: allowFix }
 }
 
 // --- deciding ----------------------------------------------------------------------
@@ -316,14 +318,14 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
       return routeReport(session.state, session.lastSent)
     case 'error':
       return command.message
-    case 'pin': {
+    case 'fix': {
       const { allowPin } = await loadRules($)
-      if (!allowPin) return "your organisation's settings turn /route pin off (allowPin: false). /route auto and /route pin picker still work."
-      await apply($, id, session, settings, 'pin', command.level, 'pinned by /route')
+      if (!allowPin) return "your organisation's settings stop users fixing a level (allowPin: false). /route decide and /route off still work."
+      await apply($, id, session, settings, 'pin', command.level, `you chose ${command.level}`)
       flushSync($, session)
-      return `effort pinned at ${command.level} for every request and subagent in this session.`
+      return `${command.level} 🔒 for every request and subagent in this session (you chose it). /route decide hands it back to the router.`
     }
-    case 'picker': {
+    case 'off': {
       session.state = { ...session.state, mode: 'picker', phase: 'undecided', level: undefined, reason: undefined, proposal: undefined }
       if (settings.syncPicker && session.baseline) {
         session.pendingSync = session.baseline
@@ -331,9 +333,9 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
       }
       show($, session)
       await persist($, id, session.state)
-      return `router off: effort is the picker's${session.baseline ? ` (restored to ${session.baseline})` : ''}. /route auto turns it back on.`
+      return `router off: effort is the picker's${session.baseline ? ` (restored to ${session.baseline})` : ''}. /route decide turns it back on.`
     }
-    case 'auto': {
+    case 'decide': {
       session.state = { ...session.state, mode: 'auto', phase: 'undecided', level: undefined, reason: undefined, proposal: undefined, snoozedUntil: undefined }
       session.announced = false
       session.reads = 0
@@ -346,8 +348,8 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
       const consent = await consentFor($, settings)
       await decide($, id, session, settings, consent, undefined)
       return session.state.phase === 'undecided'
-        ? 'routing on: undecided, reading again after your next prompt.'
-        : statusLine(session.state)
+        ? 'deciding: the router reads the transcript again after your next prompt.'
+        : footerLabel(session.state, session.lastSent).text
     }
     case 'rules': {
       const { composed, enforced } = await loadRules($)
@@ -383,14 +385,15 @@ export function register(on: On, options: PluginOptions): void {
     try {
       await $.command.register({
         name: 'route',
-        description: 'Effort router: show, re-decide (auto), pin a level, hand back to the picker, or edit the rules',
-        argumentHint: '[auto | pin <level|picker> | rules [init|critique]]',
+        description: 'Effort router: show the state, let the router decide, fix a level, turn it off, or edit the rules',
+        argumentHint: '[decide | fix <level> | off | rules [init|critique]]',
       })
       const { session } = await sessionOf($)
       if (session.lastSent === undefined) {
         const configured = (await $.settings.read().catch(() => ({}))) as { effortLevel?: unknown }
         if (isLevel(configured.effortLevel)) session.lastSent = configured.effortLevel
       }
+      await loadRules($).catch(() => undefined) // learns allowFix for the footer
       show($, session)
     } catch (error) {
       $.ui.log(`effort-router: start failed: ${String(error)}`, { to: 'debug' })
@@ -468,47 +471,37 @@ export function register(on: On, options: PluginOptions): void {
     return result
   })
 
-  // The persistent label in the footer, beside the native effort picker. A
-  // button: pressing it opens the router's menu pane.
+  // The footer, beside the native effort picker: the compact state, and on
+  // the terminal and Desktop a dropdown of the same choices as /route. The
+  // closed dropdown shows the current option, labelled with the state text.
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
-    const { session } = await sessionOf($)
+    const { id, session } = await sessionOf($)
     const label = footerLabel(session.state, session.lastSent)
-    const { Box, Button } = $.ui.resolve(e)
-    const mine = Button({
-      key: 'route-menu',
-      label: label.text,
-      plain: true,
-      onPress: async () => {
-        await $.ui.open({ id: MENU_PANE, title: 'Effort router', focus: true, closeOnEscape: true, rows: 12 })
+    const theirs = await next(e)
+    const canSelect = settings.footerControl === 'select' && (e.surface === 'terminal' || e.surface === 'desktop')
+    if (!canSelect) {
+      const { Box, Text } = $.ui.resolve(e)
+      const mine = Text({ ...(label.color ? { color: label.color } : { dimColor: true }), children: [label.text] })
+      return Box({ flexDirection: 'row', columnGap: 1, children: [theirs, mine] })
+    }
+    const { Box, Select } = $.ui.resolve(e)
+    const menu = footerMenu(session.state, session.lastSent, allowFix)
+    const mine = Select({
+      key: 'route-state',
+      options: menu.options,
+      value: menu.value,
+      onSelect: async (value: string) => {
+        if (value === menu.value) return
+        if (value === 'accept') {
+          const proposal = session.state.proposal
+          if (proposal && session.state.phase === 'proposed') await apply($, id, session, settings, 'lock', proposal.level, proposal.reason)
+          return
+        }
+        const text = await route($, value, settings).catch((error: unknown) => `effort-router: ${String(error)}`)
+        $.ui.log(text, { to: 'debug' })
       },
     })
-    return Box({ flexDirection: 'row', columnGap: 1, children: [await next(e), mine] })
-  })
-
-  // The menu: why the current level, and the /route actions as a Select.
-  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
-    if (e.requestId !== MENU_PANE || (e.surface !== 'terminal' && e.surface !== 'desktop')) return next(e)
-    const { session } = await sessionOf($)
-    const { Box, Text, Select } = $.ui.resolve(e)
-    const label = footerLabel(session.state, session.lastSent)
-    return Box({
-      flexDirection: 'column',
-      children: [
-        Text({ bold: true, children: [`effort now: ${label.text}`] }),
-        Text({ dimColor: true, children: [whyLine(session.state)] }),
-        Select({
-          key: 'route-mode',
-          label: 'Route: ',
-          options: MENU_OPTIONS,
-          autoFocus: true,
-          onSelect: async (value: string) => {
-            const text = await route($, value, settings).catch((error: unknown) => `effort-router: ${String(error)}`)
-            $.ui.log(text, { to: 'debug' })
-            await $.ui.close({ id: MENU_PANE }).catch(() => undefined)
-          },
-        }),
-      ],
-    })
+    return Box({ flexDirection: 'row', columnGap: 1, children: [theirs, mine] })
   })
 
   // The consent band above the prompt.
