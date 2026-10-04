@@ -663,42 +663,67 @@ export function parseRoute(args: string): RouteCommand {
 
 export type Mode = 'auto' | 'picker'
 
-export type Phase = 'undecided' | 'proposed' | 'provisional' | 'locked'
+export type Phase = 'undecided' | 'locked'
 
 export type Proposal = { level: Level; reason: string }
+
+/** A question open about a verdict: use the router's level, or keep the picker's (unknown when no request has gone out yet). */
+export type Asking = Proposal & { picker?: Level }
+
+const insteadOf = (asking: Asking): string => (asking.picker ? ` instead of ${asking.picker}` : '')
 
 /**
  * Everything the router remembers about one session.
  *
- * `auto` + `undecided` is deciding; `auto` + `provisional` the router's level
- * in use but not yet kept (consent `apply`); `auto` + `proposed` a suggestion
- * waiting for an accept (consent `confirm`); `auto` + `locked` locked;
- * `picker` off. While locked, `proposal` may hold a switch offered by a manual
- * run.
+ * `auto` + `undecided` is deciding: requests go out at the picker's level.
+ * `auto` + `locked` is decided: every main-thread request runs at `level` and
+ * no more reads happen. `picker` is off.
+ *
+ * With consent `ask` a read's level is not applied: it waits in `pending` for
+ * the next main-thread request, which is the only place the picker's level can
+ * be seen. There it is compared: the same level locks, a different one asks
+ * (`asking` while the question is open).
  */
 export type RouterState = {
   mode: Mode
   phase: Phase
-  /** The level in use: locked, or provisional. */
+  /** The locked level. */
   level?: Level
+  /** Why it is locked, in words for status (`router: bug fix in existing code`). */
   reason?: string
-  /** A pending suggestion (phase `proposed`), or a switch offered while locked. */
-  proposal?: Proposal
-  /** A manual run's hint, kept for re-reads while its suggestion is pending. */
+  /** A read's verdict waiting for the next main-thread request (consent `ask`). Not persisted. */
+  pending?: Proposal
+  /** The question open about a verdict. Not persisted. */
+  asking?: Asking
+  /** A manual run's hint, kept for later automatic reads until a level is locked. */
   hint?: string
   /** Human prompts counted against the decision budget since the router was (re)started. */
   prompts: number
   /** The budget ran out with nothing locked: no automatic reads. */
   gaveUp?: boolean
-  /** Why the router is off, when it turned itself off. */
+  /** Why the router is off, when it turned itself off (cleared when the person turns it off). */
   offReason?: string
 }
 
 export const freshState = (): RouterState => ({ mode: 'auto', phase: 'undecided', prompts: 0 })
 
-/** The level `turn.step` applies, or undefined to leave the request alone. */
+/** `ask`: a level that differs from the picker's is asked about. `auto`: the router's level is locked without a question. */
+export type Consent = 'ask' | 'auto'
+
+/**
+ * A consent value. 0.8 has two: `ask` and `auto`. The older names map onto
+ * them: `apply` and `none` (applied without a question) → `auto`; `confirm`
+ * and `band` (waited for the person) → `ask`. Anything else is undefined.
+ */
+export function consentOf(value: unknown): Consent | undefined {
+  if (value === 'ask' || value === 'confirm' || value === 'band') return 'ask'
+  if (value === 'auto' || value === 'apply' || value === 'none') return 'auto'
+  return undefined
+}
+
+/** The level `turn.step` applies to the main thread, or undefined to leave the request alone. */
 export function appliedLevel(state: RouterState): Level | undefined {
-  return state.mode === 'auto' && (state.phase === 'locked' || state.phase === 'provisional') ? state.level : undefined
+  return state.mode === 'auto' && state.phase === 'locked' ? state.level : undefined
 }
 
 /** Whether an automatic read should follow this human prompt. */
@@ -707,70 +732,86 @@ export function wantsRead(state: RouterState, decideWithin: number): boolean {
 }
 
 /**
- * After an automatic read: once the budget is spent with nothing locked, stop
- * reading. A provisional level becomes locked; a pending suggestion stays
- * pending; otherwise the router turns off (or, when the organisation keeps it
- * on, idles as deciding).
+ * After an automatic read (and after a question is settled): once the budget
+ * is spent with nothing locked, stop reading. A verdict still waiting for its
+ * question keeps the router on until it is settled; otherwise the router turns
+ * off (or, when the organisation keeps it on, idles as deciding).
  */
 export function afterBudget(state: RouterState, decideWithin: number, allowOff: boolean): RouterState {
   if (state.mode !== 'auto' || state.phase === 'locked' || state.prompts < decideWithin) return state
-  if (state.phase === 'provisional' && state.level) return lockedAt(state, { level: state.level, reason: state.reason ?? 'classifier' })
-  if (state.phase === 'proposed') return { ...state, gaveUp: true }
+  if (state.pending || state.asking) return state.gaveUp ? state : { ...state, gaveUp: true }
   const offReason = `no clear task after ${decideWithin} prompts — /route to ask again`
+  if (state.gaveUp && state.offReason === offReason) return state
   return allowOff
-    ? { ...state, mode: 'picker', gaveUp: true, offReason, proposal: undefined, hint: undefined }
-    : { ...state, gaveUp: true, offReason, proposal: undefined, hint: undefined }
+    ? { ...state, mode: 'picker', gaveUp: true, offReason, hint: undefined }
+    : { ...state, gaveUp: true, offReason, hint: undefined }
+}
+
+/** A read's verdict while deciding (consent `ask`): kept for the next request to compare, or cleared when undecided. Locked or off: unchanged. */
+export function withVerdict(state: RouterState, proposal: Proposal | undefined): RouterState {
+  if (state.mode !== 'auto' || state.phase === 'locked') return state
+  return proposal ? { ...state, pending: proposal } : state.pending ? { ...state, pending: undefined } : state
 }
 
 /**
- * What a read's answer does to the state. While locked: offer a switch (or
- * clear one). With `apply` (consent `apply`): a level is put in use at once
- * (provisional), and an undecided re-read leaves a provisional level alone.
- * Otherwise: suggest, or withdraw a pending suggestion.
+ * What a main-thread request does with a waiting verdict, given the picker's
+ * level (`e.effort` as the request came in): nothing to do; the same level
+ * (lock it, no question); or a different level (ask). A picker level that is
+ * not a named level (a number, or a model without effort) leaves the verdict
+ * waiting.
  */
-export function withReading(state: RouterState, proposal: Proposal | undefined, apply = false): RouterState {
-  if (state.phase === 'locked') {
-    return proposal && proposal.level !== state.level ? { ...state, proposal } : { ...state, proposal: undefined }
-  }
-  if (apply) {
-    if (!proposal) return state
-    return { ...state, mode: 'auto', phase: 'provisional', level: proposal.level, reason: proposal.reason, proposal: undefined, offReason: undefined }
-  }
-  if (proposal) return { ...state, mode: 'auto', phase: 'proposed', proposal, gaveUp: state.gaveUp, offReason: undefined }
-  // nothing clear: a pending suggestion is withdrawn; off stays off
-  return state.phase === 'proposed' ? { ...state, phase: 'undecided', proposal: undefined, hint: undefined } : state
+export type StepDecision = { kind: 'none' } | { kind: 'agree'; proposal: Proposal } | { kind: 'ask'; asking: Asking & { picker: Level } }
+
+export function stepDecision(state: RouterState, picker: unknown): StepDecision {
+  const pending = state.pending
+  if (state.mode !== 'auto' || state.phase === 'locked' || !pending || !isLevel(picker)) return { kind: 'none' }
+  return pending.level === picker ? { kind: 'agree', proposal: pending } : { kind: 'ask', asking: { ...pending, picker } }
 }
 
-/** Locks a level: the router's (or the person's accept of it). */
-export const lockedAt = (state: RouterState, proposal: Proposal): RouterState => ({
+/** Locks a level, for the stated reason: decided, so reading stops. */
+export const lockedAt = (state: RouterState, level: Level, reason: string): RouterState => ({
   ...state,
   mode: 'auto',
   phase: 'locked',
-  level: proposal.level,
-  reason: proposal.reason,
-  proposal: undefined,
+  level,
+  reason,
+  pending: undefined,
+  asking: undefined,
   hint: undefined,
   offReason: undefined,
 })
 
+/** The reasons a lock is shown with. */
+export const lockReason = {
+  /** The router's level, chosen (Use) or applied (consent auto). */
+  router: (proposal: Proposal): string => `router: ${proposal.reason}`,
+  /** The router agreed with the picker. */
+  agreed: (proposal: Proposal): string => `router: ${proposal.reason}, same as the picker`,
+  /** The person kept the picker's level over the router's. */
+  kept: (asking: Asking & { picker: Level }): string => `you kept ${asking.picker} over the router's ${asking.level} (${asking.reason})`,
+}
+
+/**
+ * The question asked when the router's level differs from the current one:
+ * one line with the reason, `Use <level>` and `Keep <current>` (or `Not now`
+ * when the current level is unknown).
+ */
+export function effortQuestion(proposal: Proposal, current: Level | undefined): { text: string; options: [string, string]; header: string } {
+  const reason = proposal.reason.charAt(0).toUpperCase() + proposal.reason.slice(1)
+  return current
+    ? { text: `Effort router: ${reason}. Use ${proposal.level} instead of ${current}?`, options: [`Use ${proposal.level}`, `Keep ${current}`], header: 'Effort' }
+    : { text: `Effort router: ${reason}. Use ${proposal.level}?`, options: [`Use ${proposal.level}`, 'Not now'], header: 'Effort' }
+}
+
 /** Off: the picker is in charge. */
 export const turnedOff = (state: RouterState): RouterState => ({
-  ...state, mode: 'picker', phase: 'undecided', level: undefined, reason: undefined, proposal: undefined, hint: undefined, offReason: undefined,
+  ...state, mode: 'picker', phase: 'undecided', level: undefined, reason: undefined, pending: undefined, asking: undefined, hint: undefined, offReason: undefined,
 })
 
-/** On: deciding again over the whole transcript, with a fresh prompt budget. */
+/** On: deciding again over the whole conversation, with a fresh prompt budget. */
 export const turnedOn = (state: RouterState): RouterState => ({
-  ...state, mode: 'auto', phase: 'undecided', level: undefined, reason: undefined, proposal: undefined, hint: undefined, prompts: 0, gaveUp: false, offReason: undefined,
+  ...state, mode: 'auto', phase: 'undecided', level: undefined, reason: undefined, pending: undefined, asking: undefined, hint: undefined, prompts: 0, gaveUp: false, offReason: undefined,
 })
-
-/** Why the level is what it is. */
-export function reasonText(state: RouterState): string {
-  if (state.mode === 'picker') return state.offReason ? `router off: ${state.offReason}` : 'router off: the effort picker decides'
-  if (state.phase === 'locked') return `router: ${state.reason ?? 'classifier'}`
-  if (state.phase === 'provisional') return `router: ${state.reason ?? 'classifier'} (in use, not yet kept)`
-  if (state.proposal) return `router suggests ${state.proposal.level}: ${state.proposal.reason}`
-  return "deciding: the picker's effort applies until the task is clear"
-}
 
 /** What the router knows about its own reads, for `/route status`. */
 export type ReadDiagnostics = {
@@ -798,22 +839,21 @@ export function ago(now: number, at: number): string {
   return `${Math.floor(seconds / 3600)}h ago`
 }
 
-/** What `/route status` prints. */
+/** What `/route status` prints. `inForce` is the level the last main-thread request went out with. */
 export function routeReport(state: RouterState, decideWithin: number, inForce?: string | number, diagnostics?: ReadDiagnostics): string {
   const now = inForce === undefined ? "the picker's level" : String(inForce)
   const lines: string[] = []
   const subagents = diagnostics?.subagents?.routing === 'on' ? '; subagents get their own level from their briefs' : ''
-  if (state.mode === 'picker') {
+  if (state.asking) {
+    lines.push(`${state.asking.level}? Asking whether to use ${state.asking.level}${insteadOf(state.asking)} (${state.asking.reason}); the request waits for the answer.`)
+  } else if (state.mode === 'picker') {
     lines.push(`off${state.offReason ? ` (${state.offReason})` : ''}. Effort is the picker's (now ${now}). /route on turns it back on; /route asks now.`)
   } else if (state.phase === 'locked') {
-    lines.push(`${state.level} 🔒 (router: ${state.reason}). Every request${subagents ? '' : ' and subagent'} runs at ${state.level}${subagents}.`)
-    if (state.proposal) lines.push(`A switch to ${state.proposal.level} is on offer (${state.proposal.reason}).`)
-  } else if (state.phase === 'provisional' && state.level) {
-    lines.push(`${state.level}? The router's level is in use (router: ${state.reason}), not yet kept. Re-reads continue and may change it; Keep in the band locks it, Revert hands back to the picker.`)
-  } else if (state.phase === 'proposed' && state.proposal) {
-    lines.push(`${state.proposal.level}? The router suggests ${state.proposal.level} (${state.proposal.reason}); accept it in the band (press the footer to open it). Until then ${now} applies.`)
+    lines.push(`${state.level} 🔒 (${state.reason ?? 'router'}). Every request${subagents ? '' : ' and subagent'} runs at ${state.level}${subagents}.`)
+  } else if (state.pending) {
+    lines.push(`deciding. The last read suggests ${state.pending.level} (${state.pending.reason}); the next request compares it with the picker's level and asks if they differ. Until then ${now} applies.`)
   } else {
-    lines.push(`deciding. The router suggests a level once the task is clear; until then ${now} applies.`)
+    lines.push(`deciding. The router reads each prompt until the task is clear; until then ${now} (the picker's level) applies.`)
   }
   if (state.mode === 'auto' && state.phase !== 'locked') {
     lines.push(state.gaveUp
@@ -844,10 +884,6 @@ export function routeReport(state: RouterState, decideWithin: number, inForce?: 
   return lines.join('\n')
 }
 
-/** The band's headline. */
-export const proposalText = (proposal: Proposal): string =>
-  `Route this session at ${proposal.level.toUpperCase()} — ${proposal.reason}`
-
 /** A colour per level for the band (Ink theme keys / named colours). */
 export const LEVEL_COLOR: Record<Level, string> = {
   low: 'green',
@@ -864,7 +900,7 @@ export type SavedState = Pick<RouterState, 'mode' | 'phase' | 'level' | 'reason'
 
 export const MAX_SAVED_SESSIONS = 100
 
-/** Adds/replaces one session's saved state, keeping the newest `MAX_SAVED_SESSIONS`. */
+/** Adds/replaces one session's saved state, keeping the newest `MAX_SAVED_SESSIONS`. A waiting verdict or open question is not kept. */
 export function withSaved(
   all: Record<string, SavedState> | undefined,
   sessionId: string,
@@ -873,7 +909,7 @@ export function withSaved(
 ): Record<string, SavedState> {
   const next: Record<string, SavedState> = { ...(all ?? {}) }
   delete next[sessionId]
-  const saved: SavedState = { mode: state.mode, phase: state.phase === 'proposed' ? 'undecided' : state.phase, savedAt: now }
+  const saved: SavedState = { mode: state.mode, phase: state.phase === 'locked' ? 'locked' : 'undecided', savedAt: now }
   if (state.level !== undefined) saved.level = state.level
   if (state.reason !== undefined) saved.reason = state.reason
   if (state.offReason !== undefined) saved.offReason = state.offReason
@@ -883,7 +919,11 @@ export function withSaved(
   return next
 }
 
-/** Rebuilds state from a saved entry; anything malformed starts fresh. A 0.1–0.3 `pinned` entry comes back locked. */
+/**
+ * Rebuilds state from a saved entry; anything malformed starts fresh. A
+ * 0.1–0.3 `pinned` entry comes back locked; a 0.6–0.7 provisional or proposed
+ * one comes back deciding.
+ */
 export function restored(saved: unknown): RouterState {
   const state = freshState()
   if (typeof saved !== 'object' || saved === null) return state
@@ -894,87 +934,56 @@ export function restored(saved: unknown): RouterState {
   if (locked && isLevel(record.level)) {
     return { ...state, phase: 'locked', level: record.level, reason: typeof record.reason === 'string' ? record.reason : 'restored' }
   }
-  if (mode === 'auto' && record.phase === 'provisional' && isLevel(record.level)) {
-    return { ...state, phase: 'provisional', level: record.level, reason: typeof record.reason === 'string' ? record.reason : 'restored' }
-  }
   return state
 }
 
 /**
  * The compact state the footer shows beside the native effort picker (which
- * shows the level in use): `deciding`, `high?`, `high 🔒` (with `→ low?` when
- * a switch is on offer) or `off`. `dim` where nothing is suggested or locked.
+ * shows the level in use): `deciding`, `high?` while the question is open,
+ * `high 🔒` or `off`. `dim` where nothing is locked or asked.
  */
 export function footerLabel(state: RouterState): { text: string; color?: string; dim: boolean } {
+  if (state.asking) return { text: `${state.asking.level}?`, color: LEVEL_COLOR[state.asking.level], dim: false }
   if (state.mode === 'picker') return { text: 'off', dim: true }
-  if (state.phase === 'locked' && state.level) {
-    const offer = state.proposal ? ` → ${state.proposal.level}?` : ''
-    return { text: `${state.level} 🔒${offer}`, color: LEVEL_COLOR[state.level], dim: false }
-  }
-  if (state.phase === 'provisional' && state.level) return { text: `${state.level}?`, color: LEVEL_COLOR[state.level], dim: false }
-  if (state.phase === 'proposed' && state.proposal) return { text: `${state.proposal.level}?`, color: LEVEL_COLOR[state.proposal.level], dim: false }
+  if (state.phase === 'locked' && state.level) return { text: `${state.level} 🔒`, color: LEVEL_COLOR[state.level], dim: false }
   return { text: 'deciding', dim: true }
 }
 
 export type BandAction = {
-  /**
-   * What the action does: `accept` the offer, `keep` the lock (declining a
-   * switch), `lock` the provisional level, `revert` to the picker (off),
-   * `suggest` (bare `/route`), `off` or `on`.
-   */
-  value: 'accept' | 'keep' | 'lock' | 'revert' | 'suggest' | 'off' | 'on'
+  /** What the action does: `suggest` (bare `/route`), `off` or `on`; `revert` (off, from the auto notice). */
+  value: 'suggest' | 'off' | 'on' | 'revert'
   label: string
 }
 
+/** The band consent `auto` opens by itself once, after locking a level other than the picker's. */
+export const noticeHeadline = (proposal: Proposal): string => `Using ${proposal.level} — ${proposal.reason}`
+
+/** Its one action, `Revert to picker` (router off), left out when the organisation keeps the router on. */
+export const noticeActions = (allowOff = true): BandAction[] => (allowOff ? [{ value: 'revert', label: 'Revert to picker' }] : [])
+
 /**
- * The router's band above the prompt, which the footer button opens and a new
- * suggestion opens by itself. One line: `Effort router: <footer state> — <why>`.
+ * The router's band above the prompt, which the footer button opens. One
+ * line: `Effort router: <footer state> — <why>`.
  */
 export function bandHeadline(state: RouterState): string {
-  if (state.mode === 'auto' && state.phase === 'provisional' && state.level) return `Using ${state.level} — ${state.reason ?? 'classifier'}`
   const label = footerLabel(state).text
   let why: string
-  if (state.mode === 'picker') why = state.offReason ?? 'the effort picker decides'
-  else if (state.phase === 'locked' && state.proposal) why = `switch to ${state.proposal.level}: ${state.proposal.reason}`
-  else if (state.phase === 'locked') why = reasonText(state)
-  else if (state.proposal) why = state.proposal.reason
+  if (state.asking) why = `asking: use ${state.asking.level}${insteadOf(state.asking)}?`
+  else if (state.mode === 'picker') why = state.offReason ?? 'the effort picker decides'
+  else if (state.phase === 'locked') why = state.reason ?? 'router'
   else if (state.gaveUp) why = 'stopped reading; Suggest now asks again'
   else why = "the picker's effort applies until the task is clear"
   return `Effort router: ${label} — ${why}`
 }
 
 /**
- * The band's buttons for a state (then `Close`, which the caller adds):
- * a suggestion → `Accept <level>`, `Turn off`; a switch offer while locked →
- * `Accept <new>`, `Keep <old>`, `Turn off`; deciding or locked → `Suggest now`,
- * `Turn off`; off → `Turn on`. A provisional level → `Keep <level>`,
- * `Revert to picker` (which is turning off), plus `Suggest now` when opened
- * from the footer. `allowOff: false` (an organisation's setting) leaves out
- * Turn off and Revert.
+ * The band's buttons for a state (then `Close`, which the caller adds): off →
+ * `Turn on`; otherwise `Suggest now`, `Turn off`. `allowOff: false` (an
+ * organisation's setting) leaves out Turn off.
  */
-export function bandActions(state: RouterState, allowOff = true, fromFooter = false): BandAction[] {
+export function bandActions(state: RouterState, allowOff = true): BandAction[] {
   if (state.mode === 'picker') return [{ value: 'on', label: 'Turn on' }]
-  const actions: BandAction[] = []
-  if (state.phase === 'provisional' && state.level) {
-    actions.push({ value: 'lock', label: `Keep ${state.level}` })
-    if (allowOff) actions.push({ value: 'revert', label: 'Revert to picker' })
-    if (fromFooter) actions.push({ value: 'suggest', label: 'Suggest now' })
-    return actions
-  }
-  if (state.proposal) {
-    actions.push({ value: 'accept', label: `Accept ${state.proposal.level}` })
-    if (state.phase === 'locked' && state.level) actions.push({ value: 'keep', label: `Keep ${state.level}` })
-  } else {
-    actions.push({ value: 'suggest', label: 'Suggest now' })
-  }
-  if (allowOff) actions.push({ value: 'off', label: 'Turn off' })
-  return actions
-}
-
-/** A suggestion's identity, so a band closed on it stays closed until it changes (for a provisional level: until the level changes). */
-export function offerKey(state: RouterState): string | undefined {
-  if (state.mode === 'auto' && state.phase === 'provisional' && state.level) return `provisional:${state.level}`
-  return state.mode === 'auto' && state.proposal ? `${state.phase}:${state.proposal.level}:${state.proposal.reason}` : undefined
+  return allowOff ? [{ value: 'suggest', label: 'Suggest now' }, { value: 'off', label: 'Turn off' }] : [{ value: 'suggest', label: 'Suggest now' }]
 }
 
 // --- settings-borne rules (org / user / project) --------------------------------------

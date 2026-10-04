@@ -3,22 +3,30 @@
 ## Automated
 
 ```
-bun test                            # 79 tests: trimming (incl. the last assistant message kept long and AskUserQuestion
+bun test                            # 74 tests: trimming (incl. the last assistant message kept long and AskUserQuestion
                                     # questions and answers kept), the classifier input cap (first prompt, then human lines
                                     # before assistant text), reply parsing (incl. fenced json), the classifier frame,
-                                    # $defaults layering, settings layers, /route grammar and hints, state: provisional
-                                    # (apply), re-reads, Keep/Revert, budget locking, first sighting, status diagnostics;
+                                    # $defaults layering, settings layers, /route grammar and hints, state: consent names
+                                    # (old values mapped), a verdict waiting for the request, the rule at a request
+                                    # (none / agree / ask), the question text, lock reasons, the budget with a waiting
+                                    # verdict, footer and band per state, the auto notice, old provisional state restored
+                                    # as deciding, first sighting, status diagnostics;
                                     # subagents: the frame and contract, the brief prompt and its head-and-tail cap, reply
                                     # parsing (no undecided), the parent's level, user-off vs router-off, the status list;
                                     # agent definitions: frontmatter, effort values, name over file name, settings agents,
                                     # first definition wins, plugin agents skipped
-claude plugin test .                # 40 tests in the engine's kit, among them: the read finishes before prompt.submit goes on
-                                    # and turn.step index 0 carries the level (main loop and subagent); a re-read changes the
-                                    # provisional level and reopens the band; Keep locks and syncs /effort; Revert restores the
-                                    # picker level and turns off; budget exhaustion locks with a log line; a classifier that
-                                    # hangs fails open at classifyTimeoutMs (mock clock); an existing session with 10 prompts
-                                    # starts off with zero model calls; the classifierMaxChars cap; confirm/ask/none consents;
-                                    # AskUserQuestion read before the tool result returns; the footer Button and band;
+claude plugin test .                # 46 tests in the engine's kit, among them, for the main thread: undecided runs at the
+                                    # picker level with no question; the picker's level locks with no question and reading
+                                    # stops; a different level holds the request on the question, Use locks it and syncs
+                                    # /effort, Keep locks the picker level; the footer reads high? while the request waits;
+                                    # dismissed runs at the picker level and the next read asks again; -p rejects; the
+                                    # question at a later index after answered AskUserQuestion questions; a waiting verdict
+                                    # asked after the budget runs out; /route asks from the command; /route while locked
+                                    # names the picker level; /route with the same level changes nothing; auto locks with
+                                    # no question and opens the band once with Revert (none under org allowOff false, none
+                                    # when it is the picker's level); EFFORT_ROUTER_CONSENT old values; a hanging classifier
+                                    # fails open; an existing session starts off with zero model calls; the input cap; the
+                                    # footer Button and band;
                                     # subagents: agent.spawn reads the brief before the agent starts and its turn.step
                                     # carries that level (others keep the main level); the brief cap; forks and nested forks
                                     # inherit; a throwing, hanging or unusable read falls back to the parent's level, a nested
@@ -27,7 +35,7 @@ claude plugin test .                # 40 tests in the engine's kit, among them: 
                                     # spawn is not kept; a user definition with effort gets no read and its requests are left
                                     # alone; a project definition wins over a user one; a definition without effort is routed;
                                     # a file is matched by its name: (not file name); settings agents; plugin agents routed
-"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 40 under Desktop's engine
+"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 46 under Desktop's engine
 claude plugin validate . --strict
 bun run eval -- --runs 3            # opt-in, real model: 22 session fixtures and 14 subagent briefs, see below
 ```
@@ -87,26 +95,26 @@ grep "effort-router: \|effort locked" r*.log
 
 Expected: r1 `classifier said {"decision":"undecided"}` and `medium -> medium`. r2 `classifier said {"decision":"lock","level":"high",...}` and `effort locked: high 🔒 (router: ...)`; under 0.6.0 its `step index=0` already logs `medium -> high`. r3 (a resumed session) `step index=0 ... medium -> high` with no classifier call.
 
-## Live, interactive terminal (still to run by hand)
+## Live, Desktop (0.8.0, still to run by hand)
 
-Run `claude --plugin-dir D:/code/mods/effort-router --model sonnet --debug-file router.log` in a scratch repo.
+Install the dev build in the Desktop Code tab, set the effort picker to Medium, and start a fresh session in a scratch repo. With a debug log, `grep "effort-router: " <log>` shows each read, each step as `effort <arrived> -> <sent>`, and each question.
 
-1. Footer: before any prompt, the footer next to the native effort picker reads `deciding` (dim). Pressing it opens the band: `Effort router: deciding — ...` with `1: Suggest now  2: Turn off  x: Close`. Press it again: the band closes.
-2. Filler: type `hi`. A short pause (the read), then the turn runs; footer unchanged, no band.
-3. Real task: type "refactor the payment retry logic". After about a second the turn starts, already at high: the band opens with `Using high — ...` and `1: Keep high  2: Revert to picker  x: Close`, the footer reads `high?`, and `grep "step index=0" router.log` shows `-> high` for that turn's first request. Close it: the footer still reads `high?`; pressing the footer reopens it with `Suggest now` too.
-4. Clarify: if Claude asks complex-or-simple, answer "2" (simple). Before that turn runs the band opens again with `Using low — ...` and the footer reads `low?`. `grep "read settled" router.log` shows each read and its time.
-5. Press `1` (Keep) in the empty prompt. The band disappears, the transcript shows `effort locked: low 🔒 (router: ...) · /route status`, the footer reads `low 🔒`, and in the terminal a `/effort low` line appears at turn end. No more `read settled` lines follow.
-6. Subagents: ask for something that launches two subagents, one mechanical ("search the codebase for every use of X") and one open-ended ("then have an agent fix the bug it finds"). `grep "effort-router: subagent " router.log` shows one line per launch with its level and reason (for example `-> low (codebase search)`), and `grep "agent=" router.log` shows each subagent's steps at its own level from `index=0`, while the main thread stays at the locked level. `/route status` lists both under `Routed subagents this session`. Then `/route off` and launch another: no `subagent` line, and its steps go out at the picker's level.
+1. Footer: before any prompt the footer beside the effort picker reads `deciding` (dim). Pressing it opens the band: `Effort router: deciding — ...` with `1: Suggest now  2: Turn off  x: Close`. Press it again: the band closes. No band ever opens by itself (consent `ask`).
+2. Undecided: type `hi`. A short pause (the read), then the turn runs at Medium. No question, footer unchanged.
+3. Same level: in a fresh session, type "add a dark mode toggle to the settings page" (Medium work). No question; the turn runs; the footer reads `medium 🔒`; the transcript shows `effort locked: medium 🔒 (router: ..., same as the picker)`. The next prompt shows no `read settled` line.
+4. Different level, Use: in a fresh session, type "the checkout total is wrong when a coupon expires mid-session, fix it". The turn waits on Claude's question card: `Effort router: Bug fix in existing code. Use high instead of medium?` with `Use high` and `Keep medium`. While it is open the footer reads `high?` and nothing streams. Wait more than 10 seconds before answering (the hook time limit): choose `Use high`. The turn then runs; the step logs `effort medium -> high`; the footer reads `high 🔒`. The Desktop picker still reads Medium (the app owns it).
+5. Different level, Keep: repeat 4 in a fresh session and choose `Keep medium`. The turn runs at Medium, the footer reads `medium 🔒`, and `/route status` starts `medium 🔒 (you kept medium over the router's high (...))`.
+6. Dismiss: repeat 4 and dismiss the card (Esc). The turn runs at Medium, the footer reads `deciding`, and the next task prompt asks again.
+7. Mid-turn questions: in a fresh session, type `pull latest code`, then "implement for me a new finance solution pulling from multiple accountancy platforms". If that read is undecided and Claude asks AskUserQuestion questions, answer them: the read runs before the answers reach Claude, and the card appears before the turn's next request (`grep "asked high over the picker's medium"`).
+8. `/route` while decided: after 4 (locked at high, picker Medium), run `/route keep it quick`. The card names the picker: `Use low instead of medium?`, never "instead of high". `Keep medium` leaves `medium 🔒`.
+9. Subagents: ask for something that launches two subagents, one mechanical ("search the codebase for every use of X") and one open-ended ("then have an agent fix the bug it finds"). `grep "effort-router: subagent " router.log` shows one line per launch with its level and reason (for example `-> low (codebase search)`), and `grep "agent=" router.log` shows each subagent's steps at its own level from `index=0`, while the main thread stays at the locked level. `/route status` lists both under `Routed subagents this session`. Then `/route off` and launch another: no `subagent` line, and its steps go out at the picker's level.
    Definitions (0.7.1): with `~/.claude/agents/effort-probe-low.md` carrying `effort: low` and the router on, launch `effort-probe-low` with an open-ended brief. The debug log shows `-> low set by its definition, left alone` and no `subagent classifier said` line, the agent's steps log `low -> low` (the engine's level, untouched), and `/route status` lists it as `low (set by its definition)`. Verified before the fix (0.7.0 live, 2026-10-04): the engine honours a file definition's `effort:` (ran at low with the session at medium and the router off), and 0.7.0 would have overridden it.
-7. Manual switch: `/route this is now a security review`. The band opens with `Effort router: low 🔒 → max? — switch to max: ...` and `1: Accept max  2: Keep low  3: Turn off  x: Close`; the footer reads `low 🔒 → max?`. Press `2` with the band focused (ctrl+x tab), or accept.
-8. Revert: in a fresh session, give a task, then press `2: Revert to picker`. The footer reads `off` (dim) and the next steps log `<picker> -> <picker>`. Press the footer, then `Turn on`: back to `deciding`.
-9. Budget: in a fresh session, give a task and keep chatting without pressing Keep. After the sixth prompt the transcript shows `effort locked: high 🔒 (kept after 6 prompts; router: ...)`. In another fresh session send six filler prompts: the footer reads `off` and `/route status` says `no clear task after 6 prompts — /route to ask again`.
-10. Existing session: `claude --resume` a long chat from before the router was installed (6 or more prompts). The footer reads `off` (dim), no band appears, and `/route status` starts `off (existing session — /route to ask)`. `/route` still reads.
-11. `consent: ask`: set it in `/config`, start fresh, type a bug-fix request. A question dialog with `Accept high / Turn off` appears before the turn runs. `consent: confirm`: the band offers `Accept high / Turn off` and the turn runs at the picker's level until you accept.
-12. Rules: `/route rules init project`, add a line after `$defaults`, run `/route rules`. It lists `spliced: <path>` and shows your line.
-13. Desktop: repeat 1, 3, 5 and 8 in the Desktop Code tab. The Desktop effort picker never moves (the app owns it); the footer is the source of truth.
-14. If the footer button does not draw or press on some surface, set `footerControl` to `label` in `/config` and use `/route`.
-15. Questions: in a fresh session, type `pull latest code`, then "implement for me a new finance solution pulling from multiple accountancy platforms". That turn starts at high. If Claude asks AskUserQuestion questions, answer them: `grep "read settled .* (after answered questions)" router.log` shows a read before the answers reach Claude, and `/route status` shows `Last verdict (after answered questions, ...)`, the consent mode, the read time and how much transcript was sent.
+10. Consent `auto`: set it in `/config` (the field is a picker: ask / auto). In a fresh session, type the bug-fix prompt from 4. No card; the band opens by itself once: `Using high — <reason>` with `1: Revert to picker  x: Close`. `Revert to picker` turns the router off (footer `off`), and the next step logs `medium -> medium`. A task at Medium locks with no band.
+11. Old consent values: a `consent` saved by 0.7 (`apply`) reads as unset in `/config`, so `ask`. `EFFORT_ROUTER_CONSENT=apply` in the environment still means `auto` (`/route status` says `Consent: auto.`).
+12. Existing session: resume a long chat from before the router was installed (6 or more prompts). The footer reads `off`, no card appears, and `/route status` starts `off (existing session — /route to ask)`. Subagents are still routed there.
+13. Budget: in a fresh session send six filler prompts. The footer reads `off`, and `/route status` says `no clear task after 6 prompts — /route to ask again`.
+14. Rules: `/route rules init project`, add a line after `$defaults`, run `/route rules`. It lists `spliced: <path>` and shows your line.
+15. Terminal: repeat 4 in the terminal. After `Use high`, a `/effort high` line appears when the turn ends and the terminal picker label follows.
 
 ## Org layer
 

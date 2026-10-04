@@ -1,7 +1,7 @@
 {
   "name": "effort-router",
-  "version": "0.7.1",
-  "description": "Reads the conversation before each prompt runs until the task is clear (a Haiku read against Anthropic's 'Spending your effort' guidance and your own rules) and puts a reasoning-effort level in use for every request at once; Keep locks it, Revert hands back to the picker. /route runs it on demand, optionally with a hint. Each subagent gets its own level from a read of its brief at spawn. The footer shows the state (deciding, high?, high 🔒, off) and is a button that opens the router's band above the prompt.",
+  "version": "0.8.0",
+  "description": "Reads the conversation before each prompt runs until the task is clear (a Haiku read against Anthropic's 'Spending your effort' guidance and your own rules). If its level matches your effort picker the turn just runs and that level is kept; if it differs, the turn waits on one question (Use high / Keep medium) and your answer is kept. /route asks on demand, optionally with a hint. Each subagent gets its own level from a read of its brief at spawn. The footer shows the state (deciding, high? while asking, high 🔒, off) and is a button that opens the router's band above the prompt.",
   "author": {
     "name": "Tommy Long"
   },
@@ -11,15 +11,13 @@
   "userConfig": {
     "consent": {
       "type": "string",
-      "title": "Consent",
-      "description": "\"apply\" (default): the router's level is used at once and shown above the prompt (Keep locks it, Revert hands back to the picker); re-reads may change it until you keep it. \"confirm\": nothing changes until you Accept in the band. \"ask\": a blocking question when a new level is suggested. \"none\": lock without asking. (\"band\", the old name for confirm, still works.)",
+      "title": "When the router wants a different level",
+      "description": "When the router wants a different level from your effort picker: \"ask\" (default) holds the turn and asks you (Use the router's level, or Keep yours); \"auto\" uses the router's level without asking and shows it above the prompt with Revert to picker. Either way the choice is kept for the session.",
       "required": false,
-      "default": "apply",
+      "default": "ask",
       "options": [
-        "apply",
-        "confirm",
         "ask",
-        "none"
+        "auto"
       ]
     },
     "classifyTimeoutMs": {

@@ -2,7 +2,9 @@ import type { AgentSpawnInput, EngineInterface, On, PluginOptions } from 'claude
 
 import {
   type AgentDefinition,
+  type Asking,
   type ComposedRules,
+  type Consent,
   type ReadDiagnostics,
   type TranscriptMessage,
   QUESTION_TOOL,
@@ -19,13 +21,17 @@ import {
   classifierPrompt,
   classifierSystem,
   composeRules,
+  consentOf,
   critiquePrompt,
   definitionFor,
   footerLabel,
   bandActions,
   bandHeadline,
-  offerKey,
+  noticeActions,
+  noticeHeadline,
+  effortQuestion,
   isLevel,
+  lockReason,
   lockedAt,
   parseDecision,
   parseRoute,
@@ -34,13 +40,12 @@ import {
   routesSubagents,
   subagentPrompt,
   subagentSystem,
-  proposalText,
-  reasonText,
   restored,
   routeReport,
   ruleLayers,
   settingsAgentDefinitions,
   settingsRulesOf,
+  stepDecision,
   renderTranscript,
   firstSighting,
   humanPromptCount,
@@ -48,16 +53,23 @@ import {
   turnedOff,
   turnedOn,
   wantsRead,
-  withReading,
+  withVerdict,
   withQuestionAnswer,
   withSaved,
 } from './policy'
 
 /**
  * effort-router: reads the conversation after each human prompt until the
- * task is clear and, before the turn runs, puts a level in use (consent
- * `apply`: provisional until kept) or suggests one (`confirm`, `ask`) or locks
- * it (`none`). `/route` runs it on demand, with an optional hint.
+ * task is clear. With consent `ask` (the default) the verdict waits for the
+ * next main-thread request, where the picker's level is known: undecided or
+ * the same level, the request goes ahead (the same level locks); a different
+ * level holds the request on a question (Use <level> / Keep <picker>), and
+ * either answer locks. With `auto` the router's level is locked at once.
+ * `/route` reads on demand, with an optional hint, and asks the same way.
+ *
+ * The question is `$.ui.ask` (the engine's own AskUserQuestion card) because
+ * a `turn.step` hook waiting on anything else is abandoned after about 10 s;
+ * a `$` call in flight does not count against the hook's time.
  *
  * Subagents are routed apart: each spawn waits for one read of its own brief
  * and its requests carry that level (forks, and failed reads, take the
@@ -65,14 +77,6 @@ import {
  *
  * Fail open everywhere: any error leaves the request at the picker's effort.
  */
-
-type Consent = 'apply' | 'confirm' | 'ask' | 'none'
-
-/** A consent value; `band`, the 0.5 name for confirm-first, maps to `confirm`. */
-function consentOf(value: unknown): Consent | undefined {
-  if (value === 'apply' || value === 'confirm' || value === 'ask' || value === 'none') return value
-  return value === 'band' ? 'confirm' : undefined
-}
 
 type Settings = {
   consent: Consent
@@ -101,10 +105,15 @@ type Session = {
   lastSent?: string | number
   /** An /effort sync to run when the session is next idle. */
   pendingSync?: Level
+  /**
+   * The picker's level: `e.effort` as the last main-thread request arrived in
+   * this hook, before the router's own rewrite (the engine's level for it).
+   */
+  picker?: string | number
   /** The band was opened from the footer. */
   bandOpen: boolean
-  /** The suggestion the band was last closed on: it stays closed until the suggestion changes. */
-  closedOffer?: string
+  /** Consent `auto` locked a level other than the picker's: the band shows it once, with Revert. */
+  notice?: Proposal
   /** Classifier calls this session, for `/route status`. */
   calls: number
   verdict?: ReadDiagnostics['verdict']
@@ -154,7 +163,7 @@ const FALLBACK_RULES =
 const HUMAN_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
 
 function settingsOf(options: PluginOptions): Settings {
-  const consent = consentOf(options.consent) ?? 'apply'
+  const consent = consentOf(options.consent) ?? 'ask'
   const num = (value: unknown, fallback: number): number => {
     const n = typeof value === 'number' ? value : Number(value)
     return Number.isFinite(n) && n >= 1 ? Math.floor(n) : fallback
@@ -220,16 +229,72 @@ async function commit($: EngineInterface, id: string, session: Session, state: R
   await persist($, id, state)
 }
 
-/** Locks the suggested level, syncs the picker, says so in the transcript. */
-async function accept($: EngineInterface, id: string, session: Session, settings: Settings, proposal: Proposal): Promise<void> {
-  await commit($, id, session, lockedAt(session.state, proposal))
-  if (settings.syncPicker) session.pendingSync = proposal.level
+/**
+ * Locks a level (decided: reading stops) and says so in the transcript. When
+ * the level differs from the picker's, the terminal picker is synced at the
+ * next idle moment.
+ */
+async function lock($: EngineInterface, id: string, session: Session, settings: Settings, level: Level, reason: string): Promise<void> {
+  await commit($, id, session, lockedAt(session.state, level, reason))
+  if (settings.syncPicker && session.picker !== level) session.pendingSync = level
   try {
-    $.ui.log(`effort locked: ${proposal.level} 🔒 (${reasonText(session.state)}) · /route status`)
+    $.ui.log(`effort locked: ${level} 🔒 (${reason}) · /route status`)
   } catch {
     // headless
   }
-  $.ui.log(`effort-router: lock ${proposal.level} (${proposal.reason})`, { to: 'debug' })
+  $.ui.log(`effort-router: lock ${level} (${reason})`, { to: 'debug' })
+}
+
+/**
+ * Consent `auto`: locks the router's level without a question. When it is not
+ * the picker's level, the band opens by itself once (`Using high — <reason>`,
+ * with Revert to picker).
+ */
+async function lockAuto($: EngineInterface, id: string, session: Session, settings: Settings, proposal: Proposal): Promise<void> {
+  await lock($, id, session, settings, proposal.level, lockReason.router(proposal))
+  if (proposal.level !== session.picker) {
+    session.notice = proposal
+    show($)
+  }
+}
+
+/**
+ * Asks whether to use the router's level instead of the picker's, in the
+ * engine's own question card (`$.ui.ask`), and locks the answer: `Use` the
+ * router's level or `Keep` the picker's (locked at the picker's level). With
+ * no picker level known, the second option is `Not now`. Dismissed, or no one
+ * to ask (`-p`): nothing is locked. The footer reads `<level>?` while it is
+ * open. Returns what was chosen.
+ */
+async function askAndLock(
+  $: EngineInterface,
+  id: string,
+  session: Session,
+  settings: Settings,
+  proposal: Proposal,
+  picker: Level | undefined,
+): Promise<'use' | 'keep' | 'none'> {
+  const question = effortQuestion(proposal, picker)
+  const asking: Asking = picker ? { ...proposal, picker } : { ...proposal }
+  session.state = { ...session.state, pending: undefined, asking }
+  show($)
+  let answer: string | undefined
+  try {
+    answer = await $.ui.ask(question.text, { options: question.options, header: question.header })
+  } catch (error) {
+    $.ui.log(`effort-router: question not answered (${String(error)}); the picker's level applies`, { to: 'debug' })
+  }
+  session.state = { ...session.state, asking: undefined }
+  if (answer === question.options[0]) {
+    await lock($, id, session, settings, proposal.level, lockReason.router(proposal))
+    return 'use'
+  }
+  if (picker && answer === question.options[1]) {
+    await lock($, id, session, settings, picker, lockReason.kept({ ...proposal, picker }))
+    return 'keep'
+  }
+  await commit($, id, session, session.state)
+  return 'none'
 }
 
 /** Turns the router off and puts the picker back where it was. */
@@ -385,42 +450,33 @@ async function timed<T>($: EngineInterface, ms: number, work: Promise<T>): Promi
 }
 
 /**
- * Applies a read's answer, then consent. `apply` puts a level in use at once
- * (provisional) and shows the band when the level changes; `none` locks a new
- * suggestion; `ask` asks when the suggested level is new; `confirm` shows the
- * band and waits for Accept.
+ * A read's verdict, by consent. `auto`: the router's level is locked at once.
+ * `ask`: it waits in `pending` for the next main-thread request, the only
+ * place the picker's level is known (decideAtStep); undecided clears it.
  */
-async function settle($: EngineInterface, id: string, session: Session, settings: Settings, consent: Consent, proposal: Proposal | undefined): Promise<void> {
-  const before = session.state.phase === 'provisional' ? session.state.level : session.state.proposal?.level
-  const next = withReading(session.state, proposal, consent === 'apply')
-  await commit($, id, session, next)
-  if (next.phase === 'provisional') {
-    if (next.level !== before) $.ui.log(`effort-router: using ${next.level} (provisional; ${next.reason})`, { to: 'debug' })
+async function afterRead($: EngineInterface, id: string, session: Session, settings: Settings, consent: Consent, proposal: Proposal | undefined): Promise<void> {
+  if (session.state.mode !== 'auto' || session.state.phase === 'locked') return
+  if (consent === 'auto' && proposal) {
+    await lockAuto($, id, session, settings, proposal)
     return
   }
-  const offer = next.proposal
-  if (!offer || next.phase === 'locked') return
-  if (consent === 'none') {
-    await accept($, id, session, settings, offer)
-    return
-  }
-  if (consent === 'ask' && offer.level !== before) {
-    const labels = allowOff ? [`Accept ${offer.level}`, 'Turn off'] : [`Accept ${offer.level}`, 'Later']
-    let answer: string | undefined
-    try {
-      answer = await $.ui.ask(`${proposalText(offer)}?`, { options: labels, header: 'Effort' })
-    } catch {
-      answer = undefined // dismissed, or no one to ask: the suggestion stays pending
-    }
-    if (answer === labels[0]) await accept($, id, session, settings, offer)
-    else if (answer === 'Turn off') await turnOff($, id, session, settings)
-  }
+  const next = withVerdict(session.state, proposal)
+  if (next !== session.state) await commit($, id, session, next)
+}
+
+/** Once the budget is spent with nothing locked: stop reading, and turn off (or idle when the organisation keeps the router on). */
+async function spendBudget($: EngineInterface, id: string, session: Session, settings: Settings): Promise<void> {
+  const was = session.state
+  const spent = afterBudget(was, settings.decideWithin, allowOff)
+  if (spent === was) return
+  await commit($, id, session, spent)
+  if (spent.mode === 'picker') restorePicker($, session, settings)
+  $.ui.log(`effort-router: ${spent.offReason ?? 'budget spent; the waiting verdict is still asked'}`, { to: 'debug' })
 }
 
 /**
  * An automatic read after a human turn, within the budget, awaited before the
- * turn goes on: at most `classifyTimeoutMs`, then fail open at the current
- * level. Then the budget: a provisional level becomes locked when it runs out.
+ * turn goes on: at most `classifyTimeoutMs`, then fail open (nothing waits).
  */
 async function readAfter($: EngineInterface, id: string, session: Session, settings: Settings, consent: Consent, input: ReadInput): Promise<void> {
   if (session.reading) return
@@ -434,9 +490,7 @@ async function readAfter($: EngineInterface, id: string, session: Session, setti
       session.error = { at: await $.clock.now().catch(() => Date.now()), text: `classifier timed out after ${settings.classifyTimeoutMs} ms; the turn went ahead at the current level` }
     } else {
       outcome = result.value ? `${result.value.level} (${result.value.reason})` : 'undecided'
-      if (session.state.mode === 'auto' && session.state.phase !== 'locked') {
-        await settle($, id, session, settings, consent, result.value)
-      }
+      await afterRead($, id, session, settings, consent, result.value)
     }
   } catch (error) {
     $.ui.log(`effort-router: classification failed: ${String(error)}`, { to: 'debug' })
@@ -446,27 +500,36 @@ async function readAfter($: EngineInterface, id: string, session: Session, setti
     session.lastReadMs = took
     $.ui.log(`effort-router: read settled in ${took} ms (${input.trigger}): ${outcome}`, { to: 'debug' })
   }
-  const was = session.state
-  const spent = afterBudget(was, settings.decideWithin, allowOff)
-  if (spent !== was) {
-    await commit($, id, session, spent)
-    if (spent.mode === 'picker') restorePicker($, session, settings)
-    if (was.phase === 'provisional' && spent.phase === 'locked' && spent.level) {
-      if (settings.syncPicker) session.pendingSync = spent.level
-      try {
-        $.ui.log(`effort locked: ${spent.level} 🔒 (kept after ${settings.decideWithin} prompts; router: ${spent.reason}) · /route status`)
-      } catch {
-        // headless
-      }
-    }
-    $.ui.log(`effort-router: ${spent.offReason ?? (spent.phase === 'locked' ? `budget spent: ${spent.level} locked` : 'budget spent')}`, { to: 'debug' })
+  await spendBudget($, id, session, settings)
+}
+
+/**
+ * A main-thread request with a verdict waiting: compares it with the picker's
+ * level (`e.effort` as the request arrived). The same level locks, no
+ * question. A different one holds the request on the question; either answer
+ * locks, and a dismissed one leaves the router deciding (the next read can
+ * ask again). One question per verdict.
+ */
+async function decideAtStep($: EngineInterface, id: string, session: Session, settings: Settings, picker: unknown): Promise<void> {
+  const decision = stepDecision(session.state, picker)
+  if (decision.kind === 'none') return
+  if (decision.kind === 'agree') {
+    await lock($, id, session, settings, decision.proposal.level, lockReason.agreed(decision.proposal))
+  } else {
+    const { picker: current, ...proposal } = decision.asking
+    const chosen = await askAndLock($, id, session, settings, proposal, current)
+    $.ui.log(`effort-router: asked ${proposal.level} over the picker's ${current}: ${chosen === 'none' ? 'no answer, deciding' : chosen}`, { to: 'debug' })
   }
+  await spendBudget($, id, session, settings)
 }
 
 /**
  * A manual run (`/route [hint]`, the band's Suggest now): reads the whole
  * conversation now, in any state, ignoring the budget, within the timeout.
- * Undecided leaves the state as it is.
+ * The same as the level in use: nothing changes. The same as the picker's
+ * (while locked elsewhere): locked there, no question. Otherwise it asks at
+ * once (consent `ask`) or locks the router's level (`auto`). Undecided
+ * changes nothing.
  */
 async function suggestNow($: EngineInterface, id: string, session: Session, settings: Settings, hint: string | undefined): Promise<string> {
   if (session.reading) return 'the router is already reading; try again in a moment.'
@@ -482,8 +545,7 @@ async function suggestNow($: EngineInterface, id: string, session: Session, sett
   } finally {
     session.reading = false
   }
-  if (!proposal) {
-    const text = `no clear task yet${hint ? ', even with your hint' : ''}; nothing changed (${footerLabel(session.state).text}).`
+  const say = (text: string): string => {
     try {
       $.ui.toast(`effort-router: ${text}`)
     } catch {
@@ -491,28 +553,26 @@ async function suggestNow($: EngineInterface, id: string, session: Session, sett
     }
     return text
   }
-  const { state } = session
-  const inUse = state.mode === 'auto' && (state.phase === 'locked' || state.phase === 'provisional') ? state.level : undefined
-  if (inUse === proposal.level && state.phase === 'locked') {
-    await commit($, id, session, { ...state, proposal: undefined })
-    const text = `confirmed: ${proposal.level} 🔒 still fits (${proposal.reason}).`
-    try {
-      $.ui.toast(`effort-router: ${text}`)
-    } catch {
-      // headless
-    }
-    return text
+  if (!proposal) return say(`no clear task yet${hint ? ', even with your hint' : ''}; nothing changed (${footerLabel(session.state).text}).`)
+  const picker = isLevel(session.picker) ? session.picker : undefined
+  const locked = appliedLevel(session.state)
+  if (proposal.level === (locked ?? picker)) {
+    if (session.state.pending) await commit($, id, session, { ...session.state, pending: undefined })
+    return say(`confirmed: ${proposal.level}${locked ? ' 🔒' : ''} still fits (${proposal.reason}); nothing changed.`)
   }
-  const consent = await consentFor($, settings)
-  const withHint = hint ? { ...session.state, hint } : session.state
-  session.state = withHint
-  await settle($, id, session, settings, consent, proposal)
-  const after = session.state
-  if (after.phase === 'provisional') return `using ${after.level} now (${after.reason}); Keep it or Revert in the band.`
-  if (after.phase === 'locked' && after.level === proposal.level && !after.proposal) return `${proposal.level} 🔒 (${proposal.reason}).`
-  return after.phase === 'locked'
-    ? `${after.level} 🔒 now; a switch to ${proposal.level} is on offer (${proposal.reason}). Accept it in the band (press the footer to open it).`
-    : `suggesting ${proposal.level} (${proposal.reason}). Accept it in the band (press the footer to open it).`
+  if (hint && session.state.phase !== 'locked') session.state = { ...session.state, hint }
+  if ((await consentFor($, settings)) === 'auto') {
+    await lockAuto($, id, session, settings, proposal)
+    return `${proposal.level} 🔒 (${proposal.reason}).`
+  }
+  if (proposal.level === picker) {
+    await lock($, id, session, settings, proposal.level, lockReason.agreed(proposal))
+    return `${proposal.level} 🔒 (${proposal.reason}): the router agrees with the picker, so it no longer overrides it.`
+  }
+  const chosen = await askAndLock($, id, session, settings, proposal, picker)
+  if (chosen === 'use') return `${proposal.level} 🔒 (${proposal.reason}).`
+  if (chosen === 'keep') return `${picker} 🔒: you kept the picker's level.`
+  return `no answer; nothing changed (${footerLabel(session.state).text}).`
 }
 
 // --- subagents -----------------------------------------------------------------------
@@ -625,15 +685,17 @@ function remember(session: Session, agentId: string, agent: RoutedAgent): void {
 
 // --- the band ------------------------------------------------------------------------
 
-/** The band shows when opened from the footer, or by itself for a suggestion it was not closed on. */
+/**
+ * The band shows when opened from the footer, or by itself once after consent
+ * `auto` locked a level other than the picker's (`notice`).
+ */
 function bandShown(session: Session): boolean {
-  const key = offerKey(session.state)
-  return session.bandOpen || (key !== undefined && key !== session.closedOffer)
+  return session.bandOpen || session.notice !== undefined
 }
 
 function closeBand($: EngineInterface, session: Session): void {
   session.bandOpen = false
-  session.closedOffer = offerKey(session.state)
+  session.notice = undefined
   show($)
 }
 
@@ -648,15 +710,9 @@ function toggleBand($: EngineInterface, session: Session): void {
 
 /** A band button: closes the band, then applies the action. */
 async function bandAction($: EngineInterface, id: string, session: Session, settings: Settings, value: string): Promise<void> {
-  const offer = session.state.proposal
   closeBand($, session)
   try {
-    const { state } = session
-    if (value === 'accept' && offer) await accept($, id, session, settings, offer)
-    else if (value === 'lock' && state.phase === 'provisional' && state.level) await accept($, id, session, settings, { level: state.level, reason: state.reason ?? 'classifier' })
-    else if (value === 'revert') await turnOff($, id, session, settings)
-    else if (value === 'keep') await commit($, id, session, { ...session.state, proposal: undefined, hint: undefined })
-    else if (value === 'off') await turnOff($, id, session, settings)
+    if (value === 'off' || value === 'revert') await turnOff($, id, session, settings)
     else if (value === 'on' || value === 'suggest') {
       const text = await route($, value === 'on' ? 'on' : '', settings)
       $.ui.log(`effort-router: ${text}`, { to: 'debug' })
@@ -760,6 +816,7 @@ export function register(on: On, options: PluginOptions): void {
         const configured = (await $.settings.read().catch(() => ({}))) as { effortLevel?: unknown }
         if (isLevel(configured.effortLevel)) session.lastSent = configured.effortLevel
       }
+      session.picker ??= session.lastSent // until a request shows the picker's level
       await loadRules($).catch(() => undefined) // learns allowOff for the footer
       if (!allowOff && session.state.mode === 'picker') session.state = turnedOn(session.state)
       show($)
@@ -777,10 +834,10 @@ export function register(on: On, options: PluginOptions): void {
     }
   })
 
-  // After each human prompt while deciding or provisional/pending (and within
-  // the budget), read the whole conversation again BEFORE the turn runs, so
-  // its first request carries the router's level. Bounded by
-  // classifyTimeoutMs; on a timeout or error the turn goes ahead as it was.
+  // After each human prompt while deciding (and within the budget), read the
+  // whole conversation BEFORE the turn runs, so its first request can act on
+  // the verdict. Bounded by classifyTimeoutMs; on a timeout or error the turn
+  // goes ahead as it was.
   on('prompt.submit', async ($, e, next) => {
     try {
       if (HUMAN_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) {
@@ -794,11 +851,14 @@ export function register(on: On, options: PluginOptions): void {
 
   // The model asked the user multiple-choice questions on the main thread and
   // got answers: that is a human turn too (platforms, scope, "keep it simple").
+  // The verdict is acted on at the turn's next request. (The router's own
+  // $.ui.ask passes every hook but this plugin's, so it never lands here.)
   on('tool.call', { tool: QUESTION_TOOL }, async ($, e, next) => {
     const result = await next(e)
     try {
       const answered = !('deny' in result && result.deny) && !result.isError && typeof result.text === 'string' && result.text.trim() !== ''
-      if (e.agentId === undefined && answered) {
+      const ours = e.questions?.some(q => q.header === 'Effort' && q.question.startsWith('Effort router:')) // belt and braces: the engine already skips the caller
+      if (e.agentId === undefined && answered && !ours) {
         await humanTurn($, settings, {
           answer: { toolUseId: e.tool_use_id, input: { questions: e.questions }, text: result.text as string },
           trigger: 'after answered questions',
@@ -842,13 +902,21 @@ export function register(on: On, options: PluginOptions): void {
     return result
   })
 
-  // Every model request: a routed subagent's own level; a subagent whose
+  // Every model request. On the main thread, `e.effort` as it arrives here is
+  // the picker's level (the router has not rewritten it yet): it is kept, and
+  // a waiting verdict is compared with it, holding this request on the
+  // question when they differ (any index: answered AskUserQuestion questions
+  // land mid-turn). Then the level: a routed subagent's own; a subagent whose
   // definition sets its effort, untouched; otherwise (the main loop, and
-  // subagents the router did not route) the main level in use, or untouched.
+  // subagents the router did not route) the locked level, or untouched.
   on('turn.step', async function* ($, e, next) {
     let effort = e.effort
     try {
-      const { session } = await sessionOf($)
+      const { id, session } = await sessionOf($)
+      if (e.agentId === undefined) {
+        if (e.effort !== undefined) session.picker = e.effort
+        if (session.state.pending) await decideAtStep($, id, session, settings, e.effort)
+      }
       const own = e.agentId !== undefined && subagentRouting(settings, session) === 'on' ? session.agents.get(e.agentId) : undefined
       const level = own ? (own.byDefinition ? undefined : own.level) : appliedLevel(session.state)
       if (e.agentId === undefined && session.baseline === undefined && isLevel(e.effort) && session.pendingSync === undefined && level === undefined) {
@@ -897,17 +965,19 @@ export function register(on: On, options: PluginOptions): void {
     return Box({ flexDirection: 'row', columnGap: 1, children: [theirs, mine] })
   })
 
-  // The band above the prompt: opened from the footer, or by itself for a new
-  // suggestion. One line of state, then that state's actions and Close.
+  // The band above the prompt: opened from the footer (the state, then Suggest
+  // now / Turn off or Turn on), or by itself once after consent auto locked a
+  // level other than the picker's (Using <level>, then Revert to picker). Close.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const { id, session } = await sessionOf($)
     if (!bandShown(session) || e.props.hasSurvey) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     const theirs = await next(e)
-    const { state } = session
-    const headline = bandHeadline(state)
-    const level = state.proposal?.level ?? (state.mode === 'auto' && state.phase === 'locked' ? state.level : undefined)
-    const label = state.phase === 'provisional' && state.level ? state.level : footerLabel(state).text
+    const { state, notice } = session
+    const headline = notice && !session.bandOpen ? noticeHeadline(notice) : bandHeadline(state)
+    const actions = notice && !session.bandOpen ? noticeActions(allowOff) : bandActions(state, allowOff)
+    const level = notice && !session.bandOpen ? notice.level : state.asking?.level ?? (state.mode === 'auto' && state.phase === 'locked' ? state.level : undefined)
+    const label = notice && !session.bandOpen ? notice.level : footerLabel(state).text
     const at = level ? headline.indexOf(label) : -1
     const line =
       at >= 0 && level
@@ -919,7 +989,7 @@ export function register(on: On, options: PluginOptions): void {
             ],
           })
         : Text({ children: [headline] })
-    const buttons = bandActions(state, allowOff, session.bandOpen).map((action, i) =>
+    const buttons = actions.map((action, i) =>
       Button({
         key: action.value,
         label: action.label,
