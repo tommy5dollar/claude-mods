@@ -25,7 +25,7 @@ bun test                            # 97 tests: trimming (incl. the last assista
                                     # 0.11: no example or rule names a level, levels held to highestLevel (xhigh unless
                                     # set) in the frame, contract and capLevel, the fork's answers block, the subagent read
                                     # told its model with that model's notes, the subagent fork message, definitions' model
-claude plugin test .                # 71 tests in the engine's kit, among them, for the main thread: undecided runs at the
+claude plugin test .                # 73 tests in the engine's kit, among them, for the main thread: undecided runs at the
                                     # picker level with no question; the picker's level locks with no question and reading
                                     # stops; a different level holds the request on the question, Use locks it and syncs
                                     # /effort, Keep locks the picker level; the footer reads high? while the request waits;
@@ -60,7 +60,7 @@ claude plugin test .                # 71 tests in the engine's kit, among them, 
                                     # a subagent's read is a fork of its parent told the subagent's model; a subagent on
                                     # Haiku (the call's model or its definition's) is left alone; Check now shows its result
                                     # in the band
-"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 71 under Desktop's engine
+"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 73 under Desktop's engine
 claude plugin validate . --strict
 bun run eval -- --runs 3            # opt-in, real model: 23 session fixtures and 14 subagent briefs, see below
                                     # (both sets as separate calls on --model, default opus, with its notes; the session
@@ -112,7 +112,7 @@ case: the router asks a fork of the parent, which knows the task, and this can't
 
 Each check now gives a probability for every level. The eval judges it as the router does: against the level in force
 (`--setting`), moving to the median when it's sure enough the setting is wrong in one direction. Opus and Sonnet ran
-against medium, Fable against high (Tommy's usual settings).
+against medium, Fable against high: Claude Code's default for each.
 
 | Model | Setting | Session reads | Over the 70% bar | Right of those |
 |---|---|---|---|---|

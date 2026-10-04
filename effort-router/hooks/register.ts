@@ -17,6 +17,7 @@ import {
   type SpendLedger,
   type SpendPeriod,
   type SpendUsage,
+  type Spread,
   type SubagentStatus,
   LEVEL_COLOR,
   STARTER_RULES,
@@ -162,6 +163,12 @@ type Session = {
    * this hook, before the router's own rewrite (the engine's level for it).
    */
   picker?: string | number
+  /**
+   * A main-thread request has shown the picker's level. Until then `picker` is
+   * a guess from the settings file's `effortLevel`, which Desktop's own picker
+   * doesn't follow, so a check isn't judged against it.
+   */
+  pickerSeen?: boolean
   /** The band was opened from the footer. */
   bandOpen: boolean
   /** Consent `auto` locked a level other than the picker's: the band shows it once, with Revert. */
@@ -552,7 +559,8 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
     const notes = await modelNotes($, model)
     const levels = levelsFor(settings)
     // The level in force now: a check's spread is judged against it (a kept level, else the picker's).
-    const inForce = appliedLevel(session.state) ?? (isLevel(session.picker) ? session.picker : undefined)
+    // Unknown before the first request: the spread is judged at that request (decideAtStep).
+    const inForce = levelInForce(session)
     const separate = async (checkModel: string, instructions?: string) => {
       session.sent = { sentChars: rendered.sentChars, fullChars: rendered.fullChars, maxChars: settings.classifierMaxChars, omitted: rendered.omitted }
       return $.model.complete({
@@ -598,7 +606,7 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
       return check
     }
     const parsed = parseDecision(reply.text)
-    const decision = parsed.decision === 'lock' && parsed.spread ? { ...parsed, ...judgeSpread(parsed.spread, inForce, levels) } : parsed
+    const decision = parsed.decision === 'lock' && parsed.spread && inForce ? { ...parsed, ...judgeSpread(parsed.spread, inForce, levels) } : parsed
     const checkedAt = await now()
     session.verdict = { at: checkedAt, trigger: input.trigger, raw: reply.text, decision, kind: check.kind }
     $.ui.log(`effort-router: ${check.kind} check on ${check.model} said (${input.trigger}) ${reply.text.trim().slice(0, 200)}`, { to: 'debug' })
@@ -612,6 +620,13 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
     throw error
   }
 }
+
+/** The level in force: a kept level, else the picker's once a request has shown it; undefined before that. */
+const levelInForce = (session: Session): Level | undefined =>
+  appliedLevel(session.state) ?? (session.pickerSeen && isLevel(session.picker) ? session.picker : undefined)
+
+/** A spread not yet judged, because the level in force was unknown when it was checked. */
+const unjudged = (proposal: Proposal | undefined): proposal is Proposal & { spread: Spread } => proposal?.spread !== undefined && proposal.confidence === undefined
 
 /** The user's own effort setting: what the picker was before the router moved it, else the picker's level now. */
 const settingOf = (session: Session): Level | undefined => session.baseline ?? (isLevel(session.picker) ? session.picker : undefined)
@@ -647,11 +662,15 @@ async function timed<T>($: EngineInterface, ms: number, work: Promise<T>): Promi
 async function afterRead($: EngineInterface, id: string, session: Session, settings: Settings, consent: Consent, check: Check | undefined): Promise<void> {
   if (session.state.mode !== 'auto' || session.state.phase === 'locked') return
   const proposal = check?.proposal
+  if (unjudged(proposal)) {
+    if (check) recordVerdict($, session, check, 'waiting for the first request')
+    await commit($, id, session, withVerdict(session.state, proposal))
+    return
+  }
   const sure = proposal !== undefined && isConfident(proposal, settings.confidence)
   if (check) recordVerdict($, session, check, !proposal ? 'undecided' : !sure ? 'below the bar' : consent === 'auto' ? 'acted' : 'waiting')
   if (check && settings.showChecks) {
-    const inForce = isLevel(session.picker) ? session.picker : undefined
-    $.ui.log(checkLine({ n: session.state.prompts, of: settings.decideWithin, proposal, inForce, threshold: settings.confidence, sure, consent }))
+    $.ui.log(checkLine({ n: session.state.prompts, of: settings.decideWithin, proposal, inForce: levelInForce(session), threshold: settings.confidence, sure, consent }))
   }
   if (consent === 'auto' && sure) {
     await lockAuto($, id, session, settings, proposal)
@@ -716,6 +735,29 @@ async function readAfter($: EngineInterface, id: string, session: Session, setti
  * ask again). One question per verdict.
  */
 async function decideAtStep($: EngineInterface, id: string, session: Session, settings: Settings, picker: unknown): Promise<void> {
+  const waiting = session.state.pending
+  if (unjudged(waiting) && isLevel(picker)) {
+    const judged = { ...waiting, ...judgeSpread(waiting.spread, picker, levelsFor(settings)) }
+    const sure = isConfident(judged, settings.confidence)
+    const consent = await consentFor($, settings)
+    if (settings.showChecks) {
+      $.ui.log(checkLine({ n: session.state.prompts, of: settings.decideWithin, proposal: judged, inForce: picker, threshold: settings.confidence, sure, consent }))
+    }
+    if (!sure) {
+      recordOutcome($, 'below the bar', waiting.checkedAt)
+      await commit($, id, session, withVerdict(session.state, undefined))
+      await spendBudget($, id, session, settings)
+      return
+    }
+    if (consent === 'auto') {
+      recordOutcome($, 'acted', waiting.checkedAt)
+      if (judged.level === picker) await lock($, id, session, settings, judged.level, lockReason.agreed(judged), judged.why)
+      else await lockAuto($, id, session, settings, judged)
+      await spendBudget($, id, session, settings)
+      return
+    }
+    await commit($, id, session, { ...session.state, pending: judged })
+  }
   const decision = stepDecision(session.state, picker)
   if (decision.kind === 'none') return
   if (decision.kind === 'agree') {
@@ -1319,7 +1361,10 @@ export function register(on: On, options: PluginOptions): void {
           session.model = e.model
           show($)
         }
-        if (e.effort !== undefined) session.picker = e.effort
+        if (e.effort !== undefined) {
+          session.picker = e.effort
+          session.pickerSeen = true
+        }
         if (session.state.pending && supportedModel(e.model)) await decideAtStep($, id, session, settings, e.effort)
       }
       const own = e.agentId !== undefined && subagentRouting(settings, session) === 'on' ? session.agents.get(e.agentId) : undefined

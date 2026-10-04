@@ -213,7 +213,7 @@ async function bandOf(band: Mounted) {
 }
 
 /** One model request; `effort` is the engine's level for it (the picker's, on the main thread). */
-async function step($: Engine, index: number, agentId?: string, effort: 'low' | 'medium' | 'high' = 'medium', model = 'claude-sonnet-5-5'): Promise<void> {
+async function step($: Engine, index: number, agentId?: string, effort: 'low' | 'medium' | 'high' | 'xhigh' = 'medium', model = 'claude-sonnet-5-5'): Promise<void> {
   const stream = $.turn.step({ turnId: 't1', index, model, effort, messageCount: 3, ...(agentId ? { agentId } : {}) })
   for await (const _ of stream) {
     // drain
@@ -635,11 +635,35 @@ describe('effort-router', () => {
     await submit($, 'two workers race on the ledger write, find and fix it')
     await step($, 0)
     expect(world.sent).toEqual(['high'])
-    expect(world.prompts.at(-1)).toContain('The session is at medium effort now.')
+    // No request yet, so the picker's level is unknown: the prompt doesn't state one, and the spread is judged at the first request.
+    expect(world.prompts.at(-1)).not.toContain('The session is at')
     expect(world.lines).toContain('Effort router: check 1 of 6: low 2%, medium 8%, high 50%, xhigh 40%. 90% sure medium is too low, so moving to high.')
     const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
     expect((await bandOf(band)).headline).toBe('Effort router: changed from medium to high for this session (race condition fix, 90% sure medium was too low).')
     expect(await route($, 'status')).toContain('Spread: low 2%, medium 8%, high 50%, xhigh 40%')
+  })
+
+  test("the first check is judged against the picker's level as the first request shows it, not the settings file's effortLevel", { options: { showChecks: true } }, async ($, on) => {
+    // The settings file says medium (as worldOf's settings.read does); Desktop's picker is on xhigh.
+    const world = worldOf(on, '{"decision":"level","levels":{"low":0.02,"medium":0.08,"high":0.6,"xhigh":0.3},"reason":"research-heavy ideation"}', {}, AUTO)
+    await $.session.start(STARTED)
+    await submit($, 'help me ideate demos for X, research my sessions and the web')
+    await step($, 0, undefined, 'xhigh')
+    expect(world.sent).toEqual(['high'])
+    expect(world.lines).toContain('Effort router: check 1 of 6: low 2%, medium 8%, high 60%, xhigh 30%. 70% sure xhigh is too high, so moving to high.')
+    const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
+    const shown = await bandOf(band)
+    expect(shown.headline).toContain('changed from xhigh to high')
+    expect(shown.headline).not.toContain('medium')
+  })
+
+  test('a first check below the bar against the picker as the first request shows it changes nothing', { options: { showChecks: true } }, async ($, on) => {
+    const world = worldOf(on, '{"decision":"level","levels":{"medium":0.2,"high":0.45,"xhigh":0.35},"reason":"ideation"}', {}, AUTO)
+    await $.session.start(STARTED)
+    await submit($, 'help me ideate demos for X')
+    await step($, 0, undefined, 'xhigh')
+    expect(world.sent).toEqual(['xhigh'])
+    expect(world.lines).toContain('Effort router: check 1 of 6: medium 20%, high 45%, xhigh 35%. 65% sure xhigh is too high, below the 70% bar, so staying on xhigh.')
   })
 
   test('a spread split between staying and moving up is below the bar, and stays', { options: { showChecks: true } }, async ($, on) => {
