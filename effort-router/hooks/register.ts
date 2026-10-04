@@ -23,6 +23,7 @@ import {
   afterBudget,
   agentFileDefinition,
   appliedLevel,
+  capLevel,
   classifierPrompt,
   classifierSystem,
   composeRules,
@@ -52,6 +53,7 @@ import {
   parentLevel,
   parseSubagentReply,
   routesSubagents,
+  subagentForkPrompt,
   subagentPrompt,
   subagentSystem,
   supportedModel,
@@ -66,6 +68,7 @@ import {
   renderTranscript,
   firstSighting,
   humanPromptCount,
+  DEFAULT_HIGHEST,
   DEFAULT_TRIM,
   turnedOff,
   turnedOn,
@@ -99,9 +102,14 @@ import {
  * a `turn.step` hook waiting on anything else is abandoned after about 10 s;
  * a `$` call in flight does not count against the hook's time.
  *
- * Subagents are routed apart: each spawn waits for one read of its own brief
- * and its requests carry that level (forks, and failed reads, take the
- * parent's level). An agent whose own definition sets an effort is left to it.
+ * Subagents are routed apart: each spawn waits for one read, a fork of its
+ * parent asked what the subagent needs on the model it runs on, and its
+ * requests carry that level (forks, and failed reads, take the parent's
+ * level). An agent whose own definition sets an effort is left to it, and so
+ * is one on a model the router doesn't support (Haiku).
+ *
+ * Every level is held to `highestLevel` (xhigh unless set): max rarely beats
+ * xhigh on the current models, so the checks aren't offered it.
  *
  * Fail open everywhere: any error leaves the request at the picker's effort.
  */
@@ -114,8 +122,10 @@ type Settings = {
   classifyTimeoutMs: number
   /** Cap on the transcript sent to the classifier. */
   classifierMaxChars: number
-  /** `session`: the session's own model (a fork from the second prompt). Otherwise a model for separate calls (`haiku`). */
+  /** `session`: the session's own model (a fork from the second prompt). Otherwise a supported model for separate calls. */
   classifierModel: string
+  /** The highest level the router picks. */
+  highestLevel: Level
   /** How sure (0 to 1) a check must be before the router acts on it. */
   confidence: number
   /** A session the router first sees with more than this many tokens of conversation is left alone. */
@@ -149,6 +159,10 @@ type Session = {
   bandOpen: boolean
   /** Consent `auto` locked a level other than the picker's: the band shows it once, with Revert. */
   notice?: Proposal
+  /** The band's Check now is running: the footer reads `checking…`. */
+  checking: boolean
+  /** What the band's Check now found, shown in the band until it is closed. */
+  result?: string
   /** Classifier calls this session, for `/route status`. */
   calls: number
   verdict?: ReadDiagnostics['verdict']
@@ -208,11 +222,18 @@ const MAX_INSTRUCTIONS_CHARS = 80_000
 const SESSION_CHECK_MAX_TOKENS = 4000
 
 const FALLBACK_RULES =
-  'low: quick in-the-loop work, questions, chores. medium: regular feature work (default). ' +
-  'high: verification, tests, review, bug fixes in existing code. xhigh: edge-case-heavy security, ' +
-  'hardware, ML/data, performance or concurrency work. max: fully autonomous hard problems, vulnerability hunting.'
+  'Effort buys verification, edge-case testing and independent judgement, not a better approach. Weigh how much is ' +
+  'hidden (edge cases, existing code, money, integrations, concurrency, security), whether the user is in the loop, ' +
+  'and how well specified and how big the task is. Pick the level that does the work well on this model without ' +
+  "paying for thinking it won't use."
 
 const HUMAN_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
+
+/** `classifierModel`: `session`, or a supported model. Anything else (Haiku included) checks on the session's model. */
+function checkModelOf(value: unknown): string {
+  const named = typeof value === 'string' ? value.trim() : ''
+  return named !== '' && named !== 'session' && supportedModel(named) ? named : 'session'
+}
 
 function settingsOf(options: PluginOptions): Settings {
   const consent = consentOf(options.consent) ?? 'ask'
@@ -225,8 +246,9 @@ function settingsOf(options: PluginOptions): Settings {
     decideWithin: num(options.decideWithin, 6),
     classifyTimeoutMs: num(options.classifyTimeoutMs, 15000),
     classifierMaxChars: num(options.classifierMaxChars, DEFAULT_TRIM.totalChars),
-    classifierModel: typeof options.classifierModel === 'string' && options.classifierModel.trim() !== '' ? options.classifierModel.trim() : 'session',
-    confidence: confidenceOf(options.confidence) ?? 0.8,
+    classifierModel: checkModelOf(options.classifierModel),
+    highestLevel: isLevel(options.highestLevel) && options.highestLevel !== 'low' ? options.highestLevel : DEFAULT_HIGHEST,
+    confidence: confidenceOf(options.confidence) ?? 0.7,
     skipAboveTokens: typeof options.skipAboveTokens === 'number' || typeof options.skipAboveTokens === 'string' ? num(options.skipAboveTokens, 20000) : 20000,
     firstCheckInstructions: options.firstCheckInstructions !== false && options.firstCheckInstructions !== 'false',
     syncPicker: options.syncPicker !== false && options.syncPicker !== 'false',
@@ -253,7 +275,7 @@ async function sessionOf($: EngineInterface): Promise<{ id: string; session: Ses
       state = firstSighting(prior, budgetAtSighting, allowOff, size)
       if (prior > 0) $.ui.log(`effort-router: first sighting with ${prior} prompts (~${size.tokens} tokens) already in the session${state.gaveUp ? ', left off' : ''}`, { to: 'debug' })
     }
-    session = { state, reading: false, bandOpen: false, calls: 0, agents: new Map(), busy: false }
+    session = { state, reading: false, bandOpen: false, checking: false, calls: 0, agents: new Map(), busy: false }
     if (appliedLevel(state)) session.pendingSync = appliedLevel(state)
     SESSIONS.set(id, session)
   }
@@ -291,11 +313,8 @@ async function modelNotes($: EngineInterface, model: string | undefined): Promis
 
 /** Which model runs the checks, in words for `/route status`. */
 function checkModelLabel(settings: Settings, session: Session): string {
-  return settings.classifierModel === 'session' ? `your session's model${session.model ? ` (${modelName(session.model)})` : ''}` : settings.classifierModel
+  return settings.classifierModel === 'session' ? `your session's model${session.model ? ` (${modelName(session.model)})` : ''}` : modelName(settings.classifierModel)
 }
-
-/** The model for subagent checks: a quick one, since a spawn waits for the answer. */
-const subagentModel = (settings: Settings): string => (settings.classifierModel === 'session' ? 'haiku' : settings.classifierModel)
 
 // --- showing and applying ----------------------------------------------------------
 
@@ -519,9 +538,9 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
       session.sent = { sentChars: rendered.sentChars, fullChars: rendered.fullChars, maxChars: settings.classifierMaxChars, omitted: rendered.omitted }
       return $.model.complete({
         model: checkModel,
-        system: classifierSystem(rules.composed.text, notes),
+        system: classifierSystem(rules.composed.text, notes, settings.highestLevel),
         prompt: classifierPrompt(rendered.text, input.hint, instructions),
-        ...(checkModel === model ? { maxTokens: SESSION_CHECK_MAX_TOKENS } : { maxTokens: 200, effort: 'low' as const }),
+        maxTokens: SESSION_CHECK_MAX_TOKENS,
         timeoutMs: settings.classifyTimeoutMs,
       })
     }
@@ -529,7 +548,17 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
     let check: Check
     let reply: Awaited<ReturnType<typeof $.model.fork>>
     if (settings.classifierModel === 'session' && model) {
-      reply = await $.model.fork({ prompt: forkPrompt({ rules: rules.composed.text, model: notes, current: input.current, lastReply: lastReplyOf(messages), hint: input.hint }) })
+      reply = await $.model.fork({
+        prompt: forkPrompt({
+          rules: rules.composed.text,
+          model: notes,
+          current: input.current,
+          lastReply: lastReplyOf(messages),
+          hint: input.hint,
+          answered: input.answer?.text,
+          highest: settings.highestLevel,
+        }),
+      })
       check = { kind: 'fork', model }
       if (!reply.isAnswered && reply.reason === 'nothing-to-fork') {
         const instructions = settings.firstCheckInstructions && session.instructions ? session.instructions.slice(0, MAX_INSTRUCTIONS_CHARS) : undefined
@@ -554,7 +583,9 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
     $.ui.log(`effort-router: ${check.kind} check on ${check.model} said (${input.trigger}) ${reply.text.trim().slice(0, 200)}`, { to: 'debug' })
     if (decision.decision !== 'lock') return { ...check, checkedAt }
     const { decision: _, ...found } = decision
-    return { ...check, checkedAt, proposal: { ...found, checkedAt } }
+    const level = capLevel(found.level, settings.highestLevel)
+    if (level !== found.level) $.ui.log(`effort-router: ${found.level} held to ${level} (highestLevel)`, { to: 'debug' })
+    return { ...check, checkedAt, proposal: { ...found, level, checkedAt } }
   } catch (error) {
     session.error = { at: await now(), text: String(error) }
     throw error
@@ -685,14 +716,7 @@ async function suggestNow($: EngineInterface, id: string, session: Session, sett
   } finally {
     session.reading = false
   }
-  const say = (text: string): string => {
-    try {
-      $.ui.toast(`effort-router: ${text}`)
-    } catch {
-      // headless
-    }
-    return text
-  }
+  const say = (text: string): string => text // typed, the command prints it; from the band, the band shows it
   if (!proposal) return say(`No clear task yet${hint ? ', even with your hint' : ''}. Nothing changed.`)
   const picker = isLevel(session.picker) ? session.picker : undefined
   const locked = appliedLevel(session.state)
@@ -794,25 +818,43 @@ async function routeSpawn($: EngineInterface, settings: Settings, session: Sessi
   if (e.fork) return fallback("it's a fork")
   const definition = definitionFor(e.subagentType, await definitionsOf($, session))
   if (definition?.effort !== undefined) return { level: definition.effort, reason: `from ${definition.source}`, byDefinition: true }
-  const read = async () =>
-    $.model.complete({
-      model: subagentModel(settings),
-      system: subagentSystem(rules.composed.text),
-      prompt: subagentPrompt({ subagentType: e.subagentType, description: e.description, prompt: e.prompt }, settings.classifierMaxChars),
-      maxTokens: 200,
-      effort: 'low',
+  // The model it runs on: the Agent call's, else its definition's, else the parent's. Haiku, or any model the
+  // router doesn't support, is left alone.
+  const runsOn = e.model ?? definition?.model ?? e.parentModel
+  const known = supportedModel(runsOn)
+  if (!known) {
+    $.ui.log(`effort-router: subagent (${e.subagentType}: ${e.description}) runs on ${modelName(runsOn)}, left alone`, { to: 'debug' })
+    return undefined
+  }
+  const brief = { subagentType: e.subagentType, description: e.description, prompt: e.prompt }
+  const notes = await modelNotes($, known.id)
+  const read = async () => {
+    if (settings.classifierModel === 'session') {
+      // The parent knows the task and why it delegates this part: ask a fork of it (cached, a few seconds).
+      const forked = await $.model.fork({
+        prompt: subagentForkPrompt({ rules: rules.composed.text, brief, runsOn: known.name, model: notes, maxChars: settings.classifierMaxChars, highest: settings.highestLevel }),
+      })
+      if (forked.isAnswered || forked.reason !== 'nothing-to-fork') return forked
+    }
+    return $.model.complete({
+      model: settings.classifierModel === 'session' ? known.id : settings.classifierModel,
+      system: subagentSystem(rules.composed.text, notes, settings.highestLevel),
+      prompt: subagentPrompt(brief, settings.classifierMaxChars),
+      maxTokens: SESSION_CHECK_MAX_TOKENS,
       timeoutMs: settings.classifyTimeoutMs,
     })
+  }
   const result = await timed($, settings.classifyTimeoutMs, read()).catch((error: unknown) => {
     $.ui.log(`effort-router: subagent read failed: ${String(error)}`, { to: 'debug' })
     return undefined
   })
   if (!result) return fallback('the check failed')
   if (!result.ok) return fallback('the check timed out')
-  recordRead($, result.value.usage, 'subagent')
+  if ('usage' in result.value) recordRead($, result.value.usage, 'subagent')
   if (!result.value.isAnswered) return fallback('the check got no answer')
   $.ui.log(`effort-router: subagent classifier said ${result.value.text.trim().slice(0, 200)}`, { to: 'debug' })
-  return parseSubagentReply(result.value.text) ?? fallback('the check gave no level')
+  const found = parseSubagentReply(result.value.text)
+  return found ? { ...found, level: capLevel(found.level, settings.highestLevel) } : fallback('the check gave no level')
 }
 
 /** Keeps a routed subagent, dropping the oldest past `MAX_ROUTED_AGENTS`. */
@@ -937,12 +979,13 @@ async function spendReportFor($: EngineInterface, id: string, session: Session, 
  * `auto` locked a level other than the picker's (`notice`).
  */
 function bandShown(session: Session): boolean {
-  return session.bandOpen || session.notice !== undefined
+  return session.bandOpen || session.notice !== undefined || session.result !== undefined
 }
 
 function closeBand($: EngineInterface, session: Session): void {
   session.bandOpen = false
   session.notice = undefined
+  session.result = undefined
   show($)
 }
 
@@ -960,12 +1003,28 @@ async function bandAction($: EngineInterface, id: string, session: Session, sett
   closeBand($, session)
   try {
     if (value === 'off' || value === 'revert') await turnOff($, id, session, settings)
-    else if (value === 'on' || value === 'suggest') {
-      const text = await route($, value === 'on' ? 'on' : '', settings)
+    else if (value === 'on') {
+      const text = await route($, 'on', settings)
       $.ui.log(`effort-router: ${text}`, { to: 'debug' })
+    } else if (value === 'suggest') {
+      // The footer reads `checking…` while the check runs, then the band opens with what it found (unless consent
+      // auto's notice, with its Undo, already says it).
+      session.checking = true
+      show($)
+      let text: string
+      try {
+        text = await route($, '', settings)
+      } finally {
+        session.checking = false
+      }
+      $.ui.log(`effort-router: ${text}`, { to: 'debug' })
+      if (session.notice === undefined) session.result = text
+      show($)
     }
   } catch (error) {
     $.ui.log(`effort-router: band action ${value} failed: ${String(error)}`, { to: 'debug' })
+    session.result = 'the check failed. Nothing changed.'
+    show($)
   }
 }
 
@@ -978,9 +1037,9 @@ async function bandAction($: EngineInterface, id: string, session: Session, sett
 async function humanTurn($: EngineInterface, settings: Settings, input: ReadInput): Promise<void> {
   const { id, session } = await sessionOf($)
   if (!supportedModel(await modelOf($, session))) return
-  // A fork mid-turn is not served from the cache, so answers given mid-turn,
-  // and prompts queued while a turn runs, wait for the next prompt's check.
-  if (settings.classifierModel === 'session' && (session.busy || input.answer)) return
+  // Answers to the model's questions mid-turn are checked by a fork, which reads the cache mid-turn too (probe E,
+  // 2026-10-04). A prompt queued while a turn runs waits for the next prompt's check: that case isn't tested live.
+  if (settings.classifierModel === 'session' && session.busy && !input.answer) return
   if (session.state.mode === 'auto' && session.state.phase !== 'locked' && !session.state.gaveUp) {
     session.state = { ...session.state, prompts: session.state.prompts + 1 }
   }
@@ -1080,7 +1139,9 @@ export function register(on: On, options: PluginOptions): void {
       })
       const { session } = await sessionOf($)
       await modelOf($, session)
-      if (session.lastSent === undefined) {
+      // The settings file's effortLevel doesn't apply to Opus 5.5 (Claude Code's model-config docs), so it
+      // isn't shown there: the first request gives the real level.
+      if (session.lastSent === undefined && supportedModel(session.model)?.id !== 'claude-opus-5-5') {
         const configured = (await $.settings.read().catch(() => ({}))) as { effortLevel?: unknown }
         if (isLevel(configured.effortLevel)) session.lastSent = configured.effortLevel
       }
@@ -1251,7 +1312,7 @@ export function register(on: On, options: PluginOptions): void {
   // that opens the band. (Desktop silently drops a Select here, so no Select.)
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     const { session } = await sessionOf($)
-    const label = footerLabel(view(session))
+    const label = session.checking ? { text: 'checking…', dim: true } : footerLabel(view(session))
     const theirs = await next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     const mine =
@@ -1271,8 +1332,9 @@ export function register(on: On, options: PluginOptions): void {
     const theirs = await next(e)
     const { notice } = session
     const state = view(session)
-    const headline = notice && !session.bandOpen ? noticeHeadline(notice) : bandHeadline(state)
-    const actions = notice && !session.bandOpen ? noticeActions(allowOff) : bandActions(state, allowOff)
+    const result = !notice && !session.bandOpen ? session.result : undefined
+    const headline = notice && !session.bandOpen ? noticeHeadline(notice) : result ? `Effort router: ${result}` : bandHeadline(state)
+    const actions = notice && !session.bandOpen ? noticeActions(allowOff) : result ? [] : bandActions(state, allowOff)
     const level = notice && !session.bandOpen ? notice.level : state.asking?.level ?? (state.mode === 'auto' && state.phase === 'locked' ? state.level : undefined)
     const label = notice && !session.bandOpen ? notice.level : footerLabel(state).text
     const at = level ? headline.indexOf(label) : -1

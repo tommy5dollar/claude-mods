@@ -3,7 +3,7 @@
 ## Automated
 
 ```
-bun test                            # 94 tests: trimming (incl. the last assistant message kept long and AskUserQuestion
+bun test                            # 97 tests: trimming (incl. the last assistant message kept long and AskUserQuestion
                                     # questions and answers kept), the classifier input cap (first prompt, then human lines
                                     # before assistant text), reply parsing (incl. fenced json), the classifier frame,
                                     # $defaults layering, settings layers, /route grammar and hints, state: consent names
@@ -21,8 +21,11 @@ bun test                            # 94 tests: trimming (incl. the last assista
                                     # 0.10: confidence in replies (fractions, percentages, none), the bar, supported models
                                     # and names, standing aside on other models, the size skip, the fork's message, the
                                     # instructions block, status when a check leaned below the bar, reads by kind, verdict
-                                    # rows and their outcome tied to the check that asked
-claude plugin test .                # 60 tests in the engine's kit, among them, for the main thread: undecided runs at the
+                                    # rows and their outcome tied to the check that asked;
+                                    # 0.11: no example or rule names a level, levels held to highestLevel (xhigh unless
+                                    # set) in the frame, contract and capLevel, the fork's answers block, the subagent read
+                                    # told its model with that model's notes, the subagent fork message, definitions' model
+claude plugin test .                # 63 tests in the engine's kit, among them, for the main thread: undecided runs at the
                                     # picker level with no question; the picker's level locks with no question and reading
                                     # stops; a different level holds the request on the question, Use locks it and syncs
                                     # /effort, Keep locks the picker level; the footer reads high? while the request waits;
@@ -51,11 +54,17 @@ claude plugin test .                # 60 tests in the engine's kit, among them, 
                                     # nothing happens and the next prompt asks; a bar of 0; no check while a turn runs or for
                                     # answers mid-turn; verdict rows saved; an unsupported model: no checks, off, says why;
                                     # a locked level not applied after /model to another; model notes in the check and in
-                                    # /route rules; a long first-seen session left alone
-"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 60 under Desktop's engine
+                                    # /route rules; a long first-seen session left alone;
+                                    # 0.11: answers mid-turn checked by a fork carrying them (prompts queued mid-turn still
+                                    # wait); max held to xhigh, highestLevel max allows it; classifierModel haiku ignored;
+                                    # a subagent's read is a fork of its parent told the subagent's model; a subagent on
+                                    # Haiku (the call's model or its definition's) is left alone; Check now shows its result
+                                    # in the band
+"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 63 under Desktop's engine
 claude plugin validate . --strict
-bun run eval -- --runs 3            # opt-in, real model: 22 session fixtures and 14 subagent briefs, see below
-                                    # (separate calls on haiku: it scores levels, not confidence or forks)
+bun run eval -- --runs 3            # opt-in, real model: 23 session fixtures and 14 subagent briefs, see below
+                                    # (both sets as separate calls on --model, default opus, with its notes; the session
+                                    # set with confidence; the forks the router makes can't be reproduced here)
 ```
 
 ### Classifier eval (2026-10-04, haiku, `bun run eval -- --runs 3`)
@@ -65,6 +74,64 @@ bun run eval -- --runs 3            # opt-in, real model: 22 session fixtures an
 Against the 0.5.1 prompt and rules (same fixtures): `53/66 reads passed (80%); 17/22 fixtures passed every run`. The live miss reproduced 0/3: "implement for me a new finance solution pulling from multiple accountancy platforms" after "pull latest code" came back `undecided` every time, as did a vague feature, a vague bank-statement importer and the AskUserQuestion case (whose answers 0.5.1 reduced to a tool name).
 
 Five fixtures (marked "held out") are not mirrored by the prompt's worked examples; several others are, so read 100% as "the examples are followed", not as a general accuracy figure.
+
+### Classifier eval per model (2026-10-04, 0.10 runner, `bun run eval -- --set session --runs 2 --model <opus|sonnet|fable>`)
+
+The first check as 0.10 makes it: on the session's model at its default effort, with that model's notes (rewritten from `rules/models/research-2026-10.md` the same day).
+
+| Model | Reads passed | Over the 80% bar | Right when over the bar |
+|---|---|---|---|
+| Opus 5.5 | 44/44 | 25/44 | 25/25 |
+| Sonnet 5.5 | 44/44 | 24/44 | 24/24 |
+| Fable 5.1 | 44/44 | 26/44 | 26/26 |
+
+The three models gave almost the same level on every fixture. The notes barely moved them: Sonnet and Fable still chose max for the two autonomous fixtures, though Sonnet's notes say max scored below xhigh. Sonnet gave medium where the others gave low on one fixture (a one-column migration), and Fable split low/medium on the vague feature. So model notes in the prompt don't produce per-model routing. Also, the fixtures' expected levels are the same for every model, so 100% here can't show per-model correctness. Every read the router would have acted on was right, but these fixtures are easy and close to the worked examples, so this is not calibration.
+
+### 0.11 eval (2026-10-04, `bun run eval -- --runs 2 --model <opus|sonnet|fable>`)
+
+Both sets as separate calls on the model with its per-level notes, levels up to xhigh. The subagent set is the harder
+case: the router asks a fork of the parent, which knows the task, and this can't.
+
+| Model | Session reads | 70%+ (the bar) / 80%+, of reads with a level | Subagent reads |
+|---|---|---|---|
+| Opus 5.5 | 46/46 | 27 / 10 of 34 | 26/28 |
+| Sonnet 5.5 | 42/46 | 21 / 12 of 33 | 26/28 |
+| Fable 5.1 | 43/46 | 31 / 21 of 34 | 25/28 |
+
+- No check picked max (it isn't offered).
+- Sonnet gave medium for the rename and the one-constant extraction, which its notes support (at low it can skip
+  verifying a change), so those fixtures now accept medium on Sonnet (`expectOn`). It went undecided once on the
+  payout webhook.
+- Fable gave medium for the one-constant extraction (twice) and medium/high for the vague feature (expected low or
+  medium). Left as misses: its notes don't clearly support medium there.
+- All three gave medium for the web-research subagent (expected low). Fable's notes support it (at low it searches
+  less), so that fixture accepts medium on Fable. Opus and Sonnet left as misses.
+- The subagent set did much better than the light variant on haiku (79% / 61% / 64% there).
+
+### Prompt variants (2026-10-04, `--variant shipped|light|hybrid`, 2 runs per fixture; the light variant became the 0.11 prompt and the flag was removed)
+
+An experiment on whether the per-model element should be rules or evidence. 23 session fixtures (a research fixture
+added) and `expectOn` predictions from the research for Sonnet (xhigh, not max, when autonomous) and Fable (xhigh or
+max for the autonomous build, not low for research on current tools). `light` (eval/variants/light.ts) drops the
+kind-of-task-to-level mapping and the levels from the worked examples, keeps the examples on reading a transcript, and
+makes the model notes the main guide. `hybrid` keeps the shipped prompt and says the notes win where they differ.
+
+| Variant | Opus 5.5 | Sonnet 5.5 | Fable 5.1 | Reads with a level at 80%+ (O/S/F, of 34) | at 70%+ |
+|---|---|---|---|---|---|
+| shipped | 46/46 | 42/46 | 46/46 | 24 / 25 / 28 | 31 / 31 / 32 |
+| hybrid | 46/46 | 42/46 | 46/46 | 24 / 26 / 27 | |
+| light | 43/46 | 40/46 | 46/46 | 6 / 6 / 19 | 27 / 24 / 30 |
+
+- shipped and hybrid: the models follow the labelled examples. Example 10 says an autonomous security hunt is max, so
+  Sonnet answers max for both autonomous fixtures, notes or not. Telling the model the notes win changed nothing.
+- light: the models diverge in the directions the evidence predicts. Sonnet: xhigh for the autonomous hunt (2/2),
+  medium for mechanical work (its notes say low skips checks). Fable: xhigh for the autonomous build, high for research
+  on current tools. Opus moved off max for autonomous work (high or xhigh), which its notes (max overthinks, returns
+  flatten) support and the shipped rules don't. Its misses against the fixtures are mostly these, and the fixtures'
+  expectations come from the mapping light removes, so they can't judge it.
+- light's confidence drops by about 0.05 to 0.1 on Opus and Sonnet: at the 80% bar the router would act on 6 of 34 reads.
+- light's subagent reads (haiku, told the subagent's model) got worse: mechanical briefs drifted to medium. The mapping
+  in the subagent frame was doing real work for haiku.
 
 ### Subagent eval (2026-10-04, haiku, `bun run eval -- --runs 3`)
 
@@ -157,7 +224,7 @@ Expected: r1 `classifier said {"decision":"undecided"}` and `medium -> medium`. 
 
 Install the dev build in the Desktop Code tab, set the effort picker to Medium, and start a fresh session in a scratch repo. With a debug log, `grep "effort-router: " <log>` shows each read, each step as `effort <arrived> -> <sent>`, and each question.
 
-1. Footer: before any prompt the footer beside the effort picker reads `deciding` (dim). Pressing it opens the band: `Effort router: deciding. Your effort setting applies until the task is clear.` with `1: Check now  2: Turn off  x: Close`. Press it again: the band closes. No band ever opens by itself (consent `ask`).
+1. Footer: before any prompt the footer beside the effort picker reads `deciding` (dim). Pressing it opens the band: `Effort router: deciding. Your effort setting applies until the task is clear.` with `1: Check now  2: Turn off  x: Close`. Press it again: the band closes. No band ever opens by itself (consent `ask`). Press `Check now`: the footer reads `checking…` until the check answers, then the band opens with the result (for example `Effort router: No clear task yet. Nothing changed.` and `Close`), or the question card opens first when the result differs from your setting (0.10.0, not yet seen in Desktop).
 2. Undecided: type `hi`. A short pause (the read), then the turn runs at Medium. No question, footer unchanged.
 3. Same level: in a fresh session, type "add a dark mode toggle to the settings page" (Medium work). No question; the turn runs; the footer reads `medium 🔒`; the transcript shows `Effort router: medium for the rest of this session (...).` The next prompt shows no `read settled` line.
 4. Different level, Use: in a fresh session, type "the checkout total is wrong when a coupon expires mid-session, fix it". The turn waits on Claude's question card: `Effort router: Bug fix in existing code. Use high effort instead of medium?` with `Use high` and `Keep medium`. While it is open the footer reads `high?` and nothing streams. Wait more than 10 seconds before answering (the hook time limit): choose `Use high`. The turn then runs; the step logs `effort medium -> high`; the footer reads `high 🔒`. The Desktop picker still reads Medium (the app owns it).

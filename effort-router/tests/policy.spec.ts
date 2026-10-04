@@ -9,6 +9,9 @@ import {
   confidenceOf,
   conversationTokens,
   forkPrompt,
+  capLevel,
+  levelsUpTo,
+  subagentForkPrompt,
   isConfident,
   modelName,
   onModel,
@@ -306,11 +309,13 @@ describe('the classifier prompt', () => {
     expect(system).toContain('Answer undecided ONLY when no actionable task has been stated yet')
     expect(system).toContain('suggest the best level for it NOW, even if the details are still unclear')
     expect(system).not.toContain('When unsure, answer undecided')
-    expect(system).toContain('implement for me a new finance solution pulling from multiple accountancy platforms → {"decision":"level","level":"high","confidence":0.7')
+    expect(system).toContain('implement for me a new finance solution pulling from multiple accountancy platforms → a level for the finance build.')
     expect(system).toContain('USER: pull the latest code → {"decision":"undecided"}')
-    expect(system).toContain('2, keep it simple → {"decision":"level","level":"low","confidence":0.9')
+    expect(system).toContain('2, keep it simple → a level for extracting one constant.')
     expect(system).toContain('USER answered:')
     expect((system.match(/^\d+\. USER:/gm) ?? []).length).toBeGreaterThanOrEqual(6)
+    // 0.11: no example or rule names the level a kind of task gets; the model notes say what each level can do
+    expect(system).not.toMatch(/"level":"(low|medium|high|xhigh|max)"/)
     expect(classifierPrompt('USER: hi')).toContain('answer undecided only if no actionable task has been stated yet')
   })
 
@@ -542,7 +547,7 @@ describe('subagent reads', () => {
 
   test('the user prompt: type, description and the brief', () => {
     expect(subagentPrompt(BRIEF)).toBe(
-      'Agent type: Explore\nDescription: Find webhook handlers\n<brief>\nList every webhook handler with file and line.\n</brief>\n\nPick the effort level this subagent should run at, from its brief alone. JSON only.',
+      'Agent type: Explore\nDescription: Find webhook handlers\n<brief>\nList every webhook handler with file and line.\n</brief>\n\nPick the effort level this subagent should run at, from its brief alone: decide from it and do not assume context it does not state. JSON only.',
     )
     expect(subagentPrompt({ subagentType: '', description: ' ', prompt: 'x' })).toStartWith('Agent type: unknown\nDescription: (none)\n')
   })
@@ -555,7 +560,24 @@ describe('subagent reads', () => {
     expect(capped).toEndWith(' END')
     expect(capped).toMatch(/\[… \d+ chars omitted …\]/)
     expect(capBrief('short', 1000)).toBe('short')
-    expect(subagentPrompt({ ...BRIEF, prompt: brief }, 1000).length).toBeLessThan(1200)
+    expect(subagentPrompt({ ...BRIEF, prompt: brief }, 1000).length).toBeLessThan(1300)
+  })
+
+  test('the subagent read knows the model the subagent runs on, and a fork of the parent is asked with the brief', () => {
+    const notes = { name: 'Sonnet 5.5', notes: '- low: chat and lookups.' }
+    expect(subagentSystem('RULES', notes)).toContain('The subagent runs on Sonnet 5.5. What each level can do on this model (the main guide to the level):\n<model_notes>\n- low: chat and lookups.\n</model_notes>')
+    const fork = subagentForkPrompt({ rules: 'RULES', brief: BRIEF, runsOn: 'Sonnet 5.5', model: notes })
+    expect(fork).toStartWith('Pause the task for a moment. Do not use any tools and do not start the subagent yourself')
+    expect(fork).toContain('You are about to start a Explore subagent on Sonnet 5.5 ("Find webhook handlers") with the brief below. You know the task and why you are delegating this part of it: use that.')
+    expect(fork).toContain('<brief>\nList every webhook handler with file and line.\n</brief>')
+    expect(fork).toContain('<rules>\nRULES\n</rules>')
+    expect(fork).not.toContain('from its brief alone')
+  })
+
+  test('agent definitions carry their model, unless it inherits', () => {
+    expect(agentFileDefinition('---\nname: scout\nmodel: haiku\n---\nbody', 'scout.md', 'user')).toEqual({ name: 'scout', model: 'haiku', source: 'user' })
+    expect(agentFileDefinition('---\nname: scout\nmodel: inherit\neffort: low\n---\n', 'scout.md', 'user')).toEqual({ name: 'scout', effort: 'low', source: 'user' })
+    expect(settingsAgentDefinitions({ agents: { scout: { model: 'sonnet' } } }, 'project')).toEqual([{ name: 'scout', model: 'sonnet', source: 'project' }])
   })
 
   test('parses a level and reason; decision may be left out; anything else falls back (undefined)', () => {
@@ -809,6 +831,19 @@ describe('0.10: confidence, models, size, verdicts', () => {
     expect(text).toContain('<new_message>\nfix it\n</new_message>')
     expect(text).toContain('<user_hint>\nbe careful\n</user_hint>')
     expect(forkPrompt({ rules: 'RULES' })).not.toContain('<new_message>')
+    expect(forkPrompt({ rules: 'RULES', answered: '"Which platforms?"="Xero"' })).toContain('You asked the user questions, and they have just answered:\n<answers>\n"Which platforms?"="Xero"\n</answers>')
+  })
+
+  test('levels are held to the highest level: xhigh unless set, and the prompts offer no more', () => {
+    expect(levelsUpTo()).toEqual(['low', 'medium', 'high', 'xhigh'])
+    expect(levelsUpTo('max')).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
+    expect(capLevel('max')).toBe('xhigh')
+    expect(capLevel('high', 'medium')).toBe('medium')
+    expect(capLevel('low')).toBe('low')
+    expect(classifierSystem('RULES')).toContain('Levels, lowest to highest: low, medium, high, xhigh.')
+    expect(classifierSystem('RULES')).toContain('"level":"<low|medium|high|xhigh>"')
+    expect(classifierSystem('RULES', undefined, 'max')).toContain('Levels, lowest to highest: low, medium, high, xhigh, max.')
+    expect(subagentSystem('RULES')).toContain('"level":"<low|medium|high|xhigh>"')
   })
 
   test('the separate check carries the instructions first when given', () => {

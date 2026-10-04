@@ -1,7 +1,7 @@
 {
   "name": "effort-router",
-  "version": "0.10.0",
-  "description": "Picks the reasoning effort each task needs, following Anthropic's 'Spending your effort' guidance. Your session's own model judges the task, and the router only acts once it's confident. When it disagrees with your effort setting, it asks before the task runs. Subagents get their own level. /route report shows where your effort went.",
+  "version": "0.11.0",
+  "description": "Picks the reasoning effort each task needs. Your session's own model judges the task, knowing what each level can do on that model, and the router only acts once it's confident. When it disagrees with your effort setting, it asks before the task runs. Subagents get their own level, chosen by the agent that starts them. /route report shows where your effort went.",
   "author": {
     "name": "Tommy Long"
   },
@@ -44,7 +44,7 @@
     "classifierModel": {
       "type": "string",
       "title": "Check model",
-      "description": "\"session\" (default): your session's own model judges the task, reading the conversation as it sees it. Or name a model, such as haiku, for quicker, cheaper checks that read a shortened copy.",
+      "description": "\"session\" (default): your session's own model judges the task, reading the conversation as it sees it. Or name another supported model (opus, sonnet or fable) for checks that read a shortened copy.",
       "required": false,
       "default": "session"
     },
@@ -53,7 +53,20 @@
       "title": "How sure a check must be",
       "description": "From 0 to 1. The router only changes the effort when a check is at least this sure. Otherwise it checks again after your next prompt.",
       "required": false,
-      "default": 0.8
+      "default": 0.7
+    },
+    "highestLevel": {
+      "type": "string",
+      "title": "Highest level",
+      "description": "The highest effort the router picks. xhigh (default): max rarely does better than xhigh on the current models and can overthink. Choose max to allow it.",
+      "required": false,
+      "default": "xhigh",
+      "options": [
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
     },
     "skipAboveTokens": {
       "type": "number",
@@ -86,7 +99,7 @@
     "routeSubagents": {
       "type": "boolean",
       "title": "Route subagents",
-      "description": "Give each subagent its own effort level based on its task (searches low, coding and review high). An agent whose definition sets an effort keeps it. Off: subagents use the session level.",
+      "description": "Give each subagent its own effort level: the agent starting it says what the subagent needs on the model it runs on. An agent whose definition sets an effort keeps it, and Haiku agents are left alone. Off: subagents use the session level.",
       "required": false,
       "default": true
     },

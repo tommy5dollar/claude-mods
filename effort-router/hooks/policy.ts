@@ -18,14 +18,26 @@ export const rank = (level: Level): number => LEVELS.indexOf(level)
 
 // --- the classifier prompt -----------------------------------------------------
 
+/** The highest level the router picks unless the `highestLevel` option says otherwise. Max rarely beats xhigh. */
+export const DEFAULT_HIGHEST: Level = 'xhigh'
+
+/** The levels a check may pick: low up to `highest`. */
+export const levelsUpTo = (highest: Level = DEFAULT_HIGHEST): readonly Level[] => LEVELS.slice(0, LEVELS.indexOf(highest) + 1)
+
+/** A level held to `highest`. */
+export const capLevel = (level: Level, highest: Level = DEFAULT_HIGHEST): Level =>
+  LEVELS.indexOf(level) > LEVELS.indexOf(highest) ? highest : level
+
 /**
- * The fixed frame around the routing rules. The rules themselves (the
- * article's policy) live in `rules/default.md` and the user's markdown files;
- * this frame holds what no rules file should be able to break: the job, when
- * to answer undecided (only before any task is stated), the worked examples
- * and the JSON contract.
+ * The fixed frame around the routing rules. It describes the job and how to
+ * read a transcript, but never ties a kind of task to a level: what a level
+ * can do differs by model, and the model notes say it. (An eval on 2026-10-04
+ * showed a frame whose examples named levels overrode the notes.) The rules
+ * (`rules/default.md` and the user's files) hold the principles for choosing.
  */
-export const CLASSIFIER_FRAME = `You pick the reasoning-effort level for a whole Claude Code session from its transcript. Levels, lowest to highest: low, medium, high, xhigh, max.
+export const classifierFrame = (highest: Level = DEFAULT_HIGHEST): string => `You pick the reasoning-effort level for a whole Claude Code session from its transcript. Levels, lowest to highest: ${levelsUpTo(highest).join(', ')}.
+
+Level names don't mean the same thing on every model: each level buys a different amount of thinking, and different behaviour, on each. Judge what this session needs on the model it runs on, using what the notes below say each level can do there.
 
 When to answer undecided, and when to suggest:
 - Answer undecided ONLY when no actionable task has been stated yet: greetings, setup or housekeeping ("pull the latest code", "install the deps", "what's in this repo?"), or pure questions asked before any work. That opening filler is not the task.
@@ -33,7 +45,7 @@ When to answer undecided, and when to suggest:
 
 Judge the task as it stands now:
 - Weigh the latest exchange most. A later clarification of scope overrides an earlier ask: "fix the whole auth system" followed by "actually just the typo in the login message" is a small change.
-- Read short replies against the question they answer. If the assistant asked "1. full rewrite or 2. minimal patch?" and the user replied "2", the task is the minimal patch. Answers to the assistant's multiple-choice questions appear as "ASSISTANT asked:" then "USER answered:"; they are the user's words about the task.
+- Read short replies against the question they answer. If the assistant asked "1. full rewrite or 2. minimal patch?" and the user replied "2", the task is the minimal patch. Answers to the assistant's multiple-choice questions are the user's words about the task.
 - If a user hint is given, the user asked for this routing explicitly: weigh the hint strongly.
 
 How sure you are:
@@ -42,51 +54,56 @@ How sure you are:
 - 0.6 to 0.8: the task is stated, but its scope, its risk or the code it touches could still move it a level.
 - Below 0.6: a guess.
 
-Worked examples (transcript, then the reply):
+Worked examples of reading a transcript (what level each needs depends on the model, so none is shown):
 1. USER: hi → {"decision":"undecided"}
 2. USER: pull the latest code → {"decision":"undecided"}
 3. USER: what's in this repo? / ASSISTANT: A Next.js storefront with a Postgres backend. → {"decision":"undecided"}
-4. USER: pull latest code / ASSISTANT: Pulled, 3 new commits. / USER: implement for me a new finance solution pulling from multiple accountancy platforms → {"decision":"level","level":"high","confidence":0.7,"reason":"new multi-platform finance integration build"} (money, reconciliation and several external APIs: edge cases. The details are not settled yet, so the level may still move)
-5. USER: add a dark mode toggle to the settings page → {"decision":"level","level":"medium","confidence":0.8,"reason":"regular feature work"}
-6. USER: the checkout total is wrong when a coupon expires mid-session, fix it → {"decision":"level","level":"high","confidence":0.9,"reason":"bug fix in existing code"}
-7. USER: refactor the payment retry logic / ASSISTANT: 1. a full rewrite with a state machine or 2. just extract the backoff constant? / USER: 2, keep it simple → {"decision":"level","level":"low","confidence":0.9,"reason":"small constant extraction"}
-8. USER: build a sync job for our invoices / ASSISTANT asked: Which platforms? [options: Xero | QuickBooks | Sage] / USER answered: Xero and QuickBooks, nightly, EU data residency → {"decision":"level","level":"high","confidence":0.85,"reason":"multi-platform invoice sync"}
-9. USER: rename getUser to fetchUser across the repo → {"decision":"level","level":"low","confidence":0.95,"reason":"mechanical rename"}
-10. USER: find security vulnerabilities in our auth service and fix them, work through it on your own, I'm away all day → {"decision":"level","level":"max","confidence":0.9,"reason":"autonomous security vulnerability hunt"}
+4. USER: pull latest code / ASSISTANT: Pulled, 3 new commits. / USER: implement for me a new finance solution pulling from multiple accountancy platforms → a level for the finance build. The filler before it doesn't matter, and the details not being settled is no reason to wait.
+5. USER: fix the whole auth system / ASSISTANT: Where should I start? / USER: actually just the typo in the login message → a level for a one-word typo fix.
+6. USER: refactor the payment retry logic / ASSISTANT: 1. a full rewrite with a state machine or 2. just extract the backoff constant? / USER: 2, keep it simple → a level for extracting one constant.
+7. USER: build a sync job for our invoices / ASSISTANT asked: Which platforms? [options: Xero | QuickBooks | Sage] / USER answered: Xero and QuickBooks, nightly, EU data residency → a level for a nightly two-platform invoice sync.
 
-Apply these routing rules. Later rules override earlier ones where they conflict:`
+Principles for choosing. Later rules override earlier ones where they conflict:`
 
-export const CLASSIFIER_CONTRACT = `Reply with exactly one JSON object and nothing else:
+/** The frame at the default highest level. */
+export const CLASSIFIER_FRAME = classifierFrame()
+
+export const classifierContract = (highest: Level = DEFAULT_HIGHEST): string => `Reply with exactly one JSON object and nothing else:
 {"decision":"undecided"}
 or
-{"decision":"level","level":"<low|medium|high|xhigh|max>","confidence":<0 to 1>,"reason":"<what the task is, 3-8 words, e.g. bug fix in existing code>"}`
+{"decision":"level","level":"<${levelsUpTo(highest).join('|')}>","confidence":<0 to 1>,"reason":"<what the task is, 3-8 words, e.g. bug fix in existing code>"}`
 
-/** What effort means on the session's model: its name and the notes in `rules/models/`. */
+export const CLASSIFIER_CONTRACT = classifierContract()
+
+/** What effort means on a model: its name and the notes in `rules/models/`. */
 export type ModelNotes = { name: string; notes: string }
 
-const modelBlock = (model?: ModelNotes): string =>
+const modelBlock = (model: ModelNotes | undefined, who: string): string =>
   model && model.notes.trim() !== ''
-    ? `\n\nThe session runs on ${model.name}. How effort behaves on this model (weigh it when you pick the level):\n<model_notes>\n${model.notes.trim()}\n</model_notes>`
+    ? `\n\n${who} ${model.name}. What each level can do on this model (the main guide to the level):\n<model_notes>\n${model.notes.trim()}\n</model_notes>`
     : ''
 
 /** The classifier's whole system prompt around the composed rules, with the session model's notes when there are any. */
-export const classifierSystem = (rules: string, model?: ModelNotes): string =>
-  `${CLASSIFIER_FRAME}\n\n<rules>\n${rules.trim()}\n</rules>${modelBlock(model)}\n\n${CLASSIFIER_CONTRACT}`
+export const classifierSystem = (rules: string, model?: ModelNotes, highest: Level = DEFAULT_HIGHEST): string =>
+  `${classifierFrame(highest)}\n\n<rules>\n${rules.trim()}\n</rules>${modelBlock(model, 'The session runs on')}\n\n${classifierContract(highest)}`
 
 /**
  * The one message a check sends into a fork of the session (`$.model.fork`):
  * the whole conversation as the session's model last saw it, its own system
  * prompt, CLAUDE.md and memory included, then this. A fork replays the last
  * request, which does not hold the reply it produced, so that reply comes
- * along here, as does the prompt being submitted.
+ * along here, as do the prompt being submitted and, mid-turn, the answers the
+ * user just gave to the model's questions.
  */
-export function forkPrompt(input: { rules: string; model?: ModelNotes; current?: string; lastReply?: string; hint?: string }): string {
+export function forkPrompt(input: { rules: string; model?: ModelNotes; current?: string; lastReply?: string; hint?: string; answered?: string; highest?: Level }): string {
   const parts = [
     'Pause the task for a moment. Do not use any tools and do not carry on with the work: answer only the question below.',
-    classifierSystem(input.rules, input.model),
+    classifierSystem(input.rules, input.model, input.highest),
   ]
   const lastReply = input.lastReply?.trim()
   if (lastReply) parts.push(`Your last reply in this conversation, which is not shown above:\n<last_reply>\n${lastReply}\n</last_reply>`)
+  const answered = input.answered?.trim()
+  if (answered) parts.push(`You asked the user questions, and they have just answered:\n<answers>\n${answered}\n</answers>`)
   const current = input.current?.trim()
   if (current) parts.push(`The user has just sent this new message, and the work goes on from it:\n<new_message>\n${current}\n</new_message>`)
   const hint = input.hint?.trim()
@@ -167,9 +184,9 @@ ${scope === 'project'
 
 /** The prompt for `/route rules critique`. */
 export const critiquePrompt = (defaults: string, composed: ComposedRules): string =>
-  `Below are the shipped default rules for a classifier that picks a Claude Code session's reasoning effort (low, medium, high, xhigh, max), and the effective rules after the user's customisation (${composed.contributors.map(c => `${c.source}: ${c.how}`).join('; ')}).
+  `Below are the shipped default rules for a classifier that picks a Claude Code session's reasoning effort (low, medium, high, xhigh, max), guided by notes on what each level can do on the session's model, and the effective rules after the user's customisation (${composed.contributors.map(c => `${c.source}: ${c.how}`).join('; ')}).
 
-Critique the user's customisation in at most 8 short bullet points: rules that are ambiguous, contradict each other or the defaults, would push most sessions to one level, or that a small classifier model would likely misapply. Suggest concrete rewordings. If nothing was customised, say so in one line.
+Critique the user's customisation in at most 8 short bullet points: rules that are ambiguous, contradict each other or the defaults, would push most sessions to one level, or that tie kinds of task to levels without regard to the model (level names mean different things on different models). Suggest concrete rewordings. If nothing was customised, say so in one line.
 
 <defaults>
 ${defaults.trim()}
@@ -534,38 +551,32 @@ export function modelName(model: string | undefined): string {
 // --- subagents --------------------------------------------------------------------
 
 /**
- * The frame for a subagent's read. A subagent is routed once, at spawn, from
- * the brief its parent wrote: unlike the session read it has no transcript,
- * no user in the loop and no "undecided". The same rules sit inside it, so a
- * user's or organisation's rules ("payments code is never below high") still
- * apply to subagents.
+ * The frame for a subagent's read. A subagent is routed once, at spawn. Like
+ * the session frame it ties no kind of task to a level: the notes on the
+ * model the subagent runs on say what each level can do. The same rules sit
+ * inside it, so a user's or organisation's rules ("payments code is never
+ * below high") still apply to subagents.
  */
-export const SUBAGENT_FRAME = `You pick the reasoning-effort level for one Claude Code subagent from the brief its parent agent wrote for it. Levels, lowest to highest: low, medium, high, xhigh, max.
+export const subagentFrame = (highest: Level = DEFAULT_HIGHEST): string => `You pick the reasoning-effort level for one Claude Code subagent. Levels, lowest to highest: ${levelsUpTo(highest).join(', ')}.
+
+Level names don't mean the same thing on every model. Judge what this subagent needs on the model it runs on, using what the notes below say each level can do there.
 
 How a subagent differs from a session with a user:
-- No user is in the loop. The subagent works alone from its brief until it reports back; nobody answers its questions or checks its steps. Without a user in the loop, higher effort does better on open-ended work that needs judgement: implementing or changing code, debugging, code review, security work, design and planning. Pick high for these; xhigh when the work is edge-case heavy in security, concurrency, performance, ML/data or hardware; max only for a long, fully autonomous hunt or build on a hard problem.
-- Mechanical work and tight specs gain little from effort, with or without a user: searching a codebase or the web, looking something up, listing or reading files, collecting or tabulating facts, running a given command and reporting its output, summarising or extracting from text it is given. Pick low for these.
-- medium is for small, well-specified code changes that follow an existing pattern.
-- The brief is the whole task: decide from it alone and do not assume context it does not state. The agent type is a hint (a search or explore agent is usually mechanical), but the brief decides.
+- No user is in the loop. The subagent works alone from its brief until it reports back; nobody answers its questions or checks its steps.
 - There is no undecided. If the brief is short or vague, pick the level the work it describes most likely needs.
 
-Worked examples (agent type: brief, then the reply):
-1. Explore: list every call site of chargeCard() with file and line → {"decision":"lock","level":"low","reason":"codebase search"}
-2. general-purpose: look up the current Node.js LTS version and its end-of-life date, cite the page → {"decision":"lock","level":"low","reason":"web lookup"}
-3. general-purpose: run the lint script and paste back any errors verbatim → {"decision":"lock","level":"low","reason":"run a command and report"}
-4. general-purpose: in the orders table component, add a "Region" column the same way "Country" is shown → {"decision":"lock","level":"medium","reason":"small change following a pattern"}
-5. general-purpose: the nightly export job sometimes writes duplicate rows; find out why and fix it → {"decision":"lock","level":"high","reason":"debugging an intermittent bug"}
-6. general-purpose: implement the webhook retry queue described below, with tests (spec follows) → {"decision":"lock","level":"high","reason":"feature implementation, no user in loop"}
-7. general-purpose: audit the file upload handler for path traversal and unsafe deserialisation → {"decision":"lock","level":"xhigh","reason":"security audit"}
+Principles for choosing. They were written for whole sessions; read them for a subagent, which has no user in the loop. Later rules override earlier ones where they conflict:`
 
-Apply these routing rules too. They were written for whole sessions; read them for a subagent, which has no user in the loop. Later rules override earlier ones where they conflict:`
+export const SUBAGENT_FRAME = subagentFrame()
 
-export const SUBAGENT_CONTRACT = `Reply with exactly one JSON object and nothing else:
-{"decision":"lock","level":"<low|medium|high|xhigh|max>","reason":"<what the subagent's task is, 3-8 words, e.g. codebase search>"}`
+export const subagentContract = (highest: Level = DEFAULT_HIGHEST): string => `Reply with exactly one JSON object and nothing else:
+{"decision":"lock","level":"<${levelsUpTo(highest).join('|')}>","reason":"<what the subagent's task is, 3-8 words, e.g. codebase search>"}`
 
-/** The subagent read's whole system prompt around the composed rules. */
-export const subagentSystem = (rules: string): string =>
-  `${SUBAGENT_FRAME}\n\n<rules>\n${rules.trim()}\n</rules>\n\n${SUBAGENT_CONTRACT}`
+export const SUBAGENT_CONTRACT = subagentContract()
+
+/** The subagent read's whole system prompt around the composed rules, with the notes on the model it runs on. */
+export const subagentSystem = (rules: string, model?: ModelNotes, highest: Level = DEFAULT_HIGHEST): string =>
+  `${subagentFrame(highest)}\n\n<rules>\n${rules.trim()}\n</rules>${modelBlock(model, 'The subagent runs on')}\n\n${subagentContract(highest)}`
 
 /** What `agent.spawn` says about the subagent, as far as its read needs it. */
 export type SubagentBrief = { subagentType: string; description: string; prompt: string }
@@ -583,9 +594,24 @@ export function capBrief(text: string, max: number): string {
   return `${text.slice(0, head)}${marker(text.length - head - tail)}${tail > 0 ? text.slice(-tail) : ''}`
 }
 
-/** The user message for a subagent's read: its type, description and brief (capped at `maxChars`). */
+/** The user message for a subagent's read on another model: its type, description and brief (capped at `maxChars`). */
 export const subagentPrompt = (brief: SubagentBrief, maxChars: number = DEFAULT_TRIM.totalChars): string =>
-  `Agent type: ${brief.subagentType || 'unknown'}\nDescription: ${brief.description.trim() || '(none)'}\n<brief>\n${capBrief(brief.prompt.trim(), maxChars)}\n</brief>\n\nPick the effort level this subagent should run at, from its brief alone. JSON only.`
+  `Agent type: ${brief.subagentType || 'unknown'}\nDescription: ${brief.description.trim() || '(none)'}\n<brief>\n${capBrief(brief.prompt.trim(), maxChars)}\n</brief>\n\nPick the effort level this subagent should run at, from its brief alone: decide from it and do not assume context it does not state. JSON only.`
+
+/**
+ * The message a subagent's read sends into a fork of its parent at spawn:
+ * the parent knows the task and why it is delegating this part, which the
+ * brief alone often doesn't say.
+ */
+export function subagentForkPrompt(input: { rules: string; brief: SubagentBrief; runsOn: string; model?: ModelNotes; maxChars?: number; highest?: Level }): string {
+  const { brief } = input
+  return [
+    `Pause the task for a moment. Do not use any tools and do not start the subagent yourself: answer only the question below. You are about to start a ${brief.subagentType || 'general-purpose'} subagent on ${input.runsOn}${brief.description.trim() ? ` ("${brief.description.trim()}")` : ''} with the brief below. You know the task and why you are delegating this part of it: use that.`,
+    subagentSystem(input.rules, input.model, input.highest),
+    `<brief>\n${capBrief(brief.prompt.trim(), input.maxChars ?? DEFAULT_TRIM.totalChars)}\n</brief>`,
+    'Pick the effort level this subagent should run at. JSON only.',
+  ].join('\n\n')
+}
 
 /**
  * Reads a subagent read's reply: a level and reason, from the first `{...}`.
@@ -610,7 +636,13 @@ export type RoutedAgent = { level: Level | number; reason: string; subagentType:
 // --- agent definitions that set their own effort ------------------------------------
 
 /** One agent definition, as far as the router needs it: its name, and its effort when it sets one. */
-export type AgentDefinition = { name: string; effort?: Level | number; source: string }
+export type AgentDefinition = { name: string; effort?: Level | number; model?: string; source: string }
+
+/** A definition's model, unless it inherits the parent's. */
+const definitionModel = (value: unknown): string | undefined => {
+  const text = typeof value === 'string' ? value.trim().replace(/^(['"])(.*)\1$/, '$2').trim() : ''
+  return text === '' || text.toLowerCase() === 'inherit' ? undefined : text
+}
 
 /** A definition's effort when it is one the engine takes: a level, or a positive number. */
 export function definitionEffort(value: unknown): Level | number | undefined {
@@ -650,7 +682,8 @@ export function agentFileDefinition(text: string, fileName: string, source: stri
   if (!fields) return undefined
   const name = fields.name?.trim() || fileName.replace(/\.md$/i, '')
   const effort = definitionEffort(fields.effort)
-  return effort === undefined ? { name, source } : { name, effort, source }
+  const model = definitionModel(fields.model)
+  return { name, ...(effort === undefined ? {} : { effort }), ...(model === undefined ? {} : { model }), source }
 }
 
 /**
@@ -668,7 +701,8 @@ export function settingsAgentDefinitions(settings: unknown, source: string): Age
   for (const [name, spec] of entries) {
     if (typeof name !== 'string' || name.trim() === '' || typeof spec !== 'object' || spec === null) continue
     const effort = definitionEffort((spec as { effort?: unknown }).effort)
-    out.push(effort === undefined ? { name: name.trim(), source } : { name: name.trim(), effort, source })
+    const model = definitionModel((spec as { model?: unknown }).model)
+    out.push({ name: name.trim(), ...(effort === undefined ? {} : { effort }), ...(model === undefined ? {} : { model }), source })
   }
   return out
 }

@@ -13,6 +13,11 @@ export type Fixture = {
   /** The prompt being submitted (the read at prompt.submit sees it beside the transcript). */
   current?: string
   expect: readonly Expected[]
+  /**
+   * Where the evidence says a model should differ (rules/models/research-2026-10.md), the levels that pass on it,
+   * replacing `expect`. These are predictions from the evidence, not measured truth.
+   */
+  expectOn?: Partial<Record<'opus' | 'sonnet' | 'fable', readonly Expected[]>>
 }
 
 const u = (text: string): TranscriptMessage => ({ role: 'user', text })
@@ -55,20 +60,30 @@ export const FIXTURES: Fixture[] = [
   { name: 'vague feature', messages: [], current: "I want to add some kind of reporting feature, not sure exactly what yet", expect: ['low', 'medium'] },
   { name: 'ordinary feature', messages: [], current: 'add a dark mode toggle to the settings page', expect: ['medium', 'low'] },
   { name: 'brownfield bug fix', messages: [], current: 'the checkout total is wrong when a coupon expires mid-session, fix it', expect: ['high'] },
-  { name: 'mechanical rename', messages: [], current: 'rename getUser to fetchUser across the repo', expect: ['low'] },
+  // Sonnet 5.5 at low can skip verifying a code change and report it done (its notes), so medium is fair there
+  { name: 'mechanical rename', messages: [], current: 'rename getUser to fetchUser across the repo', expect: ['low'], expectOn: { sonnet: ['low', 'medium'] } },
   { name: 'edge-case tests', messages: [], current: "write tests for the date parser's edge cases: leap years, DST, bad input", expect: ['high', 'xhigh'] },
   { name: 'storage engine concurrency', messages: [], current: 'implement a lock-free ring buffer for the write-ahead log in our storage engine', expect: ['xhigh', 'high'] },
   {
     name: 'autonomous vulnerability hunt',
     messages: [],
     current: "find security vulnerabilities in our auth service and fix them. Work through it on your own, I'm away all day",
-    expect: ['max', 'xhigh'],
+    // max isn't offered (highestLevel xhigh); Opus 5.5's notes (returns flatten above medium) can make high a fair answer
+    expect: ['xhigh', 'high'],
   },
   {
     name: 'autonomous end-to-end build',
     messages: [],
     current: "build the whole booking app end to end and verify it works, don't ask me any questions, I'll check tomorrow",
-    expect: ['max'],
+    expect: ['xhigh', 'high'],
+  },
+  {
+    name: 'research on current tools',
+    messages: [],
+    current: 'find out which of the current AI coding assistants support remote MCP servers over HTTP today, and put it in a table with links',
+    expect: ['low', 'medium'],
+    // Fable 5.1 at low calls search tools less and answers from memory, most of all about current products
+    expectOn: { fable: ['medium', 'high'] },
   },
 
   // --- held out: not mirrored by the prompt's worked examples ---------------------------
@@ -102,6 +117,7 @@ export const FIXTURES: Fixture[] = [
     ],
     current: '2, keep it simple',
     expect: ['low'],
+    expectOn: { sonnet: ['low', 'medium'] }, // as for the rename
   },
   {
     name: 'scope narrowed by a later clarification',
@@ -128,7 +144,7 @@ export const FIXTURES: Fixture[] = [
 
 // --- subagent briefs: one read of the brief at spawn, no undecided -------------------
 
-export type SubagentFixture = { name: string; brief: SubagentBrief; expect: readonly Level[] }
+export type SubagentFixture = { name: string; brief: SubagentBrief; expect: readonly Level[]; expectOn?: Partial<Record<'opus' | 'sonnet' | 'fable', readonly Level[]>> }
 
 const brief = (subagentType: string, description: string, prompt: string): SubagentBrief => ({ subagentType, description, prompt })
 
@@ -142,6 +158,7 @@ export const SUBAGENT_FIXTURES: SubagentFixture[] = [
       'Research UK lenders that offer buy-to-let mortgages to limited companies. For each of Precise, Paragon, Kent Reliance and The Mortgage Works, find the maximum LTV, the minimum interest cover ratio for higher-rate taxpayers and the product fee from their published criteria pages. Return a markdown table with a source URL per row. Do not spawn sub-agents.',
     ),
     expect: ['low'],
+    expectOn: { fable: ['low', 'medium'] }, // Fable 5.1 at low searches less and answers from memory (its notes)
   },
   {
     name: 'Explore: where is the token refreshed',

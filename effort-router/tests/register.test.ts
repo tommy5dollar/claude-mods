@@ -41,7 +41,7 @@ type World = {
   clock: MockClock
   /** classifierCalls as the beneath prompt.submit saw them (after the plugin's hook ran). */
   callsAtSubmit: number[]
-  /** What a subagent's read answers (its prompt starts `Agent type:`); THROW and HANG as for `reply`. */
+  /** What a subagent's read answers (a fork of its parent, or a separate call whose prompt starts `Agent type:`); THROW and HANG as for `reply`. */
   subagentReply: string
   /** Subagent reads: their system and user prompts. */
   subagentReads: { system: string; prompt: string }[]
@@ -99,6 +99,12 @@ function worldOf(on: On, reply = BUG_REPLY, sources: Record<string, unknown> = {
   on('session.messages', () => ({ value: world.messages as never }))
   on('session.model', () => ({ value: world.model }))
   on('model.fork', async ($, e) => {
+    if (e.prompt.includes('do not start the subagent yourself')) {
+      world.subagentReads.push({ system: '', prompt: e.prompt })
+      if (world.subagentReply === 'THROW') throw new Error('boom')
+      if (world.subagentReply === 'HANG') await clock.sleep(60_000)
+      return { value: { isAnswered: true, text: world.subagentReply, usage: { input_tokens: 2, output_tokens: 1, cache_read_input_tokens: 100, cache_creation_input_tokens: 0 } } }
+    }
     if (!world.forkable) return { value: { isAnswered: false, reason: 'nothing-to-fork' } as never }
     world.forks.push(e.prompt)
     world.classifierCalls += 1
@@ -356,7 +362,7 @@ describe('effort-router', () => {
     expect(await route($, 'status')).toStartWith('Deciding.')
   })
 
-  test('answered AskUserQuestion questions (checks on haiku): read before the answers return, then asked at the next request (a later index)', { options: { decideWithin: 3, classifierModel: 'haiku' } }, async ($, on) => {
+  test('answered AskUserQuestion questions (checks on another model): read before the answers return, then asked at the next request (a later index)', { options: { decideWithin: 3, classifierModel: 'opus' } }, async ($, on) => {
     const world = worldOf(on, '{"decision":"undecided"}')
     await $.session.start(STARTED)
     world.messages = [{ role: 'user', text: 'pull latest code', toolUses: [] }]
@@ -383,8 +389,9 @@ describe('effort-router', () => {
     expect(world.classifierCalls).toBe(2) // a subagent's question is not the user's turn
 
     const status = await route($, 'status')
-    expect(status).toContain("It acts once a check is at least 80% sure. If that level isn't your setting, it asks you first (consent: ask).")
-    expect(status).toMatch(/Checks this session: 2, on haiku\./)
+    expect(status).toContain("It acts once a check is at least 70% sure. If that level isn't your setting, it asks you first (consent: ask).")
+    expect(status).toMatch(/Checks this session: 2, on Opus 5\.5\./)
+    expect(world.completes.map(c => c.model)).toEqual(['opus', 'opus'])
     expect(status).toMatch(/Last check \(after answered questions, \d+s ago, took [\d.]+s\): high, 90% sure \(multi-platform finance integration\)\./)
   })
 
@@ -448,14 +455,36 @@ describe('effort-router', () => {
     expect(await route($, 'status')).toContain('Off (no clear task after 1 prompt)')
 
     expect(await route($, 'not sure yet')).toContain('No clear task yet, even with your hint')
-    expect(world.toasts.at(-1)).toContain('No clear task yet')
     expect(await route($, 'status')).toStartWith('Off')
 
     world.reply = '{"decision":"lock","level":"max","confidence":0.9,"reason":"security review"}'
-    expect(await route($, 'this is a security review')).toBe('max for this session.')
+    expect(await route($, 'this is a security review')).toBe('xhigh for this session.') // held to highestLevel
     expect(world.prompts.at(-1)).toContain('<user_hint>\nthis is a security review\n</user_hint>')
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
-    expect((await footerOf(footer)).shown).toBe('max 🔒')
+    expect((await footerOf(footer)).shown).toBe('xhigh 🔒')
+  })
+
+  test('highestLevel max lets the router pick max; never Haiku as the check model', { options: { highestLevel: 'max', classifierModel: 'haiku' } }, async ($, on) => {
+    const world = worldOf(on, '{"decision":"lock","level":"max","confidence":0.9,"reason":"security review"}', {}, AUTO)
+    await $.session.start(STARTED)
+    await submit($, 'find and fix every vulnerability in the auth service, I am away all day')
+    expect(world.completes.map(c => c.model)).toEqual(['claude-sonnet-5-5']) // haiku is ignored: the session's model checks
+    await step($, 0)
+    expect(world.sent).toEqual(['max'])
+  })
+
+  test('Check now from the band: a check that changes nothing says so in the band', async ($, on) => {
+    worldOf(on, '{"decision":"undecided"}')
+    await $.session.start({ ...STARTED, surface: 'desktop' })
+    const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'desktop', ...FOOTER } as never)
+    const band = await $.ui.mount({ plugin: 'effort-router', surface: 'desktop', ...BAND } as never)
+    await footer.press({ key: 'route-state' })
+    await band.press({ key: 'suggest' })
+    await settle($)
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: No clear task yet. Nothing changed.', buttons: ['Close'] })
+    expect((await footerOf(footer)).shown).toBe('deciding')
+    await footer.press({ key: 'route-state' }) // the footer closes it too
+    expect((await bandOf(band)).headline).toBeUndefined()
   })
 
   test("footer: a plain button that opens the band with the state's actions; Check now asks", async ($, on) => {
@@ -484,7 +513,10 @@ describe('effort-router', () => {
     await band.press({ key: 'suggest' })
     await settle($)
     expect(world.asked).toHaveLength(1)
-    expect((await bandOf(band)).headline).toBeUndefined() // the band closed; it does not open by itself under ask
+    // the band reopens with what the check found, and Close takes it away
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: high for this session.', buttons: ['Close'] })
+    await band.press({ key: 'close' })
+    expect((await bandOf(band)).headline).toBeUndefined()
     expect((await footerOf(footer)).shown).toBe('high 🔒')
     await footer.press({ key: 'route-state' })
     expect(await bandOf(band)).toEqual({ headline: 'Effort router: high 🔒 for this session (bug fix in existing code)', buttons: ['Check now', 'Turn off', 'Close'] })
@@ -779,7 +811,7 @@ describe('effort-router', () => {
       expect(world.asked).toHaveLength(1)
     })
 
-    test('a prompt sent while a turn runs is not checked (a fork mid-turn misses the cache)', async ($, on) => {
+    test('a prompt sent while a turn runs is not checked (not tested live yet)', async ($, on) => {
       const world = worldOf(on, '{"decision":"undecided"}')
       await $.session.start(STARTED)
       await submit($, 'hi')
@@ -792,13 +824,18 @@ describe('effort-router', () => {
       expect(world.classifierCalls).toBe(2)
     })
 
-    test('answered questions mid-turn wait for the next prompt', async ($, on) => {
+    test('answered questions mid-turn are checked by a fork that carries the answers', async ($, on) => {
       const world = worldOf(on, '{"decision":"undecided"}')
       await $.session.start(STARTED)
       await submit($, 'build an invoice sync')
       await step($, 0)
+      world.forkable = true
+      world.reply = '{"decision":"level","level":"high","confidence":0.85,"reason":"multi-platform invoice sync"}'
       await $.tool.call({ tool: 'AskUserQuestion', tool_use_id: 'q1', ...QUESTIONS } as never)
-      expect(world.classifierCalls).toBe(1)
+      expect(world.forks).toHaveLength(1)
+      expect(world.forks[0]).toContain(`<answers>\n${ANSWERS}\n</answers>`)
+      await step($, 1)
+      expect(world.asked).toHaveLength(1)
     })
 
     test('each verdict is recorded with its kind, model, confidence and what came of it', async ($, on) => {
@@ -876,11 +913,12 @@ describe('effort-router', () => {
 
       const id = await spawn($, { subagentType: 'Explore', description: 'Find parser call sites', prompt: 'List every caller of parse() with file and line.' })
       expect(id).toBe('agent-1')
-      expect(world.subagentReads).toHaveLength(1) // read before the agent started
+      expect(world.subagentReads).toHaveLength(1) // read before the agent started: a fork of the parent
       const read = world.subagentReads[0] ?? { system: '', prompt: '' }
-      expect(read.prompt).toStartWith('Agent type: Explore\nDescription: Find parser call sites\n<brief>\nList every caller of parse() with file and line.\n</brief>')
-      expect(read.system).toContain('one Claude Code subagent')
-      expect(read.system).toContain('<rules>')
+      expect(read.prompt).toContain('You are about to start a Explore subagent on Sonnet 5.5 ("Find parser call sites") with the brief below.')
+      expect(read.prompt).toContain('<brief>\nList every caller of parse() with file and line.\n</brief>')
+      expect(read.prompt).toContain('one Claude Code subagent')
+      expect(read.prompt).toContain('<rules>')
       expect(world.spawned[0]?.prompt).toBe('List every caller of parse() with file and line.') // the brief is passed on untouched
 
       await step($, 0, 'agent-1')
@@ -901,7 +939,8 @@ describe('effort-router', () => {
       await $.session.start(STARTED)
       await spawn($, { prompt: `HEAD ${'x'.repeat(10_000)} TAIL` })
       const prompt = world.subagentReads[0]?.prompt ?? ''
-      expect(prompt.length).toBeLessThan(2400)
+      const brief = prompt.slice(prompt.indexOf('<brief>'), prompt.indexOf('</brief>'))
+      expect(brief.length).toBeLessThan(2100)
       expect(prompt).toContain('<brief>\nHEAD ')
       expect(prompt).toContain(' TAIL\n</brief>')
       expect(prompt).toContain('chars omitted …]')
@@ -1022,11 +1061,28 @@ describe('effort-router', () => {
       expect(await route($, 'status')).toContain('not routed (turned off by your organisation)')
     })
 
+    test('a subagent on Haiku (the call\'s model, or its definition\'s) is left alone: no read, its requests untouched', async ($, on) => {
+      const world = worldOf(on, BUG_REPLY, {}, AUTO)
+      world.files['/repo/.claude/agents/scout.md'] = '---\nname: scout\nmodel: haiku\n---\nSearch things.'
+      await $.session.start(STARTED)
+      await submit($, 'fix the crash in the parser')
+      const asked = await $.agent.spawn({ tool_use_id: 't', prompt: 'search', description: 'd', subagentType: 'Explore', model: 'haiku', parentModel: 'claude-sonnet-5-5', background: true, fork: false } as never)
+      const defined = await spawn($, { prompt: 'search', subagentType: 'scout' })
+      expect(world.subagentReads).toHaveLength(0)
+      const stream = $.turn.step({ turnId: 't1', index: 0, model: 'claude-haiku-4-5-20251001', messageCount: 3, agentId: asked.agentId } as never)
+      for await (const _ of stream) {
+        // drain
+      }
+      expect(world.sent).toEqual([undefined])
+      expect(world.debug.some(line => /subagent \(Explore: d\) runs on Haiku 4\.5, left alone|runs on haiku, left alone/i.test(line))).toBe(true)
+      expect(defined).toBeDefined()
+    })
+
     test('a denied spawn is not kept', async ($, on) => {
       const world = worldOf(on, BUG_REPLY, {}, AUTO)
       world.denySpawn = 'no agents here'
       await $.session.start(STARTED)
-      const result = await $.agent.spawn({ tool_use_id: 't', prompt: 'search', description: 'd', subagentType: 'Explore', parentModel: 'm', background: true, fork: false } as never)
+      const result = await $.agent.spawn({ tool_use_id: 't', prompt: 'search', description: 'd', subagentType: 'Explore', parentModel: 'claude-sonnet-5-5', background: true, fork: false } as never)
       expect(result.deny).toBe('no agents here')
       expect(world.subagentReads).toHaveLength(1)
       expect(await route($, 'status')).not.toContain('Recent subagents')
