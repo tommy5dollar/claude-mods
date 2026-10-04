@@ -398,21 +398,141 @@ export type Decision =
  * read (fail open).
  */
 export function parseDecision(reply: string | undefined | null): Decision {
-  if (typeof reply !== 'string') return { decision: 'undecided' }
-  const match = reply.match(/\{[\s\S]*\}/)
-  if (!match) return { decision: 'undecided' }
-  let data: unknown
+  const record = jsonObjectOf(reply)
+  if (!record || (record.decision !== 'lock' && record.decision !== 'suggest')) return { decision: 'undecided' }
+  const proposal = proposalOf(record)
+  return proposal ? { decision: 'lock', ...proposal } : { decision: 'undecided' }
+}
+
+/** The first `{...}` in a reply, parsed; undefined when there is none or it is not a JSON object. */
+function jsonObjectOf(reply: string | undefined | null): Record<string, unknown> | undefined {
+  const match = typeof reply === 'string' ? reply.match(/\{[\s\S]*\}/) : null
+  if (!match) return undefined
   try {
-    data = JSON.parse(match[0])
+    const data: unknown = JSON.parse(match[0])
+    return typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : undefined
   } catch {
-    return { decision: 'undecided' }
+    return undefined
   }
-  if (typeof data !== 'object' || data === null) return { decision: 'undecided' }
-  const record = data as Record<string, unknown>
+}
+
+/** A reply's level (case-insensitive) and reason (capped); undefined for an unknown level. */
+function proposalOf(record: Record<string, unknown>): Proposal | undefined {
   const level = typeof record.level === 'string' ? record.level.trim().toLowerCase() : undefined
-  if ((record.decision !== 'lock' && record.decision !== 'suggest') || !isLevel(level)) return { decision: 'undecided' }
+  if (!isLevel(level)) return undefined
   const reason = typeof record.reason === 'string' ? record.reason.replace(/\s+/g, ' ').trim() : ''
-  return { decision: 'lock', level, reason: reason === '' ? 'classifier' : cut(reason, 60).replace(/… \[\d+ more chars\]$/, '…') }
+  return { level, reason: reason === '' ? 'classifier' : cut(reason, 60).replace(/… \[\d+ more chars\]$/, '…') }
+}
+
+// --- subagents --------------------------------------------------------------------
+
+/**
+ * The frame for a subagent's read. A subagent is routed once, at spawn, from
+ * the brief its parent wrote: unlike the session read it has no transcript,
+ * no user in the loop and no "undecided". The same rules sit inside it, so a
+ * user's or organisation's rules ("payments code is never below high") still
+ * apply to subagents.
+ */
+export const SUBAGENT_FRAME = `You pick the reasoning-effort level for one Claude Code subagent from the brief its parent agent wrote for it. Levels, lowest to highest: low, medium, high, xhigh, max.
+
+How a subagent differs from a session with a user:
+- No user is in the loop. The subagent works alone from its brief until it reports back; nobody answers its questions or checks its steps. Without a user in the loop, higher effort does better on open-ended work that needs judgement: implementing or changing code, debugging, code review, security work, design and planning. Pick high for these; xhigh when the work is edge-case heavy in security, concurrency, performance, ML/data or hardware; max only for a long, fully autonomous hunt or build on a hard problem.
+- Mechanical work and tight specs gain little from effort, with or without a user: searching a codebase or the web, looking something up, listing or reading files, collecting or tabulating facts, running a given command and reporting its output, summarising or extracting from text it is given. Pick low for these.
+- medium is for small, well-specified code changes that follow an existing pattern.
+- The brief is the whole task: decide from it alone and do not assume context it does not state. The agent type is a hint (a search or explore agent is usually mechanical), but the brief decides.
+- There is no undecided. If the brief is short or vague, pick the level the work it describes most likely needs.
+
+Worked examples (agent type: brief, then the reply):
+1. Explore: list every call site of chargeCard() with file and line → {"decision":"lock","level":"low","reason":"codebase search"}
+2. general-purpose: look up the current Node.js LTS version and its end-of-life date, cite the page → {"decision":"lock","level":"low","reason":"web lookup"}
+3. general-purpose: run the lint script and paste back any errors verbatim → {"decision":"lock","level":"low","reason":"run a command and report"}
+4. general-purpose: in the orders table component, add a "Region" column the same way "Country" is shown → {"decision":"lock","level":"medium","reason":"small change following a pattern"}
+5. general-purpose: the nightly export job sometimes writes duplicate rows; find out why and fix it → {"decision":"lock","level":"high","reason":"debugging an intermittent bug"}
+6. general-purpose: implement the webhook retry queue described below, with tests (spec follows) → {"decision":"lock","level":"high","reason":"feature implementation, no user in loop"}
+7. general-purpose: audit the file upload handler for path traversal and unsafe deserialisation → {"decision":"lock","level":"xhigh","reason":"security audit"}
+
+Apply these routing rules too. They were written for whole sessions; read them for a subagent, which has no user in the loop. Later rules override earlier ones where they conflict:`
+
+export const SUBAGENT_CONTRACT = `Reply with exactly one JSON object and nothing else:
+{"decision":"lock","level":"<low|medium|high|xhigh|max>","reason":"<what the subagent's task is, 3-8 words, e.g. codebase search>"}`
+
+/** The subagent read's whole system prompt around the composed rules. */
+export const subagentSystem = (rules: string): string =>
+  `${SUBAGENT_FRAME}\n\n<rules>\n${rules.trim()}\n</rules>\n\n${SUBAGENT_CONTRACT}`
+
+/** What `agent.spawn` says about the subagent, as far as its read needs it. */
+export type SubagentBrief = { subagentType: string; description: string; prompt: string }
+
+/**
+ * Fits a brief into `max` characters: the head (the task is usually stated
+ * first) and the tail (often what to report back), with a marker between.
+ */
+export function capBrief(text: string, max: number): string {
+  if (text.length <= max) return text
+  const marker = (n: number) => `\n[… ${n} chars omitted …]\n`
+  const room = Math.max(0, max - marker(text.length).length)
+  const head = Math.ceil(room * 0.75)
+  const tail = room - head
+  return `${text.slice(0, head)}${marker(text.length - head - tail)}${tail > 0 ? text.slice(-tail) : ''}`
+}
+
+/** The user message for a subagent's read: its type, description and brief (capped at `maxChars`). */
+export const subagentPrompt = (brief: SubagentBrief, maxChars: number = DEFAULT_TRIM.totalChars): string =>
+  `Agent type: ${brief.subagentType || 'unknown'}\nDescription: ${brief.description.trim() || '(none)'}\n<brief>\n${capBrief(brief.prompt.trim(), maxChars)}\n</brief>\n\nPick the effort level this subagent should run at, from its brief alone. JSON only.`
+
+/**
+ * Reads a subagent read's reply: a level and reason, from the first `{...}`.
+ * The `decision` field may be left out; an explicit undecided, an unknown
+ * level or anything unparseable is undefined, and the caller falls back.
+ */
+export function parseSubagentReply(reply: string | undefined | null): Proposal | undefined {
+  const record = jsonObjectOf(reply)
+  if (!record) return undefined
+  if (record.decision !== undefined && record.decision !== 'lock' && record.decision !== 'suggest') return undefined
+  return proposalOf(record)
+}
+
+/** A subagent the router routed: the level its requests carry, and why. */
+export type RoutedAgent = { level: Level; reason: string; subagentType: string; description: string }
+
+/**
+ * Whether subagents are routed in this state. They are unless the person
+ * turned the router off themselves (`/route off`, Revert, Turn off), which
+ * clears `offReason`. When the router turned itself off (an existing session,
+ * a spent budget) `offReason` says so, and subagents are still routed: each
+ * brief is a new, whole task.
+ */
+export const routesSubagents = (state: RouterState): boolean => state.mode === 'auto' || state.offReason !== undefined
+
+/**
+ * The level a spawn inherits, for a fork or when its read fails: the parent
+ * subagent's routed level for a nested spawn, else the main thread's level in
+ * use; undefined when neither has one (the request is left alone).
+ */
+export function parentLevel(state: RouterState, agents: ReadonlyMap<string, RoutedAgent>, parentAgentId?: string): Level | undefined {
+  return (parentAgentId !== undefined ? agents.get(parentAgentId)?.level : undefined) ?? appliedLevel(state)
+}
+
+/** Why subagents are or are not routed, for `/route status`. */
+export type SubagentStatus = { routing: 'on' | 'setting' | 'org' | 'user-off'; agents: readonly RoutedAgent[] }
+
+/** `/route status`'s subagent lines: whether they are routed, then the newest `shown`, newest first. */
+export function subagentReport(status: SubagentStatus, shown = 10): string[] {
+  const why = {
+    on: 'routed from their own briefs at spawn',
+    setting: 'not routed (routeSubagents is off); they run at the main level',
+    org: "not routed (your organisation's settings turn it off); they run at the main level",
+    'user-off': "not routed while the router is off; they run at the picker's level",
+  }[status.routing]
+  const lines = [`Subagents: ${why}.`]
+  if (status.agents.length === 0) return lines
+  const recent = status.agents.slice(-shown).reverse()
+  lines.push(`Routed subagents this session: ${status.agents.length}${status.agents.length > recent.length ? ` (newest ${recent.length} shown)` : ''}.`)
+  for (const agent of recent) {
+    const description = cut(agent.description.replace(/\s+/g, ' ').trim() || '(no description)', 60).replace(/… \[\d+ more chars\]$/, '…')
+    lines.push(`  ${agent.level}: ${description} (${agent.subagentType || 'agent'}) — ${agent.reason}`)
+  }
+  return lines
 }
 
 // --- /route grammar -------------------------------------------------------------
@@ -582,6 +702,8 @@ export type ReadDiagnostics = {
   lastReadMs?: number
   /** The last read's transcript: characters sent, characters before the cap, the cap, lines dropped. */
   sent?: { sentChars: number; fullChars: number; maxChars: number; omitted: number }
+  /** Whether subagents are routed, and the ones that were. */
+  subagents?: SubagentStatus
 }
 
 /** `12s ago`, `4m ago`, `2h ago`. */
@@ -596,10 +718,11 @@ export function ago(now: number, at: number): string {
 export function routeReport(state: RouterState, decideWithin: number, inForce?: string | number, diagnostics?: ReadDiagnostics): string {
   const now = inForce === undefined ? "the picker's level" : String(inForce)
   const lines: string[] = []
+  const subagents = diagnostics?.subagents?.routing === 'on' ? '; subagents get their own level from their briefs' : ''
   if (state.mode === 'picker') {
     lines.push(`off${state.offReason ? ` (${state.offReason})` : ''}. Effort is the picker's (now ${now}). /route on turns it back on; /route asks now.`)
   } else if (state.phase === 'locked') {
-    lines.push(`${state.level} 🔒 (router: ${state.reason}). Every request and subagent runs at ${state.level}.`)
+    lines.push(`${state.level} 🔒 (router: ${state.reason}). Every request${subagents ? '' : ' and subagent'} runs at ${state.level}${subagents}.`)
     if (state.proposal) lines.push(`A switch to ${state.proposal.level} is on offer (${state.proposal.reason}).`)
   } else if (state.phase === 'provisional' && state.level) {
     lines.push(`${state.level}? The router's level is in use (router: ${state.reason}), not yet kept. Re-reads continue and may change it; Keep in the band locks it, Revert hands back to the picker.`)
@@ -631,6 +754,7 @@ export function routeReport(state: RouterState, decideWithin: number, inForce?: 
       )
     }
     if (diagnostics.error) lines.push(`Last error (${ago(diagnostics.now, diagnostics.error.at)}): ${cut(diagnostics.error.text, 200)}`)
+    if (diagnostics.subagents) lines.push(...subagentReport(diagnostics.subagents))
   }
   lines.push(ROUTE_USAGE)
   return lines.join('\n')
@@ -778,6 +902,8 @@ export type SettingsRules = {
   rulesMode?: 'extend' | 'enforce'
   /** Org only: false stops users turning the router off, so the org's routing always applies. */
   allowOff?: boolean
+  /** Org only: false turns subagent routing off for everyone. */
+  routeSubagents?: boolean
 }
 
 /**
@@ -805,6 +931,7 @@ export function settingsRulesOf(source: unknown, pluginName = 'effort-router'): 
     if (out.rules === undefined && typeof c.rules === 'string' && c.rules.trim() !== '') out.rules = c.rules
     if (out.rulesMode === undefined && (c.rulesMode === 'extend' || c.rulesMode === 'enforce')) out.rulesMode = c.rulesMode
     if (out.allowOff === undefined && typeof c.allowOff === 'boolean') out.allowOff = c.allowOff
+    if (out.routeSubagents === undefined && typeof c.routeSubagents === 'boolean') out.routeSubagents = c.routeSubagents
   }
   return out
 }

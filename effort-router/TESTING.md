@@ -3,21 +3,29 @@
 ## Automated
 
 ```
-bun test                            # 65 tests: trimming (incl. the last assistant message kept long and AskUserQuestion
+bun test                            # 73 tests: trimming (incl. the last assistant message kept long and AskUserQuestion
                                     # questions and answers kept), the classifier input cap (first prompt, then human lines
                                     # before assistant text), reply parsing (incl. fenced json), the classifier frame,
                                     # $defaults layering, settings layers, /route grammar and hints, state: provisional
-                                    # (apply), re-reads, Keep/Revert, budget locking, first sighting, status diagnostics
-claude plugin test .                # 23 tests in the engine's kit, among them: the read finishes before prompt.submit goes on
+                                    # (apply), re-reads, Keep/Revert, budget locking, first sighting, status diagnostics;
+                                    # subagents: the frame and contract, the brief prompt and its head-and-tail cap, reply
+                                    # parsing (no undecided), the parent's level, user-off vs router-off, the status list
+claude plugin test .                # 34 tests in the engine's kit, among them: the read finishes before prompt.submit goes on
                                     # and turn.step index 0 carries the level (main loop and subagent); a re-read changes the
                                     # provisional level and reopens the band; Keep locks and syncs /effort; Revert restores the
                                     # picker level and turns off; budget exhaustion locks with a log line; a classifier that
                                     # hangs fails open at classifyTimeoutMs (mock clock); an existing session with 10 prompts
                                     # starts off with zero model calls; the classifierMaxChars cap; confirm/ask/none consents;
-                                    # AskUserQuestion read before the tool result returns; the footer Button and band
-"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 23 under Desktop's engine
+                                    # AskUserQuestion read before the tool result returns; the footer Button and band;
+                                    # subagents: agent.spawn reads the brief before the agent starts and its turn.step
+                                    # carries that level (others keep the main level); the brief cap; forks and nested forks
+                                    # inherit; a throwing, hanging or unusable read falls back to the parent's level, a nested
+                                    # one via parentAgentId; routeSubagents false; an existing session still routes them,
+                                    # /route off stops it (and /route on brings it back); org routeSubagents false; a denied
+                                    # spawn is not kept
+"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 34 under Desktop's engine
 claude plugin validate . --strict
-bun run eval -- --runs 3            # opt-in, real model: 22 fixtures, see below
+bun run eval -- --runs 3            # opt-in, real model: 22 session fixtures and 14 subagent briefs, see below
 ```
 
 ### Classifier eval (2026-10-04, haiku, `bun run eval -- --runs 3`)
@@ -27,6 +35,14 @@ bun run eval -- --runs 3            # opt-in, real model: 22 fixtures, see below
 Against the 0.5.1 prompt and rules (same fixtures): `53/66 reads passed (80%); 17/22 fixtures passed every run`. The live miss reproduced 0/3: "implement for me a new finance solution pulling from multiple accountancy platforms" after "pull latest code" came back `undecided` every time, as did a vague feature, a vague bank-statement importer and the AskUserQuestion case (whose answers 0.5.1 reduced to a tool name).
 
 Five fixtures (marked "held out") are not mirrored by the prompt's worked examples; several others are, so read 100% as "the examples are followed", not as a general accuracy figure.
+
+### Subagent eval (2026-10-04, haiku, `bun run eval -- --runs 3`)
+
+0.7.0: `subagent: 42/42 reads passed (100%); 14/14 fixtures passed every run`, and the session set unchanged at 66/66 (`all: 108/108`).
+
+What came back: every mechanical brief (web research and tabulating, an Explore search, summarising a given file, running tests and reporting, listing npm scripts, extracting action items from given text) was low in all 3 runs. Adding translation keys in the existing format was low twice and medium once (both pass). Implementing rate limiting from a spec, debugging a failing test, the design proposal and the PR review were high every time. The security review was xhigh every time. The autonomous port with property tests was high every time, never max (high, xhigh or max pass). The vague "now do the same for the invoices table" was medium every time.
+
+Read 100% with care. The fixtures were written alongside the subagent frame, several sit close to its worked examples (a codebase search, running a command, debugging, a security audit) and most expectations allow two levels. It shows the frame is followed and the mechanical/judgement split is stable, not general accuracy on real briefs. The live briefs in Tommy's transcripts are the next check.
 
 The kit passes a `Select` in the SessionMode footer on both surfaces, but the real Desktop app (2.1.286) silently drops it, so the footer is a `Button`. Footer and band rendering on Desktop has to be checked live (steps 1, 3 and 8 below).
 
@@ -76,7 +92,7 @@ Run `claude --plugin-dir D:/code/mods/effort-router --model sonnet --debug-file 
 3. Real task: type "refactor the payment retry logic". After about a second the turn starts, already at high: the band opens with `Using high — ...` and `1: Keep high  2: Revert to picker  x: Close`, the footer reads `high?`, and `grep "step index=0" router.log` shows `-> high` for that turn's first request. Close it: the footer still reads `high?`; pressing the footer reopens it with `Suggest now` too.
 4. Clarify: if Claude asks complex-or-simple, answer "2" (simple). Before that turn runs the band opens again with `Using low — ...` and the footer reads `low?`. `grep "read settled" router.log` shows each read and its time.
 5. Press `1` (Keep) in the empty prompt. The band disappears, the transcript shows `effort locked: low 🔒 (router: ...) · /route status`, the footer reads `low 🔒`, and in the terminal a `/effort low` line appears at turn end. No more `read settled` lines follow.
-6. Ask for something that spawns a subagent. `grep "agent=" router.log` shows the subagent's steps at the locked level.
+6. Subagents: ask for something that launches two subagents, one mechanical ("search the codebase for every use of X") and one open-ended ("then have an agent fix the bug it finds"). `grep "effort-router: subagent " router.log` shows one line per launch with its level and reason (for example `-> low (codebase search)`), and `grep "agent=" router.log` shows each subagent's steps at its own level from `index=0`, while the main thread stays at the locked level. `/route status` lists both under `Routed subagents this session`. Then `/route off` and launch another: no `subagent` line, and its steps go out at the picker's level.
 7. Manual switch: `/route this is now a security review`. The band opens with `Effort router: low 🔒 → max? — switch to max: ...` and `1: Accept max  2: Keep low  3: Turn off  x: Close`; the footer reads `low 🔒 → max?`. Press `2` with the band focused (ctrl+x tab), or accept.
 8. Revert: in a fresh session, give a task, then press `2: Revert to picker`. The footer reads `off` (dim) and the next steps log `<picker> -> <picker>`. Press the footer, then `Turn on`: back to `deciding`.
 9. Budget: in a fresh session, give a task and keep chatting without pressing Keep. After the sixth prompt the transcript shows `effort locked: high 🔒 (kept after 6 prompts; router: ...)`. In another fresh session send six filler prompts: the footer reads `off` and `/route status` says `no clear task after 6 prompts — /route to ask again`.

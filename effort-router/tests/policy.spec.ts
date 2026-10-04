@@ -37,6 +37,15 @@ import {
   withSaved,
   questionText,
   ago,
+  SUBAGENT_CONTRACT,
+  SUBAGENT_FRAME,
+  capBrief,
+  parentLevel,
+  parseSubagentReply,
+  routesSubagents,
+  subagentPrompt,
+  subagentReport,
+  subagentSystem,
   type TranscriptMessage,
 } from '../hooks/policy'
 
@@ -492,5 +501,91 @@ describe('settings-borne rules', () => {
     expect(composeRules(enforced.layers).text).toBe('D\nO')
     expect(ruleLayers({ defaults: 'D', userFile: { path: 'u.md', text: 'FILE' }, userSettings: 'SETTING' }).layers.map(l => l.text)).toEqual(['D', 'FILE'])
     expect(ruleLayers({ defaults: 'D', userFile: { path: 'u.md', text: undefined }, userSettings: 'SETTING' }).layers.map(l => l.text)).toEqual(['D', 'SETTING'])
+  })
+})
+
+describe('subagent reads', () => {
+  const BRIEF = { subagentType: 'Explore', description: 'Find webhook handlers', prompt: 'List every webhook handler with file and line.' }
+
+  test('the system prompt: the subagent frame, the composed rules, a contract with no undecided', () => {
+    const system = subagentSystem('MY RULE')
+    expect(system).toStartWith(SUBAGENT_FRAME)
+    expect(system).toContain('<rules>\nMY RULE\n</rules>')
+    expect(system).toEndWith(SUBAGENT_CONTRACT)
+    expect(SUBAGENT_CONTRACT).not.toContain('undecided')
+    expect(SUBAGENT_FRAME).toContain('No user is in the loop')
+    expect(SUBAGENT_FRAME).toContain('There is no undecided')
+  })
+
+  test('the user prompt: type, description and the brief', () => {
+    expect(subagentPrompt(BRIEF)).toBe(
+      'Agent type: Explore\nDescription: Find webhook handlers\n<brief>\nList every webhook handler with file and line.\n</brief>\n\nPick the effort level this subagent should run at, from its brief alone. JSON only.',
+    )
+    expect(subagentPrompt({ subagentType: '', description: ' ', prompt: 'x' })).toStartWith('Agent type: unknown\nDescription: (none)\n')
+  })
+
+  test('a long brief keeps its head and tail within the cap', () => {
+    const brief = `START ${'m'.repeat(5000)} END`
+    const capped = capBrief(brief, 1000)
+    expect(capped.length).toBeLessThanOrEqual(1000)
+    expect(capped).toStartWith('START ')
+    expect(capped).toEndWith(' END')
+    expect(capped).toMatch(/\[… \d+ chars omitted …\]/)
+    expect(capBrief('short', 1000)).toBe('short')
+    expect(subagentPrompt({ ...BRIEF, prompt: brief }, 1000).length).toBeLessThan(1200)
+  })
+
+  test('parses a level and reason; decision may be left out; anything else falls back (undefined)', () => {
+    expect(parseSubagentReply('{"decision":"lock","level":"low","reason":"codebase search"}')).toEqual({ level: 'low', reason: 'codebase search' })
+    expect(parseSubagentReply('```json\n{"level":"HIGH","reason":"debugging"}\n```')).toEqual({ level: 'high', reason: 'debugging' })
+    expect(parseSubagentReply('{"level":"xhigh"}')).toEqual({ level: 'xhigh', reason: 'classifier' })
+    expect(parseSubagentReply('{"decision":"undecided"}')).toBeUndefined()
+    expect(parseSubagentReply('{"decision":"undecided","level":"low"}')).toBeUndefined()
+    expect(parseSubagentReply('{"level":"extreme","reason":"x"}')).toBeUndefined()
+    expect(parseSubagentReply('high, because it is debugging')).toBeUndefined()
+    expect(parseSubagentReply('{not json')).toBeUndefined()
+    expect(parseSubagentReply(undefined)).toBeUndefined()
+  })
+
+  test("the parent's level: the parent subagent's routed level, else the main level in use, else none", () => {
+    const agents = new Map([['agent-1', { level: 'xhigh' as const, reason: 'security audit', subagentType: 'general-purpose', description: 'audit' }]])
+    const provisional = withReading(freshState(), { level: 'high', reason: 'bug fix' }, true)
+    expect(parentLevel(provisional, agents)).toBe('high')
+    expect(parentLevel(provisional, agents, 'agent-1')).toBe('xhigh')
+    expect(parentLevel(provisional, agents, 'agent-unknown')).toBe('high') // it ran at the main level
+    expect(parentLevel(freshState(), agents)).toBeUndefined()
+    expect(parentLevel(freshState(), agents, 'agent-1')).toBe('xhigh')
+  })
+
+  test('routed unless the person turned the router off', () => {
+    expect(routesSubagents(freshState())).toBe(true)
+    expect(routesSubagents(firstSighting(10, 6, true))).toBe(true) // existing session: off, but by the router
+    expect(routesSubagents(afterBudget({ ...freshState(), prompts: 6 }, 6, true))).toBe(true) // no clear task: off, by the router
+    expect(routesSubagents(turnedOff(withReading(freshState(), { level: 'high', reason: 'r' }, true)))).toBe(false) // /route off, Revert, Turn off
+    expect(routesSubagents(turnedOn(turnedOff(freshState())))).toBe(true)
+    expect(routesSubagents(restored({ mode: 'picker' }))).toBe(false)
+    expect(routesSubagents(restored({ mode: 'picker', offReason: 'existing session — /route to ask' }))).toBe(true)
+  })
+
+  test('/route status lists routed subagents, newest first, at most 10', () => {
+    const agents = Array.from({ length: 12 }, (_, i) => ({ level: 'low' as const, reason: `reason ${i}`, subagentType: 'Explore', description: `task ${i}` }))
+    const lines = subagentReport({ routing: 'on', agents })
+    expect(lines[0]).toBe('Subagents: routed from their own briefs at spawn.')
+    expect(lines[1]).toBe('Routed subagents this session: 12 (newest 10 shown).')
+    expect(lines[2]).toBe('  low: task 11 (Explore) — reason 11')
+    expect(lines).toHaveLength(12)
+    expect(lines.at(-1)).toBe('  low: task 2 (Explore) — reason 2')
+    expect(subagentReport({ routing: 'setting', agents: [] })).toEqual(['Subagents: not routed (routeSubagents is off); they run at the main level.'])
+    expect(subagentReport({ routing: 'user-off', agents: [] })[0]).toContain("they run at the picker's level")
+
+    const locked = lockedAt(freshState(), { level: 'high', reason: 'bug fix' })
+    expect(routeReport(locked, 6, 'high', { now: 0, calls: 1, subagents: { routing: 'on', agents: [] } }))
+      .toStartWith('high 🔒 (router: bug fix). Every request runs at high; subagents get their own level from their briefs.')
+    expect(routeReport(locked, 6)).toContain('Every request and subagent runs at high.')
+  })
+
+  test("the organisation's routeSubagents is read from settings", () => {
+    expect(settingsRulesOf({ pluginConfigs: { 'effort-router@tommy-mods': { options: { routeSubagents: false } } } })).toEqual({ routeSubagents: false })
+    expect(settingsRulesOf({ effortRouter: { routeSubagents: 'no' } })).toEqual({})
   })
 })

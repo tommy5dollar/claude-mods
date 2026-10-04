@@ -26,6 +26,7 @@ const QUESTIONS = {
 const ANSWERS = 'User has answered your questions: "Which platforms?"="Xero, QuickBooks", "What is it for?"="Month-end close". You can now continue.'
 
 const BUG_REPLY = '{"decision":"lock","level":"high","reason":"bug fix in existing code"}'
+const SEARCH_REPLY = '{"decision":"lock","level":"low","reason":"codebase search"}'
 
 type World = {
   sent: (string | number | undefined)[]
@@ -40,12 +41,23 @@ type World = {
   clock: MockClock
   /** classifierCalls as the beneath prompt.submit saw them (after the plugin's hook ran). */
   callsAtSubmit: number[]
+  /** What a subagent's read answers (its prompt starts `Agent type:`); THROW and HANG as for `reply`. */
+  subagentReply: string
+  /** Subagent reads: their system and user prompts. */
+  subagentReads: { system: string; prompt: string }[]
+  /** Spawns that reached the engine, as the plugin passed them on. */
+  spawned: Record<string, unknown>[]
+  /** Set: the engine refuses spawns with this reason. */
+  denySpawn?: string
 }
 
 /** Answers every `$` call the mod makes, beneath it. */
 function worldOf(on: On, reply = BUG_REPLY, sources: Record<string, unknown> = {}, env: Record<string, string> = {}): World {
   const clock = mock.clock(on)
-  const world: World = { sent: [], efforts: [], lines: [], debug: [], classifierCalls: 0, reply, messages: [], prompts: [], toasts: [], clock, callsAtSubmit: [] }
+  const world: World = {
+    sent: [], efforts: [], lines: [], debug: [], classifierCalls: 0, reply, messages: [], prompts: [], toasts: [], clock, callsAtSubmit: [],
+    subagentReply: SEARCH_REPLY, subagentReads: [], spawned: [],
+  }
   mock.store(on)
   mock.env(on, env)
   on('session.start', ($, e) => ({ cwd: e.cwd }))
@@ -55,14 +67,19 @@ function worldOf(on: On, reply = BUG_REPLY, sources: Record<string, unknown> = {
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('fs.read', () => ({ deny: 'ENOENT' }))
   on('model.complete', async ($, e) => {
-    world.classifierCalls += 1
-    world.prompts.push(e.prompt)
-    if (world.reply === 'THROW') throw new Error('boom')
-    if (world.reply === 'HANG') {
+    const subagent = e.prompt.startsWith('Agent type:')
+    const reply = subagent ? world.subagentReply : world.reply
+    if (subagent) world.subagentReads.push({ system: e.system ?? '', prompt: e.prompt })
+    else {
+      world.classifierCalls += 1
+      world.prompts.push(e.prompt)
+    }
+    if (reply === 'THROW') throw new Error('boom')
+    if (reply === 'HANG') {
       await clock.sleep(60_000)
       return { value: { isAnswered: true, text: BUG_REPLY, usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }
     }
-    return { value: { isAnswered: true, text: world.reply, usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }
+    return { value: { isAnswered: true, text: reply, usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }
   })
   on('command.run', { command: 'effort' }, ($, e) => {
     world.efforts.push(e.args)
@@ -82,6 +99,11 @@ function worldOf(on: On, reply = BUG_REPLY, sources: Record<string, unknown> = {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
   })
   on('turn.complete', ($, e) => ({ text: e.answer }))
+  on('agent.spawn', ($, e) => {
+    if (world.denySpawn) return { deny: world.denySpawn }
+    world.spawned.push({ ...e })
+    return { model: 'claude-sonnet-5-5', agentId: `agent-${world.spawned.length}` }
+  })
   on('settings.read', ($, e) => ({ value: (e.source ? sources[e.source] ?? {} : { effortLevel: 'medium' }) as never }))
   on('prompt.submit', ($, e) => {
     world.callsAtSubmit.push(world.classifierCalls)
@@ -118,6 +140,20 @@ async function step($: Engine, index: number, agentId?: string): Promise<void> {
 
 async function submit($: Engine, text: string): Promise<void> {
   await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } } as never)
+}
+
+/** Spawns a subagent; resolves with its agentId once the plugin's hook let it start. */
+async function spawn($: Engine, input: { prompt: string; description?: string; subagentType?: string; fork?: boolean; parentAgentId?: string }): Promise<string | undefined> {
+  const result = await $.agent.spawn({
+    tool_use_id: 'tu-1',
+    description: 'a task',
+    subagentType: 'general-purpose',
+    parentModel: 'claude-sonnet-5-5',
+    background: true,
+    fork: false,
+    ...input,
+  } as never)
+  return result.agentId
 }
 
 async function route($: Engine, args = ''): Promise<string> {
@@ -560,5 +596,170 @@ describe('effort-router', () => {
     const rules = await route($, 'rules')
     expect(rules).toMatch(/ORG\nUSER$/)
     expect(rules).toContain('spliced: user settings (pluginConfigs option)')
+  })
+
+  describe('subagents', () => {
+    test("a spawn waits for a read of its own brief; that agent's steps carry its level, others keep the main level", async ($, on) => {
+      const world = worldOf(on)
+      await $.session.start(STARTED)
+      await submit($, 'fix the crash in the parser') // main: high (provisional)
+
+      const id = await spawn($, { subagentType: 'Explore', description: 'Find parser call sites', prompt: 'List every caller of parse() with file and line.' })
+      expect(id).toBe('agent-1')
+      expect(world.subagentReads).toHaveLength(1) // read before the agent started
+      const read = world.subagentReads[0] ?? { system: '', prompt: '' }
+      expect(read.prompt).toStartWith('Agent type: Explore\nDescription: Find parser call sites\n<brief>\nList every caller of parse() with file and line.\n</brief>')
+      expect(read.system).toContain('one Claude Code subagent')
+      expect(read.system).toContain('<rules>')
+      expect(world.spawned[0]?.prompt).toBe('List every caller of parse() with file and line.') // the brief is passed on untouched
+
+      await step($, 0, 'agent-1')
+      await step($, 1, 'agent-1')
+      await step($, 0)
+      await step($, 0, 'agent-unknown')
+      expect(world.sent).toEqual(['low', 'low', 'high', 'high'])
+      expect(world.debug.some(line => /subagent agent-1 \(Explore: Find parser call sites\) -> low \(codebase search\) in \d+ ms/.test(line))).toBe(true)
+
+      const status = await route($, 'status')
+      expect(status).toContain('Subagents: routed from their own briefs at spawn.')
+      expect(status).toContain('Routed subagents this session: 1.')
+      expect(status).toContain('  low: Find parser call sites (Explore) — codebase search')
+    })
+
+    test('the brief is capped by classifierMaxChars', { options: { classifierMaxChars: 2000 } }, async ($, on) => {
+      const world = worldOf(on)
+      await $.session.start(STARTED)
+      await spawn($, { prompt: `HEAD ${'x'.repeat(10_000)} TAIL` })
+      const prompt = world.subagentReads[0]?.prompt ?? ''
+      expect(prompt.length).toBeLessThan(2400)
+      expect(prompt).toContain('<brief>\nHEAD ')
+      expect(prompt).toContain(' TAIL\n</brief>')
+      expect(prompt).toContain('chars omitted …]')
+    })
+
+    test("a fork takes the parent's level without a read; a nested fork its parent subagent's", async ($, on) => {
+      const world = worldOf(on)
+      await $.session.start(STARTED)
+      await submit($, 'fix the crash in the parser')
+      await spawn($, { prompt: 'search for X' }) // agent-1: low
+      const fork = await spawn($, { prompt: 'carry on with the second half', subagentType: 'fork', fork: true }) // agent-2
+      const nested = await spawn($, { prompt: 'and the rest', subagentType: 'fork', fork: true, parentAgentId: 'agent-1' }) // agent-3
+      expect(world.subagentReads).toHaveLength(1)
+      await step($, 0, fork)
+      await step($, 0, nested)
+      expect(world.sent).toEqual(['high', 'low'])
+      expect(await route($, 'status')).toContain("high: a task (fork) — fork: the parent's level")
+    })
+
+    test("a read that fails, hangs or answers nothing usable falls back to the parent's level", async ($, on) => {
+      const world = worldOf(on)
+      await $.session.start(STARTED)
+      await submit($, 'fix the crash in the parser') // main: high
+
+      world.subagentReply = 'THROW'
+      const failed = await spawn($, { prompt: 'review the diff' })
+      world.subagentReply = '{"decision":"undecided"}'
+      const unusable = await spawn($, { prompt: 'review the diff' })
+      world.subagentReply = 'HANG'
+      const spawning = spawn($, { prompt: 'review the diff' })
+      await world.clock.advance(8000)
+      const late = await spawning
+
+      for (const id of [failed, unusable, late]) await step($, 0, id)
+      expect(world.sent).toEqual(['high', 'high', 'high'])
+      const status = await route($, 'status')
+      expect(status).toContain("— read failed: the parent's level")
+      expect(status).toContain("— unusable reply: the parent's level")
+      expect(status).toContain("— read timed out: the parent's level")
+    })
+
+    test("a nested spawn whose read fails takes its parent subagent's level (parentAgentId)", async ($, on) => {
+      const world = worldOf(on)
+      await $.session.start(STARTED)
+      await submit($, 'fix the crash in the parser') // main: high
+      world.subagentReply = '{"decision":"lock","level":"xhigh","reason":"security audit"}'
+      await spawn($, { prompt: 'audit the upload handler' }) // agent-1: xhigh
+      world.subagentReply = 'THROW'
+      const nested = await spawn($, { prompt: 'check this one file', parentAgentId: 'agent-1' })
+      const top = await spawn($, { prompt: 'check this one file' })
+      await step($, 0, nested)
+      await step($, 0, top)
+      expect(world.sent).toEqual(['xhigh', 'high'])
+    })
+
+    test('with no level anywhere and a failed read, the subagent is left alone', async ($, on) => {
+      const world = worldOf(on, '{"decision":"undecided"}')
+      world.subagentReply = 'THROW'
+      await $.session.start(STARTED)
+      const id = await spawn($, { prompt: 'look into it' })
+      await step($, 0, id)
+      expect(world.sent).toEqual(['medium'])
+      expect(await route($, 'status')).not.toContain('Routed subagents')
+    })
+
+    test('routeSubagents false: no read; subagents run at the main level as before', { options: { routeSubagents: false } }, async ($, on) => {
+      const world = worldOf(on)
+      await $.session.start(STARTED)
+      await submit($, 'fix the crash in the parser')
+      const id = await spawn($, { prompt: 'search for X' })
+      expect(world.subagentReads).toHaveLength(0)
+      await step($, 0, id)
+      expect(world.sent).toEqual(['high'])
+      expect(await route($, 'status')).toContain('Subagents: not routed (routeSubagents is off)')
+    })
+
+    test('off because it is an existing session: subagents are still routed; the main thread is left alone', async ($, on) => {
+      const world = worldOf(on)
+      world.messages = Array.from({ length: 10 }, (_, i) => ({ role: 'user' as const, text: `earlier prompt ${i}`, toolUses: [] }))
+      await $.session.start(STARTED)
+      const id = await spawn($, { prompt: 'search for X' })
+      expect(world.subagentReads).toHaveLength(1)
+      expect(world.classifierCalls).toBe(0)
+      await step($, 0, id)
+      await step($, 0)
+      expect(world.sent).toEqual(['low', 'medium'])
+    })
+
+    test('off because the person turned it off: no reads, and routed subagents go back to the picker', async ($, on) => {
+      const world = worldOf(on)
+      await $.session.start(STARTED)
+      const before = await spawn($, { prompt: 'search for X' })
+      await step($, 0, before)
+      expect(world.sent).toEqual(['low'])
+
+      await route($, 'off')
+      const after = await spawn($, { prompt: 'search for Y' })
+      expect(world.subagentReads).toHaveLength(1)
+      await step($, 1, before)
+      await step($, 0, after)
+      expect(world.sent.slice(1)).toEqual(['medium', 'medium'])
+      expect(await route($, 'status')).toContain("Subagents: not routed while the router is off; they run at the picker's level.")
+
+      await route($, 'on')
+      await step($, 2, before)
+      expect(world.sent.at(-1)).toBe('low')
+    })
+
+    test("the organisation's routeSubagents: false turns it off", async ($, on) => {
+      const sources = { policy: { pluginConfigs: { 'effort-router@tommy-mods': { options: { routeSubagents: false } } } } }
+      const world = worldOf(on, BUG_REPLY, sources)
+      await $.session.start(STARTED)
+      await submit($, 'fix the crash in the parser')
+      const id = await spawn($, { prompt: 'search for X' })
+      expect(world.subagentReads).toHaveLength(0)
+      await step($, 0, id)
+      expect(world.sent).toEqual(['high'])
+      expect(await route($, 'status')).toContain("not routed (your organisation's settings turn it off)")
+    })
+
+    test('a denied spawn is not kept', async ($, on) => {
+      const world = worldOf(on)
+      world.denySpawn = 'no agents here'
+      await $.session.start(STARTED)
+      const result = await $.agent.spawn({ tool_use_id: 't', prompt: 'search', description: 'd', subagentType: 'Explore', parentModel: 'm', background: true, fork: false } as never)
+      expect(result.deny).toBe('no agents here')
+      expect(world.subagentReads).toHaveLength(1)
+      expect(await route($, 'status')).not.toContain('Routed subagents')
+    })
   })
 })

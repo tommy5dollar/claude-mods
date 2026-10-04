@@ -1,4 +1,4 @@
-import type { EngineInterface, On, PluginOptions } from 'claude-code'
+import type { AgentSpawnInput, EngineInterface, On, PluginOptions } from 'claude-code'
 
 import {
   type ComposedRules,
@@ -7,7 +7,9 @@ import {
   QUESTION_TOOL,
   type Level,
   type Proposal,
+  type RoutedAgent,
   type RouterState,
+  type SubagentStatus,
   LEVEL_COLOR,
   STARTER_RULES,
   afterBudget,
@@ -24,6 +26,11 @@ import {
   lockedAt,
   parseDecision,
   parseRoute,
+  parentLevel,
+  parseSubagentReply,
+  routesSubagents,
+  subagentPrompt,
+  subagentSystem,
   proposalText,
   reasonText,
   restored,
@@ -48,6 +55,10 @@ import {
  * `apply`: provisional until kept) or suggests one (`confirm`, `ask`) or locks
  * it (`none`). `/route` runs it on demand, with an optional hint.
  *
+ * Subagents are routed apart: each spawn waits for one read of its own brief
+ * and its requests carry that level (forks, and failed reads, take the
+ * parent's level).
+ *
  * Fail open everywhere: any error leaves the request at the picker's effort.
  */
 
@@ -71,6 +82,8 @@ type Settings = {
   syncPicker: boolean
   /** `button`: the footer state is a button that opens the band. `label`: plain text, /route is the control. */
   footerControl: 'button' | 'label'
+  /** Route each subagent from its own brief at spawn. */
+  routeSubagents: boolean
 }
 
 /** Per-session runtime facts that are not persisted. */
@@ -96,6 +109,8 @@ type Session = {
   lastReadMs?: number
   /** What the last read sent. */
   sent?: ReadDiagnostics['sent']
+  /** Routed subagents by agentId, oldest first (memory only: a resume starts empty). */
+  agents: Map<string, RoutedAgent>
 }
 
 /** What one read sees beyond the stored transcript. */
@@ -120,6 +135,10 @@ let isInteractive = true
 let allowOff = true
 /** `decideWithin`, for a session's first sighting (set at register). */
 let budgetAtSighting = 6
+/** The organisation's `routeSubagents`, as the last rules read found it. */
+let orgRoutesSubagents = true
+/** Routed subagents kept per session, for turn.step and `/route status`. */
+const MAX_ROUTED_AGENTS = 200
 
 const FALLBACK_RULES =
   'low: quick in-the-loop work, questions, chores. medium: regular feature work (default). ' +
@@ -142,6 +161,7 @@ function settingsOf(options: PluginOptions): Settings {
     classifierModel: typeof options.classifierModel === 'string' && options.classifierModel !== '' ? options.classifierModel : 'haiku',
     syncPicker: options.syncPicker !== false && options.syncPicker !== 'false',
     footerControl: options.footerControl === 'label' ? 'label' : 'button',
+    routeSubagents: options.routeSubagents !== false && options.routeSubagents !== 'false',
   }
 }
 
@@ -161,7 +181,7 @@ async function sessionOf($: EngineInterface): Promise<{ id: string; session: Ses
       state = firstSighting(prior, budgetAtSighting, allowOff)
       if (prior > 0) $.ui.log(`effort-router: first sighting with ${prior} prompts already in the session${state.gaveUp ? ' — left off' : ''}`, { to: 'debug' })
     }
-    session = { state, reading: false, bandOpen: false, calls: 0 }
+    session = { state, reading: false, bandOpen: false, calls: 0, agents: new Map() }
     if (appliedLevel(state)) session.pendingSync = appliedLevel(state)
     SESSIONS.set(id, session)
   }
@@ -267,7 +287,7 @@ async function settingsSource($: EngineInterface, source: 'user' | 'project' | '
   }
 }
 
-type LoadedRules = { composed: ComposedRules; defaults: string; enforced: boolean; allowOff: boolean }
+type LoadedRules = { composed: ComposedRules; defaults: string; enforced: boolean; allowOff: boolean; routeSubagents: boolean }
 
 /**
  * Shipped defaults → org (policy settings) → user → project, re-read on every
@@ -296,7 +316,8 @@ async function loadRules($: EngineInterface): Promise<LoadedRules> {
   const composed = composeRules(layers)
   $.ui.log(`effort-router: rules from ${composed.contributors.map(c => `${c.source} (${c.how})`).join(' → ')}${enforced ? ' [org enforce]' : ''}`, { to: 'debug' })
   allowOff = org.allowOff !== false
-  return { composed, defaults: defaults ?? FALLBACK_RULES, enforced, allowOff }
+  orgRoutesSubagents = org.routeSubagents !== false
+  return { composed, defaults: defaults ?? FALLBACK_RULES, enforced, allowOff, routeSubagents: orgRoutesSubagents }
 }
 
 // --- deciding ----------------------------------------------------------------------
@@ -487,6 +508,57 @@ async function suggestNow($: EngineInterface, id: string, session: Session, sett
     : `suggesting ${proposal.level} (${proposal.reason}). Accept it in the band (press the footer to open it).`
 }
 
+// --- subagents -----------------------------------------------------------------------
+
+/** Whether subagents are routed now, and if not, why. */
+function subagentRouting(settings: Settings, session: Session): SubagentStatus['routing'] {
+  if (!settings.routeSubagents) return 'setting'
+  if (!orgRoutesSubagents) return 'org'
+  return routesSubagents(session.state) ? 'on' : 'user-off'
+}
+
+/**
+ * The level for a spawn, decided before it starts. A fork takes the parent's
+ * level. Anything else waits (at most `classifyTimeoutMs`) for one read of its
+ * own brief; a failed, late or unusable read takes the parent's level.
+ * Undefined leaves the subagent's requests as they would have been.
+ */
+async function routeSpawn($: EngineInterface, settings: Settings, session: Session, e: AgentSpawnInput): Promise<Proposal | undefined> {
+  const rules = await loadRules($) // also learns the org's routeSubagents
+  if (!rules.routeSubagents) return undefined
+  const inherited = parentLevel(session.state, session.agents, e.parentAgentId)
+  const fallback = (why: string): Proposal | undefined => (inherited ? { level: inherited, reason: `${why}: the parent's level` } : undefined)
+  if (e.fork) return fallback('fork')
+  const read = async () =>
+    $.model.complete({
+      model: settings.classifierModel,
+      system: subagentSystem(rules.composed.text),
+      prompt: subagentPrompt({ subagentType: e.subagentType, description: e.description, prompt: e.prompt }, settings.classifierMaxChars),
+      maxTokens: 200,
+      effort: 'low',
+      timeoutMs: settings.classifyTimeoutMs,
+    })
+  const result = await timed($, settings.classifyTimeoutMs, read()).catch((error: unknown) => {
+    $.ui.log(`effort-router: subagent read failed: ${String(error)}`, { to: 'debug' })
+    return undefined
+  })
+  if (!result) return fallback('read failed')
+  if (!result.ok) return fallback('read timed out')
+  if (!result.value.isAnswered) return fallback(`no answer (${result.value.reason})`)
+  $.ui.log(`effort-router: subagent classifier said ${result.value.text.trim().slice(0, 200)}`, { to: 'debug' })
+  return parseSubagentReply(result.value.text) ?? fallback('unusable reply')
+}
+
+/** Keeps a routed subagent, dropping the oldest past `MAX_ROUTED_AGENTS`. */
+function remember(session: Session, agentId: string, agent: RoutedAgent): void {
+  session.agents.delete(agentId)
+  session.agents.set(agentId, agent)
+  for (const oldest of session.agents.keys()) {
+    if (session.agents.size <= MAX_ROUTED_AGENTS) break
+    session.agents.delete(oldest)
+  }
+}
+
 // --- the band ------------------------------------------------------------------------
 
 /** The band shows when opened from the footer, or by itself for a suggestion it was not closed on. */
@@ -569,6 +641,7 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
         consent: await consentFor($, settings),
         lastReadMs: session.lastReadMs,
         sent: session.sent,
+        subagents: { routing: subagentRouting(settings, session), agents: [...session.agents.values()] },
       })
     case 'off': {
       if (!(await loadRules($)).allowOff) return "your organisation's settings keep the router on (allowOff: false)."
@@ -673,13 +746,47 @@ export function register(on: On, options: PluginOptions): void {
     return result
   })
 
-  // Every model request, main loop and subagents alike: the locked level, or
+  // A subagent is about to start: read its brief (a fork takes its parent's
+  // level) BEFORE it starts, and key the level to its agentId. next(e)
+  // resolves with the id before the agent's first turn.step (verified live,
+  // foreground and background), so its first request already carries it.
+  on('agent.spawn', async ($, e, next) => {
+    let routed: { session: Session; proposal: Proposal; took: number } | undefined
+    try {
+      const { session } = await sessionOf($)
+      if (subagentRouting(settings, session) === 'on') {
+        const started = await $.clock.now().catch(() => Date.now())
+        const proposal = await routeSpawn($, settings, session, e)
+        if (proposal) routed = { session, proposal, took: (await $.clock.now().catch(() => Date.now())) - started }
+      }
+    } catch (error) {
+      $.ui.log(`effort-router: agent.spawn failed: ${String(error)}`, { to: 'debug' })
+    }
+    const result = await next(e)
+    try {
+      if (routed && result.agentId !== undefined) {
+        const { session, proposal, took } = routed
+        remember(session, result.agentId, { ...proposal, subagentType: e.subagentType, description: e.description })
+        $.ui.log(
+          `effort-router: subagent ${result.agentId} (${e.subagentType}${e.fork ? ', fork' : ''}: ${e.description}) -> ${proposal.level} (${proposal.reason}) in ${took} ms`,
+          { to: 'debug' },
+        )
+      }
+    } catch {
+      // best effort: an unrouted subagent runs as it would have
+    }
+    return result
+  })
+
+  // Every model request: a routed subagent's own level; otherwise (the main
+  // loop, and subagents the router did not route) the main level in use, or
   // the request untouched.
   on('turn.step', async function* ($, e, next) {
     let effort = e.effort
     try {
       const { session } = await sessionOf($)
-      const level = appliedLevel(session.state)
+      const own = e.agentId !== undefined && subagentRouting(settings, session) === 'on' ? session.agents.get(e.agentId) : undefined
+      const level = own?.level ?? appliedLevel(session.state)
       if (e.agentId === undefined && session.baseline === undefined && isLevel(e.effort) && session.pendingSync === undefined && level === undefined) {
         session.baseline = e.effort
       }

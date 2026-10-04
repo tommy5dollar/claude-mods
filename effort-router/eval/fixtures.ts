@@ -1,7 +1,9 @@
 // Classifier eval fixtures: a transcript (as `$.session.messages()` rows, plus
 // the prompt being submitted) and the outcomes that count as a pass.
 // `undecided` is a valid expectation; a list means any of those levels passes.
-import type { Level, TranscriptMessage } from '../hooks/policy'
+// SUBAGENT_FIXTURES are subagent briefs (what `agent.spawn` carries), read with
+// the subagent frame; they have no undecided.
+import type { Level, SubagentBrief, TranscriptMessage } from '../hooks/policy'
 
 export type Expected = Level | 'undecided'
 
@@ -121,5 +123,121 @@ export const FIXTURES: Fixture[] = [
     ],
     current: undefined,
     expect: ['high', 'xhigh', 'medium'],
+  },
+]
+
+// --- subagent briefs: one read of the brief at spawn, no undecided -------------------
+
+export type SubagentFixture = { name: string; brief: SubagentBrief; expect: readonly Level[] }
+
+const brief = (subagentType: string, description: string, prompt: string): SubagentBrief => ({ subagentType, description, prompt })
+
+export const SUBAGENT_FIXTURES: SubagentFixture[] = [
+  // --- mechanical: low ---------------------------------------------------------------
+  {
+    name: 'web research, tabulate lender criteria',
+    brief: brief(
+      'general-purpose',
+      'BTL lender criteria research',
+      'Research UK lenders that offer buy-to-let mortgages to limited companies. For each of Precise, Paragon, Kent Reliance and The Mortgage Works, find the maximum LTV, the minimum interest cover ratio for higher-rate taxpayers and the product fee from their published criteria pages. Return a markdown table with a source URL per row. Do not spawn sub-agents.',
+    ),
+    expect: ['low'],
+  },
+  {
+    name: 'Explore: where is the token refreshed',
+    brief: brief(
+      'Explore',
+      'Find token refresh code',
+      'Find where the frontend refreshes the session token and which React hooks or components trigger it. Report each file path with a one-line note on what it does. Search breadth: medium.',
+    ),
+    expect: ['low'],
+  },
+  {
+    name: 'summarise a given doc',
+    brief: brief('general-purpose', 'Summarise payments architecture doc', 'Read docs/architecture/payments.md and give me a 10-bullet summary of the payment flows it describes. Quote the section headings you drew each bullet from.'),
+    expect: ['low'],
+  },
+  {
+    name: 'run the tests and report, no fixing',
+    brief: brief('general-purpose', 'Run API tests', 'Run `bun test` in packages/api and report which tests fail, with the first lines of each error. Do not change any code.'),
+    expect: ['low'],
+  },
+  {
+    name: 'list npm scripts across the monorepo',
+    brief: brief('general-purpose', 'Inventory npm scripts', 'List the npm scripts defined in every package.json in this monorepo, as a table of package name, script name and command.'),
+    expect: ['low'],
+  },
+  {
+    name: 'extract action items from given text',
+    brief: brief(
+      'general-purpose',
+      'Extract action items',
+      'From the meeting notes below, extract every action item with its owner and due date as a markdown table. Leave the due date blank where none is given.\n\nNotes: Priya to send the revised pricing deck by Friday. Tom will chase legal on the DPA. We agreed Sam owns the onboarding survey, due end of month. Next sync in two weeks.',
+    ),
+    expect: ['low'],
+  },
+  {
+    name: 'add translation keys in the existing format',
+    brief: brief('general-purpose', 'Add i18n keys', 'In src/i18n/en.json and src/i18n/fr.json add the key checkout.promo.expired with the strings "This code has expired" and "Ce code a expiré", following the existing nesting and ordering.'),
+    expect: ['low', 'medium'],
+  },
+
+  // --- open-ended judgement, no user in the loop: high and up --------------------------
+  {
+    name: 'implement rate limiting from a spec, with tests',
+    brief: brief(
+      'general-purpose',
+      'Implement API rate limiting',
+      'Implement rate limiting for the public REST API. Spec: token bucket per API key, 100 requests per minute with a burst of 20, state in Redis, respond 429 with a Retry-After header, limits configurable by environment variable, internal service keys exempt. Add unit tests for the bucket maths and an integration test against the Express app. Report what you changed.',
+    ),
+    expect: ['high', 'xhigh'],
+  },
+  {
+    name: 'debug a failing test after a merge',
+    brief: brief(
+      'general-purpose',
+      'Fix failing ledger test',
+      "The test 'settles partial refunds across currencies' in src/ledger/ledger.spec.ts started failing after yesterday's merge to main. Find the root cause and fix it. Do not just change the assertion; explain what broke.",
+    ),
+    expect: ['high', 'xhigh'],
+  },
+  {
+    name: 'security review of a branch',
+    brief: brief(
+      'general-purpose',
+      'Security review of auth branch',
+      'Do a security review of the changes on this branch: the OAuth callback handler and the new session cookie settings. Look for CSRF, open redirects, token leakage in logs or URLs, and missing cookie flags. Report each finding with severity and a suggested fix.',
+    ),
+    expect: ['high', 'xhigh'],
+  },
+  {
+    name: 'Plan: design proposal for event-driven reconciliation',
+    brief: brief(
+      'Plan',
+      'Design event-driven reconciliation',
+      'Write a design proposal for moving our nightly batch reconciliation of card settlements to an event-driven model. Cover at least two options, the trade-offs, a migration path that keeps both running in parallel, and the risks to month-end close.',
+    ),
+    expect: ['high', 'xhigh'],
+  },
+  {
+    name: 'review a PR for correctness',
+    brief: brief('general-purpose', 'Review retry middleware PR', 'Review PR #482, which adds retry middleware to the HTTP client, for correctness bugs and missed edge cases (idempotency, timeouts, retry storms). Report issues with file and line; do not change code.'),
+    expect: ['high', 'xhigh'],
+  },
+  {
+    name: 'autonomous port with property tests',
+    brief: brief(
+      'general-purpose',
+      'Port payment state machine to TS',
+      "Port the payment state machine from the legacy C# service (legacy/Payments/StateMachine.cs) to TypeScript in src/payments/state.ts, keeping behaviour identical. Write property-based tests against the recorded fixtures in legacy/fixtures and keep iterating until they all pass. Work on your own; I won't be around to answer questions.",
+    ),
+    expect: ['high', 'xhigh', 'max'],
+  },
+
+  // --- the fragile point: a short brief that leans on shared context ------------------
+  {
+    name: 'vague: "same for the invoices table"',
+    brief: brief('general-purpose', 'Same for invoices', 'Now do the same for the invoices table.'),
+    expect: ['low', 'medium', 'high'],
   },
 ]
