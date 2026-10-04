@@ -105,5 +105,24 @@ describe('register', () => {
     expect(text).toContain('Messages')
     expect(text).not.toContain('Free space')
   })
+
+  test('keeps other mods footer drawing when the engine has no modes', async ($, on) => {
+    // another mod (effort-router) drawing beneath this one in the same footer
+    on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+      const { Box, Text } = await $.ui.resolve(e)
+      return Box({ children: [await next(e), Text({ children: ['auto · medium'] })] })
+    })
+    world(on, { tokens: 68_000, window: 200_000, percent: 34 })
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: '/work' })
+    await $.session.measure({
+      context: { tokens: 68_000, window: 200_000, percent: 34 },
+      rateLimits: [],
+      changed: ['context'],
+    })
+    const ui = await $.ui.mount({ ...FOOTER, surface: 'desktop' })
+    expect(await ui.find({ type: 'Text', text: 'ctx 34%' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'auto · medium' })).toBeDefined()
+    await ui.unmount()
+  })
 })
 

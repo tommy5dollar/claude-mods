@@ -2,6 +2,7 @@ import type { EngineInterface, On, PluginOptions } from 'claude-code'
 
 import {
   breakdownText,
+  estimatedGaugeOf,
   type Gauge,
   gaugeOf,
   isSameGauge,
@@ -19,6 +20,12 @@ const COMMAND = 'ctx'
  * until the module reloads, and the next measurement or refresh refills it.
  */
 let gauge: Gauge | undefined
+
+/**
+ * Counts readings so a slow, older one (an estimate) never overwrites a newer
+ * one (a measurement that landed meanwhile).
+ */
+let readings = 0
 
 /**
  * Takes a new reading and redraws only when the drawing changes.
@@ -47,11 +54,31 @@ function show($: EngineInterface, next: Gauge | undefined, site: Site): void {
  * @param site where the gauge draws
  */
 async function refresh($: EngineInterface, thresholds: Thresholds, site: Site): Promise<void> {
+  const ticket = ++readings
+  let next: Gauge | undefined
   try {
     const usage = await $.session.usage()
-    show($, gaugeOf(usage?.context, thresholds), site)
+    next = gaugeOf(usage?.context, thresholds) ?? (await estimate($, thresholds))
   } catch {
-    show($, undefined, site)
+    next = undefined
+  }
+  // A newer reading (a measurement) landed while this one was in flight.
+  if (ticket === readings) show($, next, site)
+}
+
+/**
+ * An estimate from a `summary` breakdown (local counts, no API call), for when
+ * there is no live reading or the live one is stale (just after compaction).
+ *
+ * @param $ the engine
+ * @param thresholds where the colour changes
+ */
+async function estimate($: EngineInterface, thresholds: Thresholds): Promise<Gauge | undefined> {
+  try {
+    const usage = await $.session.usage({ breakdown: 'summary' })
+    return estimatedGaugeOf(usage?.context, thresholds)
+  } catch {
+    return undefined
   }
 }
 
@@ -85,6 +112,7 @@ export function register(on: On, options: PluginOptions): void {
   // Pushed after each main-thread turn; `changed` says whether the fill moved.
   on('session.measure', ($, e, next) => {
     if (e.changed.includes('context')) {
+      readings++
       show($, gaugeOf(e.context, thresholds), site)
     }
 
@@ -98,6 +126,30 @@ export function register(on: On, options: PluginOptions): void {
     void refresh($, thresholds, site)
 
     return next(e)
+  })
+
+  // Compaction leaves the live reading stale or empty until the next response,
+  // so the gauge would sit on the old figure. Estimate from the new transcript
+  // as soon as compaction finishes.
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agentId === undefined) {
+      const ticket = ++readings
+      void estimate($, thresholds).then(estimated => {
+        if (ticket === readings) show($, estimated, site)
+      })
+    }
+
+    return result
+  })
+
+  // session.measure only fires when a whole turn ends. Re-read after each main
+  // thread model request too, so the gauge moves during long tool loops.
+  on('turn.step', async function* ($, e, next) {
+    const result = yield* next(e)
+    if (e.agentId === undefined) void refresh($, thresholds, site)
+
+    return result
   })
 
   on('command.run', { command: COMMAND }, async $ => {
@@ -121,9 +173,11 @@ export function register(on: On, options: PluginOptions): void {
       const { Box, Text } = await $.ui.resolve(e)
       const mine = Text({ color: gauge.color, children: [gauge.text] })
 
-      if (e.props.modes.length === 0) return mine
+      // Always run the rest of the chain: other mods (effort-router) draw in
+      // this same footer, and returning early here would erase them.
+      const theirs = await next(e)
 
-      return Box({ flexDirection: 'row', columnGap: 1, children: [await next(e), mine] })
+      return Box({ flexDirection: 'row', columnGap: 1, children: theirs ? [theirs, mine] : [mine] })
     })
   }
 

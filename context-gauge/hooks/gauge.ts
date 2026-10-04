@@ -109,6 +109,26 @@ export function gaugeOf(
   return { percent, text: `ctx ${percent}%`, level, color: COLORS[level] }
 }
 
+/**
+ * An estimated gauge from a `summary` breakdown, for when the engine has no
+ * live reading: just after compaction, until the next response lands. Drawn
+ * as `ctx ~12%` so it reads as an estimate. Measured against the model's
+ * window (`window`), the same base the live reading uses.
+ */
+export function estimatedGaugeOf(
+  context: ContextFigures & { breakdown?: { totalTokens?: unknown } } | undefined | null,
+  thresholds: Thresholds = DEFAULT_THRESHOLDS,
+): Gauge | undefined {
+  const total = context?.breakdown?.totalTokens
+  const window = context?.window
+  if (!isFiniteNumber(total) || !isFiniteNumber(window) || window <= 0 || total < 0) return undefined
+
+  const percent = Math.round((total / window) * 100)
+  const level = levelOf(percent, thresholds)
+
+  return { percent, text: `ctx ~${percent}%`, level, color: COLORS[level] }
+}
+
 /** Whether two gauges would draw the same thing. */
 export const isSameGauge = (a: Gauge | undefined, b: Gauge | undefined): boolean =>
   a?.text === b?.text && a?.color === b?.color

@@ -4,6 +4,7 @@ import {
   breakdownText,
   DEFAULT_THRESHOLDS,
   gaugeOf,
+  estimatedGaugeOf,
   isSameGauge,
   levelOf,
   percentOf,
@@ -117,5 +118,18 @@ describe('breakdownText', () => {
 
   test('no reading', () => {
     expect(breakdownText({ window: 200_000 })).toContain('no reading yet')
+  })
+})
+
+describe('estimatedGaugeOf', () => {
+  test('estimates from the breakdown total against the model window, marked with ~', () => {
+    const g = estimatedGaugeOf({ window: 200_000, breakdown: { totalTokens: 24_000 } })
+    expect(g).toEqual({ percent: 12, text: 'ctx ~12%', level: 'green', color: 'success' })
+  })
+
+  test('nothing without a breakdown total or a window', () => {
+    expect(estimatedGaugeOf({ window: 200_000 })).toBeUndefined()
+    expect(estimatedGaugeOf({ breakdown: { totalTokens: 5 } })).toBeUndefined()
+    expect(estimatedGaugeOf(undefined)).toBeUndefined()
   })
 })
