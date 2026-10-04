@@ -1,7 +1,7 @@
 {
   "name": "effort-router",
-  "version": "0.5.2",
-  "description": "Reads the conversation after each prompt until the task is clear (a Haiku read against Anthropic's 'Spending your effort' guidance and your own rules), suggests a reasoning-effort level, and locks it for every request and subagent once you accept. /route runs it on demand, optionally with a hint. The footer shows the state (deciding, high?, high 🔒, off) and is a button that opens the router's band above the prompt.",
+  "version": "0.6.0",
+  "description": "Reads the conversation before each prompt runs until the task is clear (a Haiku read against Anthropic's 'Spending your effort' guidance and your own rules) and puts a reasoning-effort level in use for every request and subagent at once; Keep locks it, Revert hands back to the picker. /route runs it on demand, optionally with a hint. The footer shows the state (deciding, high?, high 🔒, off) and is a button that opens the router's band above the prompt.",
   "author": {
     "name": "Tommy Long"
   },
@@ -11,20 +11,35 @@
   "userConfig": {
     "consent": {
       "type": "string",
-      "title": "Consent before locking",
-      "description": "\"band\" (default): offer the level above the prompt (Accept or Turn off) and lock on Accept. \"ask\": a blocking question when a new level is suggested. \"none\": lock without asking.",
+      "title": "Consent",
+      "description": "\"apply\" (default): the router's level is used at once and shown above the prompt (Keep locks it, Revert hands back to the picker); re-reads may change it until you keep it. \"confirm\": nothing changes until you Accept in the band. \"ask\": a blocking question when a new level is suggested. \"none\": lock without asking. (\"band\", the old name for confirm, still works.)",
       "required": false,
-      "default": "band",
+      "default": "apply",
       "options": [
-        "band",
+        "apply",
+        "confirm",
         "ask",
         "none"
       ]
     },
+    "classifyTimeoutMs": {
+      "type": "number",
+      "title": "Classifier timeout (ms)",
+      "description": "How long a prompt waits for the router's read before it runs anyway at the current level. The read usually takes 1-2 seconds.",
+      "required": false,
+      "default": 8000
+    },
+    "classifierMaxChars": {
+      "type": "number",
+      "title": "Classifier input cap (chars)",
+      "description": "Most transcript characters one read sends. The first prompt is always kept, then the newest lines, your prompts and answers before Claude's replies.",
+      "required": false,
+      "default": 24000
+    },
     "decideWithin": {
       "type": "number",
       "title": "Decide within (prompts)",
-      "description": "How many of your prompts the router reads automatically. If nothing is locked by then it stops reading: a pending suggestion stays pending, otherwise the router turns off. /route asks again at any time.",
+      "description": "How many of your prompts (and answered questions) the router reads automatically. If nothing is locked by then it stops reading: a level in use is locked, a pending suggestion stays pending, otherwise the router turns off. /route asks again at any time.",
       "required": false,
       "default": 6
     },

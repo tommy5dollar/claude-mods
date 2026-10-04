@@ -30,6 +30,10 @@ import {
   wantsRead,
   withReading,
   withQuestionAnswer,
+  capLines,
+  renderTranscript,
+  firstSighting,
+  humanPromptCount,
   withSaved,
   questionText,
   ago,
@@ -64,7 +68,7 @@ describe('trimTranscript', () => {
     const out = trimTranscript(messages, 'LATEST', { userChars: 100, assistantChars: 300, lastAssistantChars: 300, totalChars: 2000 })
     expect(out.length).toBeLessThanOrEqual(2000)
     expect(out.split('\n')[0]).toBe('USER: FIRST')
-    expect(out).toContain('earlier messages omitted')
+    expect(out).toContain('messages omitted …]')
     expect(out).toEndWith('USER: LATEST')
   })
 
@@ -83,6 +87,36 @@ describe('trimTranscript', () => {
 
   test('assistant message with only tool uses', () => {
     expect(trimTranscript([{ role: 'assistant', text: '', toolUses: [{ tool: 'Edit' }] }])).toBe('ASSISTANT: [tools: Edit]')
+  })
+})
+
+describe('the classifier input cap', () => {
+  test('keeps the first prompt, then human lines before assistant text, newest first, within the cap', () => {
+    const messages: TranscriptMessage[] = [{ role: 'user', text: 'THE ORIGINAL TASK' }]
+    for (let i = 0; i < 60; i++) {
+      messages.push({ role: 'assistant', text: `reply ${i} ${'y'.repeat(280)}` })
+      messages.push({ role: 'user', text: `prompt ${i}` })
+    }
+    messages.push({ role: 'assistant', text: 'Which one: 1. full rewrite or 2. minimal patch?' })
+    const out = renderTranscript(messages, '2', { ...DEFAULT_TRIM, totalChars: 3000 })
+    expect(out.sentChars).toBeLessThanOrEqual(3000)
+    expect(out.fullChars).toBeGreaterThan(18_000)
+    expect(out.omitted).toBeGreaterThan(0)
+    const lines = out.text.split('\n')
+    expect(lines[0]).toBe('USER: THE ORIGINAL TASK')
+    expect(lines.at(-1)).toBe('USER: 2')
+    expect(lines.at(-2)).toBe('ASSISTANT: Which one: 1. full rewrite or 2. minimal patch?') // the question a short reply answers
+    // every human prompt fits (they are short); assistant replies are what gets dropped
+    for (let i = 0; i < 60; i++) expect(out.text).toContain(`USER: prompt ${i}\n`)
+    expect(out.text).toContain('[… 1 messages omitted …]')
+  })
+
+  test('under the cap nothing is dropped', () => {
+    expect(capLines(['USER: a', 'ASSISTANT: b'], 1000)).toEqual({ text: 'USER: a\nASSISTANT: b', sentChars: 20, omitted: 0 })
+  })
+
+  test('the default cap is 24k characters', () => {
+    expect(DEFAULT_TRIM.totalChars).toBe(24_000)
   })
 })
 
@@ -254,6 +288,70 @@ describe('state', () => {
   const PROPOSED = withReading(DECIDING, P_HIGH)
   const LOCKED = lockedAt(PROPOSED, P_HIGH)
   const OFF = turnedOff(DECIDING)
+
+  test('apply: a reading puts the level in use (provisional); re-reads change it; undecided keeps it', () => {
+    const provisional = withReading(DECIDING, P_HIGH, true)
+    expect(provisional).toMatchObject({ mode: 'auto', phase: 'provisional', level: 'high', reason: 'bug fix in existing code' })
+    expect(appliedLevel(provisional)).toBe('high')
+    const lowered = withReading(provisional, P_LOW, true)
+    expect(lowered).toMatchObject({ phase: 'provisional', level: 'low', reason: 'minimal patch' })
+    expect(withReading(lowered, undefined, true)).toBe(lowered)
+    expect(withReading(DECIDING, undefined, true)).toBe(DECIDING)
+    expect(withReading(OFF, P_HIGH, true)).toMatchObject({ mode: 'auto', phase: 'provisional', level: 'high' })
+    expect(withReading(LOCKED, P_LOW, true)).toMatchObject({ phase: 'locked', level: 'high', proposal: P_LOW }) // locked: still a switch offer
+  })
+
+  test('apply: footer, band and identity of a provisional level', () => {
+    const provisional = withReading(DECIDING, P_HIGH, true)
+    expect(footerLabel(provisional)).toEqual({ text: 'high?', color: 'yellow', dim: false })
+    expect(bandHeadline(provisional)).toBe('Using high — bug fix in existing code')
+    expect(bandActions(provisional).map(a => a.label)).toEqual(['Keep high', 'Revert to picker'])
+    expect(bandActions(provisional, true, true).map(a => a.label)).toEqual(['Keep high', 'Revert to picker', 'Suggest now'])
+    expect(bandActions(provisional, false).map(a => a.label)).toEqual(['Keep high'])
+    expect(offerKey(provisional)).toBe('provisional:high')
+    expect(offerKey(withReading(provisional, { level: 'high', reason: 'other words' }, true))).toBe('provisional:high') // same level: the band stays closed
+    expect(offerKey(withReading(provisional, P_LOW, true))).toBe('provisional:low')
+    expect(reasonText(provisional)).toBe('router: bug fix in existing code (in use, not yet kept)')
+    expect(routeReport(provisional, 6)).toStartWith('high? The router\'s level is in use')
+  })
+
+  test('apply: the budget running out locks a provisional level', () => {
+    const provisional = { ...withReading(DECIDING, P_HIGH, true), prompts: 6 }
+    expect(afterBudget(provisional, 6, true)).toMatchObject({ mode: 'auto', phase: 'locked', level: 'high', reason: 'bug fix in existing code' })
+    expect(afterBudget({ ...provisional, prompts: 5 }, 6, true)).toEqual({ ...provisional, prompts: 5 })
+  })
+
+  test('a provisional level survives a resume', () => {
+    const provisional = withReading(DECIDING, P_HIGH, true)
+    expect(restored(withSaved(undefined, 's1', provisional, 1).s1)).toMatchObject({ mode: 'auto', phase: 'provisional', level: 'high' })
+  })
+
+  test('first sighting: earlier prompts count; past the budget the router is left off', () => {
+    expect(firstSighting(0, 6, true)).toEqual(freshState())
+    expect(firstSighting(4, 6, true)).toEqual({ ...freshState(), prompts: 4 })
+    expect(firstSighting(10, 6, true)).toMatchObject({ mode: 'picker', gaveUp: true, offReason: 'existing session — /route to ask' })
+    expect(footerLabel(firstSighting(10, 6, true)).text).toBe('off')
+    expect(firstSighting(10, 6, false)).toMatchObject({ mode: 'auto', phase: 'undecided', gaveUp: true })
+    expect(wantsRead({ ...firstSighting(10, 6, false), prompts: 11 }, 6)).toBe(false)
+    expect(
+      humanPromptCount([
+        { role: 'user', text: 'one' },
+        { role: 'assistant', text: 'ok' },
+        { role: 'user', text: '' }, // a tool result
+        { role: 'user', text: '<command-name>/effort</command-name>' },
+        { role: 'user', text: '[Request interrupted by user]' },
+        { role: 'user', text: 'two' },
+      ]),
+    ).toBe(2)
+  })
+
+  test('status shows the consent mode, the read time and what was sent', () => {
+    const report = routeReport(DECIDING, 6, 'medium', { now: 0, calls: 2, consent: 'apply', lastReadMs: 1240, sent: { sentChars: 23_900, fullChars: 91_000, maxChars: 24_000, omitted: 210 } })
+    expect(report).toContain('Consent: apply.')
+    expect(report).toContain('Classifier calls this session: 2. Last read took 1240 ms.')
+    expect(report).toContain('Last read sent 23900 of 91000 transcript chars (cap 24000; 210 messages left out).')
+    expect(routeReport(DECIDING, 6, 'medium', { now: 0, calls: 1, sent: { sentChars: 80, fullChars: 80, maxChars: 24_000, omitted: 0 } })).toContain('Last read sent the whole transcript: 80 chars (cap 24000).')
+  })
 
   test('only a lock touches effort', () => {
     expect(appliedLevel(DECIDING)).toBeUndefined()

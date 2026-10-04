@@ -211,11 +211,11 @@ export type TrimLimits = {
   assistantChars: number
   /** Cap for the last assistant message, often the question a short reply answers. */
   lastAssistantChars: number
-  /** Cap on the whole rendered transcript; the middle is dropped first. */
+  /** Cap on the whole rendered transcript (`classifierMaxChars`): the first prompt and the newest lines are kept, human lines before assistant text. */
   totalChars: number
 }
 
-export const DEFAULT_TRIM: TrimLimits = { userChars: 4000, assistantChars: 300, lastAssistantChars: 2000, totalChars: 16000 }
+export const DEFAULT_TRIM: TrimLimits = { userChars: 4000, assistantChars: 300, lastAssistantChars: 2000, totalChars: 24000 }
 
 const COMMAND_MESSAGE = /^\s*<(command-name|command-message|local-command-stdout|local-command-stderr)>/
 
@@ -278,18 +278,101 @@ export function trimTranscript(
   const now = (current ?? '').trim()
   if (now !== '' && !COMMAND_MESSAGE.test(now)) lines.push(`USER: ${cut(now, limits.userChars)}`)
 
-  const total = (xs: string[]) => xs.reduce((n, x) => n + x.length + 1, 0)
-  if (total(lines) <= limits.totalChars) return lines.join('\n')
+  return capLines(lines, limits.totalChars).text
+}
 
-  const firstUser = lines.findIndex(line => line.startsWith('USER: '))
-  const head = firstUser >= 0 ? [lines[firstUser] as string] : []
-  const tail: string[] = []
-  for (let i = lines.length - 1; i > Math.max(firstUser, -1); i--) {
-    const line = lines[i] as string
-    if (total([...head, ...tail, line]) + 40 > limits.totalChars) break
-    tail.unshift(line)
+/** What a capped transcript kept, for `/route status`. */
+export type CapStats = { text: string; fullChars: number; sentChars: number; omitted: number }
+
+/** The transcript as `trimTranscript` renders it, with what the cap dropped. */
+export function renderTranscript(messages: readonly TranscriptMessage[], current?: string, limits: TrimLimits = DEFAULT_TRIM): CapStats {
+  const uncapped = trimTranscript(messages, current, { ...limits, totalChars: Number.MAX_SAFE_INTEGER })
+  const capped = capLines(uncapped === '' ? [] : uncapped.split('\n'), limits.totalChars)
+  return { ...capped, fullChars: uncapped.length }
+}
+
+const isHumanLine = (line: string): boolean => line.startsWith('USER') || line.startsWith('ASSISTANT asked:')
+
+/**
+ * Fits rendered lines into `max` characters. Always keeps the first human
+ * prompt (the original task). Then, newest first, the human side (prompts,
+ * AskUserQuestion questions and answers) and the last assistant line (often
+ * the question a short reply answers); then, newest first, other assistant
+ * text with what is left. Order is kept; each gap becomes one marker line.
+ */
+export function capLines(lines: readonly string[], max: number): { text: string; sentChars: number; omitted: number } {
+  const size = (line: string) => line.length + 1
+  const whole = lines.reduce((n, line) => n + size(line), 0)
+  if (whole <= max) {
+    const text = lines.join('\n')
+    return { text, sentChars: text.length, omitted: 0 }
   }
-  return [...head, '[… earlier messages omitted …]', ...tail].join('\n')
+  // Budget the output as it will be rendered: kept lines, plus one marker per
+  // run of dropped lines (adding a line can split a run, shrink it or close it).
+  const n = lines.length
+  const keep = new Set<number>()
+  const MARKER = 30 // `[… 123 messages omitted …]` and its newline
+  let used = n > 0 ? MARKER : 0
+  const dropped = (i: number) => i >= 0 && i < n && !keep.has(i)
+  const add = (i: number): boolean => {
+    const left = dropped(i - 1)
+    const right = dropped(i + 1)
+    const markers = left && right ? 1 : !left && !right ? -1 : 0
+    const cost = size(lines[i] as string) + markers * MARKER
+    if (used + cost > max) return false
+    keep.add(i)
+    used += cost
+    return true
+  }
+  const firstUser = lines.findIndex(line => line.startsWith('USER: '))
+  if (firstUser >= 0) add(firstUser)
+  let lastAssistant = -1
+  lines.forEach((line, i) => {
+    if (line.startsWith('ASSISTANT: ')) lastAssistant = i
+  })
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (keep.has(i)) continue
+    if (isHumanLine(lines[i] as string) || i === lastAssistant) {
+      if (!add(i)) break
+    }
+  }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (keep.has(i)) continue
+    if (!add(i)) break
+  }
+  const out: string[] = []
+  let gap = 0
+  lines.forEach((line, i) => {
+    if (keep.has(i)) {
+      if (gap > 0) out.push(`[… ${gap} messages omitted …]`)
+      gap = 0
+      out.push(line)
+    } else gap++
+  })
+  if (gap > 0) out.push(`[… ${gap} messages omitted …]`)
+  const text = out.join('\n')
+  return { text, sentChars: text.length, omitted: lines.length - keep.size }
+}
+
+/** Human prompts in a stored transcript: the ones a person typed, not tool results, /commands or interruptions. */
+export function humanPromptCount(messages: readonly TranscriptMessage[]): number {
+  return messages.filter(message => {
+    if (message.role !== 'user') return false
+    const text = (message.text ?? '').trim()
+    return text !== '' && !COMMAND_MESSAGE.test(text) && !text.startsWith('[Request interrupted')
+  }).length
+}
+
+/**
+ * The state for a session the router first sees with prompts already in it:
+ * those prompts count toward the budget. A session already past the budget is
+ * left alone (off; idle deciding when the organisation keeps the router on).
+ */
+export function firstSighting(prior: number, decideWithin: number, allowOff: boolean): RouterState {
+  const state = { ...freshState(), prompts: prior }
+  if (prior < decideWithin) return state
+  const offReason = 'existing session — /route to ask'
+  return allowOff ? { ...state, mode: 'picker', gaveUp: true, offReason } : { ...state, gaveUp: true, offReason }
 }
 
 /**
@@ -376,21 +459,23 @@ export function parseRoute(args: string): RouteCommand {
 
 export type Mode = 'auto' | 'picker'
 
-export type Phase = 'undecided' | 'proposed' | 'locked'
+export type Phase = 'undecided' | 'proposed' | 'provisional' | 'locked'
 
 export type Proposal = { level: Level; reason: string }
 
 /**
  * Everything the router remembers about one session.
  *
- * `auto` + `undecided` is deciding, `auto` + `proposed` a pending suggestion,
- * `auto` + `locked` locked, `picker` off. While locked, `proposal` may hold a
- * switch offered by a manual run.
+ * `auto` + `undecided` is deciding; `auto` + `provisional` the router's level
+ * in use but not yet kept (consent `apply`); `auto` + `proposed` a suggestion
+ * waiting for an accept (consent `confirm`); `auto` + `locked` locked;
+ * `picker` off. While locked, `proposal` may hold a switch offered by a manual
+ * run.
  */
 export type RouterState = {
   mode: Mode
   phase: Phase
-  /** The locked level. */
+  /** The level in use: locked, or provisional. */
   level?: Level
   reason?: string
   /** A pending suggestion (phase `proposed`), or a switch offered while locked. */
@@ -409,7 +494,7 @@ export const freshState = (): RouterState => ({ mode: 'auto', phase: 'undecided'
 
 /** The level `turn.step` applies, or undefined to leave the request alone. */
 export function appliedLevel(state: RouterState): Level | undefined {
-  return state.mode === 'auto' && state.phase === 'locked' ? state.level : undefined
+  return state.mode === 'auto' && (state.phase === 'locked' || state.phase === 'provisional') ? state.level : undefined
 }
 
 /** Whether an automatic read should follow this human prompt. */
@@ -419,11 +504,13 @@ export function wantsRead(state: RouterState, decideWithin: number): boolean {
 
 /**
  * After an automatic read: once the budget is spent with nothing locked, stop
- * reading. A pending suggestion stays pending; otherwise the router turns off
- * (or, when the organisation keeps it on, idles as deciding).
+ * reading. A provisional level becomes locked; a pending suggestion stays
+ * pending; otherwise the router turns off (or, when the organisation keeps it
+ * on, idles as deciding).
  */
 export function afterBudget(state: RouterState, decideWithin: number, allowOff: boolean): RouterState {
   if (state.mode !== 'auto' || state.phase === 'locked' || state.prompts < decideWithin) return state
+  if (state.phase === 'provisional' && state.level) return lockedAt(state, { level: state.level, reason: state.reason ?? 'classifier' })
   if (state.phase === 'proposed') return { ...state, gaveUp: true }
   const offReason = `no clear task after ${decideWithin} prompts — /route to ask again`
   return allowOff
@@ -431,10 +518,19 @@ export function afterBudget(state: RouterState, decideWithin: number, allowOff: 
     : { ...state, gaveUp: true, offReason, proposal: undefined, hint: undefined }
 }
 
-/** What a read's answer does to the state: suggest, withdraw, or offer a switch. */
-export function withReading(state: RouterState, proposal: Proposal | undefined): RouterState {
+/**
+ * What a read's answer does to the state. While locked: offer a switch (or
+ * clear one). With `apply` (consent `apply`): a level is put in use at once
+ * (provisional), and an undecided re-read leaves a provisional level alone.
+ * Otherwise: suggest, or withdraw a pending suggestion.
+ */
+export function withReading(state: RouterState, proposal: Proposal | undefined, apply = false): RouterState {
   if (state.phase === 'locked') {
     return proposal && proposal.level !== state.level ? { ...state, proposal } : { ...state, proposal: undefined }
+  }
+  if (apply) {
+    if (!proposal) return state
+    return { ...state, mode: 'auto', phase: 'provisional', level: proposal.level, reason: proposal.reason, proposal: undefined, offReason: undefined }
   }
   if (proposal) return { ...state, mode: 'auto', phase: 'proposed', proposal, gaveUp: state.gaveUp, offReason: undefined }
   // nothing clear: a pending suggestion is withdrawn; off stays off
@@ -467,6 +563,7 @@ export const turnedOn = (state: RouterState): RouterState => ({
 export function reasonText(state: RouterState): string {
   if (state.mode === 'picker') return state.offReason ? `router off: ${state.offReason}` : 'router off: the effort picker decides'
   if (state.phase === 'locked') return `router: ${state.reason ?? 'classifier'}`
+  if (state.phase === 'provisional') return `router: ${state.reason ?? 'classifier'} (in use, not yet kept)`
   if (state.proposal) return `router suggests ${state.proposal.level}: ${state.proposal.reason}`
   return "deciding: the picker's effort applies until the task is clear"
 }
@@ -479,6 +576,12 @@ export type ReadDiagnostics = {
   calls: number
   verdict?: { at: number; trigger: string; raw: string; decision: Decision }
   error?: { at: number; text: string }
+  /** The consent mode in force. */
+  consent?: string
+  /** How long the last read took, in ms. */
+  lastReadMs?: number
+  /** The last read's transcript: characters sent, characters before the cap, the cap, lines dropped. */
+  sent?: { sentChars: number; fullChars: number; maxChars: number; omitted: number }
 }
 
 /** `12s ago`, `4m ago`, `2h ago`. */
@@ -498,6 +601,8 @@ export function routeReport(state: RouterState, decideWithin: number, inForce?: 
   } else if (state.phase === 'locked') {
     lines.push(`${state.level} 🔒 (router: ${state.reason}). Every request and subagent runs at ${state.level}.`)
     if (state.proposal) lines.push(`A switch to ${state.proposal.level} is on offer (${state.proposal.reason}).`)
+  } else if (state.phase === 'provisional' && state.level) {
+    lines.push(`${state.level}? The router's level is in use (router: ${state.reason}), not yet kept. Re-reads continue and may change it; Keep in the band locks it, Revert hands back to the picker.`)
   } else if (state.phase === 'proposed' && state.proposal) {
     lines.push(`${state.proposal.level}? The router suggests ${state.proposal.level} (${state.proposal.reason}); accept it in the band (press the footer to open it). Until then ${now} applies.`)
   } else {
@@ -510,11 +615,20 @@ export function routeReport(state: RouterState, decideWithin: number, inForce?: 
   }
   if (state.hint) lines.push(`Hint: ${state.hint}`)
   if (diagnostics) {
-    lines.push(`Classifier calls this session: ${diagnostics.calls}.`)
+    if (diagnostics.consent) lines.push(`Consent: ${diagnostics.consent}.`)
+    lines.push(`Classifier calls this session: ${diagnostics.calls}.${diagnostics.lastReadMs !== undefined ? ` Last read took ${diagnostics.lastReadMs} ms.` : ''}`)
     const verdict = diagnostics.verdict
     if (verdict) {
       const said = verdict.decision.decision === 'lock' ? `${verdict.decision.level} (${verdict.decision.reason})` : 'undecided'
       lines.push(`Last verdict (${verdict.trigger}, ${ago(diagnostics.now, verdict.at)}): ${said}. Raw: ${cut(verdict.raw.replace(/\s+/g, ' ').trim(), 200)}`)
+    }
+    if (diagnostics.sent) {
+      const sent = diagnostics.sent
+      lines.push(
+        sent.omitted > 0
+          ? `Last read sent ${sent.sentChars} of ${sent.fullChars} transcript chars (cap ${sent.maxChars}; ${sent.omitted} messages left out).`
+          : `Last read sent the whole transcript: ${sent.sentChars} chars (cap ${sent.maxChars}).`,
+      )
     }
     if (diagnostics.error) lines.push(`Last error (${ago(diagnostics.now, diagnostics.error.at)}): ${cut(diagnostics.error.text, 200)}`)
   }
@@ -572,6 +686,9 @@ export function restored(saved: unknown): RouterState {
   if (locked && isLevel(record.level)) {
     return { ...state, phase: 'locked', level: record.level, reason: typeof record.reason === 'string' ? record.reason : 'restored' }
   }
+  if (mode === 'auto' && record.phase === 'provisional' && isLevel(record.level)) {
+    return { ...state, phase: 'provisional', level: record.level, reason: typeof record.reason === 'string' ? record.reason : 'restored' }
+  }
   return state
 }
 
@@ -586,13 +703,18 @@ export function footerLabel(state: RouterState): { text: string; color?: string;
     const offer = state.proposal ? ` → ${state.proposal.level}?` : ''
     return { text: `${state.level} 🔒${offer}`, color: LEVEL_COLOR[state.level], dim: false }
   }
+  if (state.phase === 'provisional' && state.level) return { text: `${state.level}?`, color: LEVEL_COLOR[state.level], dim: false }
   if (state.phase === 'proposed' && state.proposal) return { text: `${state.proposal.level}?`, color: LEVEL_COLOR[state.proposal.level], dim: false }
   return { text: 'deciding', dim: true }
 }
 
 export type BandAction = {
-  /** What the action does: `accept` the offer, `keep` the lock, `suggest` (bare `/route`), `off` or `on`. */
-  value: 'accept' | 'keep' | 'suggest' | 'off' | 'on'
+  /**
+   * What the action does: `accept` the offer, `keep` the lock (declining a
+   * switch), `lock` the provisional level, `revert` to the picker (off),
+   * `suggest` (bare `/route`), `off` or `on`.
+   */
+  value: 'accept' | 'keep' | 'lock' | 'revert' | 'suggest' | 'off' | 'on'
   label: string
 }
 
@@ -601,6 +723,7 @@ export type BandAction = {
  * suggestion opens by itself. One line: `Effort router: <footer state> — <why>`.
  */
 export function bandHeadline(state: RouterState): string {
+  if (state.mode === 'auto' && state.phase === 'provisional' && state.level) return `Using ${state.level} — ${state.reason ?? 'classifier'}`
   const label = footerLabel(state).text
   let why: string
   if (state.mode === 'picker') why = state.offReason ?? 'the effort picker decides'
@@ -616,12 +739,20 @@ export function bandHeadline(state: RouterState): string {
  * The band's buttons for a state (then `Close`, which the caller adds):
  * a suggestion → `Accept <level>`, `Turn off`; a switch offer while locked →
  * `Accept <new>`, `Keep <old>`, `Turn off`; deciding or locked → `Suggest now`,
- * `Turn off`; off → `Turn on`. `allowOff: false` (an organisation's setting)
- * leaves out Turn off.
+ * `Turn off`; off → `Turn on`. A provisional level → `Keep <level>`,
+ * `Revert to picker` (which is turning off), plus `Suggest now` when opened
+ * from the footer. `allowOff: false` (an organisation's setting) leaves out
+ * Turn off and Revert.
  */
-export function bandActions(state: RouterState, allowOff = true): BandAction[] {
+export function bandActions(state: RouterState, allowOff = true, fromFooter = false): BandAction[] {
   if (state.mode === 'picker') return [{ value: 'on', label: 'Turn on' }]
   const actions: BandAction[] = []
+  if (state.phase === 'provisional' && state.level) {
+    actions.push({ value: 'lock', label: `Keep ${state.level}` })
+    if (allowOff) actions.push({ value: 'revert', label: 'Revert to picker' })
+    if (fromFooter) actions.push({ value: 'suggest', label: 'Suggest now' })
+    return actions
+  }
   if (state.proposal) {
     actions.push({ value: 'accept', label: `Accept ${state.proposal.level}` })
     if (state.phase === 'locked' && state.level) actions.push({ value: 'keep', label: `Keep ${state.level}` })
@@ -632,8 +763,9 @@ export function bandActions(state: RouterState, allowOff = true): BandAction[] {
   return actions
 }
 
-/** A suggestion's identity, so a band closed on it stays closed until the suggestion changes. */
+/** A suggestion's identity, so a band closed on it stays closed until it changes (for a provisional level: until the level changes). */
 export function offerKey(state: RouterState): string | undefined {
+  if (state.mode === 'auto' && state.phase === 'provisional' && state.level) return `provisional:${state.level}`
   return state.mode === 'auto' && state.proposal ? `${state.phase}:${state.proposal.level}:${state.proposal.reason}` : undefined
 }
 

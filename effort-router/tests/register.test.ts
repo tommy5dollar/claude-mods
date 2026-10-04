@@ -1,7 +1,7 @@
 // Integration tests under the engine's own kit: `claude plugin test .`
 import type { On } from 'claude-code'
 import { describe, expect, mock, test } from 'claude-code/testing'
-import type { Engine } from 'claude-code/testing'
+import type { Engine, MockClock } from 'claude-code/testing'
 
 const BAND = {
   component: 'AbovePrompt',
@@ -37,24 +37,31 @@ type World = {
   messages: { role: 'user' | 'assistant'; text: string; toolUses: never[] }[]
   prompts: string[]
   toasts: string[]
+  clock: MockClock
+  /** classifierCalls as the beneath prompt.submit saw them (after the plugin's hook ran). */
+  callsAtSubmit: number[]
 }
 
 /** Answers every `$` call the mod makes, beneath it. */
-function worldOf(on: On, reply = BUG_REPLY, sources: Record<string, unknown> = {}): World {
-  const world: World = { sent: [], efforts: [], lines: [], debug: [], classifierCalls: 0, reply, messages: [{ role: 'user', text: 'pull the latest code', toolUses: [] }], prompts: [], toasts: [] }
+function worldOf(on: On, reply = BUG_REPLY, sources: Record<string, unknown> = {}, env: Record<string, string> = {}): World {
+  const clock = mock.clock(on)
+  const world: World = { sent: [], efforts: [], lines: [], debug: [], classifierCalls: 0, reply, messages: [], prompts: [], toasts: [], clock, callsAtSubmit: [] }
   mock.store(on)
-  mock.clock(on)
-  mock.env(on, {})
+  mock.env(on, env)
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'session-1' }))
   on('session.root', () => ({ value: '/repo' }))
   on('session.messages', () => ({ value: world.messages as never }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('fs.read', () => ({ deny: 'ENOENT' }))
-  on('model.complete', ($, e) => {
+  on('model.complete', async ($, e) => {
     world.classifierCalls += 1
     world.prompts.push(e.prompt)
     if (world.reply === 'THROW') throw new Error('boom')
+    if (world.reply === 'HANG') {
+      await clock.sleep(60_000)
+      return { value: { isAnswered: true, text: BUG_REPLY, usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }
+    }
     return { value: { isAnswered: true, text: world.reply, usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } }
   })
   on('command.run', { command: 'effort' }, ($, e) => {
@@ -76,7 +83,10 @@ function worldOf(on: On, reply = BUG_REPLY, sources: Record<string, unknown> = {
   })
   on('turn.complete', ($, e) => ({ text: e.answer }))
   on('settings.read', ($, e) => ({ value: (e.source ? sources[e.source] ?? {} : { effortLevel: 'medium' }) as never }))
-  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('prompt.submit', ($, e) => {
+    world.callsAtSubmit.push(world.classifierCalls)
+    return { text: e.text }
+  })
   on('tool.call', { tool: 'AskUserQuestion' }, () => ({ result: { questions: QUESTIONS.questions, answers: {} }, text: ANSWERS }) as never)
   return world
 }
@@ -94,7 +104,7 @@ async function footerOf(footer: Mounted) {
 
 /** The router's band: its headline (undefined when not drawn) and button labels. */
 async function bandOf(band: Mounted) {
-  const headline = (await band.find({ type: 'Text', text: /^Effort router: / }))?.text
+  const headline = (await band.find({ type: 'Text', text: /^(Effort router: |Using )/ }))?.text
   const buttons = (await band.findAll({ type: 'Button' })).map(b => b.props.label as string)
   return { headline, buttons }
 }
@@ -116,13 +126,13 @@ async function route($: Engine, args = ''): Promise<string> {
 
 const STARTED = { cwd: '/repo', surface: 'terminal', isInteractive: true } as const
 
-/** Lets the detached classification settle. */
+/** Lets anything left running settle. */
 async function settle(_: Engine): Promise<void> {
   for (let i = 0; i < 500; i++) await Promise.resolve()
 }
 
 describe('effort-router', () => {
-  test('consent band: suggests, Accept locks, every later request and subagent runs at the lock', async ($, on) => {
+  test('apply (default): the read finishes before the turn, so its first request already carries the level', async ($, on) => {
     const world = worldOf(on)
     await $.session.start(STARTED)
 
@@ -130,39 +140,26 @@ describe('effort-router', () => {
     expect(world.sent).toEqual(['medium']) // deciding: untouched
 
     await submit($, 'the checkout total is wrong when a coupon expires mid-session, fix it')
-    await settle($)
-    expect(world.classifierCalls).toBe(1)
-
-    const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
-    expect(await bandOf(band)).toEqual({ headline: 'Effort router: high? — bug fix in existing code', buttons: ['Accept high', 'Turn off', 'Close'] })
-
-    await step($, 1)
-    expect(world.sent.at(-1)).toBe('medium') // pending, not yet locked
-
-    await band.press({ key: 'accept' })
-    expect((await bandOf(band)).headline).toBeUndefined() // the action closes the band
-
-    await step($, 2)
+    expect(world.callsAtSubmit).toEqual([1]) // the classifier answered before prompt.submit went on
+    await step($, 0)
     await step($, 0, 'agent-7')
-    expect(world.sent.slice(-2)).toEqual(['high', 'high'])
-    expect(world.lines).toContain('effort locked: high 🔒 (router: bug fix in existing code) · /route status')
+    expect(world.sent.slice(-2)).toEqual(['high', 'high']) // index 0 of the triggering turn, and a subagent
 
-    const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'desktop', ...FOOTER } as never)
-    expect((await footerOf(footer)).shown).toBe('high 🔒')
-
-    await submit($, 'now also add a test for it')
-    await settle($)
-    expect(world.classifierCalls).toBe(1) // locked: no more automatic reads
-  })
-
-  test('a pending suggestion is re-read after each prompt: "do X" → high?, then "2" (simple) → low?', async ($, on) => {
-    const world = worldOf(on)
-    await $.session.start(STARTED)
-    world.messages = []
-    await submit($, 'refactor the payment retry logic')
-    await settle($)
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
     expect((await footerOf(footer)).shown).toBe('high?')
+    const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
+    expect(await bandOf(band)).toEqual({ headline: 'Using high — bug fix in existing code', buttons: ['Keep high', 'Revert to picker', 'Close'] })
+    expect(world.debug.some(line => /read settled in \d+ ms \(after a prompt\): high/.test(line))).toBe(true)
+  })
+
+  test('apply: a re-read changes the provisional level at once and shows the band again; undecided keeps it', async ($, on) => {
+    const world = worldOf(on)
+    await $.session.start(STARTED)
+    await submit($, 'refactor the payment retry logic')
+    const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
+    expect((await bandOf(band)).headline).toBe('Using high — bug fix in existing code')
+    await band.press({ key: 'close' })
+    expect((await bandOf(band)).headline).toBeUndefined()
 
     world.messages = [
       { role: 'user', text: 'refactor the payment retry logic', toolUses: [] },
@@ -170,65 +167,181 @@ describe('effort-router', () => {
     ]
     world.reply = '{"decision":"lock","level":"low","reason":"small constant extraction"}'
     await submit($, '2')
-    await settle($)
-    expect((await footerOf(footer)).shown).toBe('low?')
+    await step($, 0)
+    expect(world.sent).toEqual(['low'])
+    expect((await bandOf(band)).headline).toBe('Using low — small constant extraction') // shown again for the new level
     const prompt = world.prompts.at(-1) ?? ''
-    expect(prompt).toContain('2. just extract the backoff constant (simple). Which?') // the question is there to read "2" against
+    expect(prompt).toContain('2. just extract the backoff constant (simple). Which?')
     expect(prompt).toContain('USER: 2')
 
-    // and a re-read that finds nothing clear withdraws the suggestion
     world.reply = '{"decision":"undecided"}'
-    await submit($, 'hmm, wait, let me think about what I actually want')
-    await settle($)
-    expect((await footerOf(footer)).shown).toBe('deciding')
+    await submit($, 'thanks, go on')
+    await step($, 1)
+    expect(world.sent.at(-1)).toBe('low')
+    const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
+    expect((await footerOf(footer)).shown).toBe('low?')
   })
 
-  test('the decision budget: no Haiku calls after decideWithin prompts; nothing suggested → off', { options: { decideWithin: 3 } }, async ($, on) => {
+  test('apply: Keep locks, stops re-reading and syncs the picker at turn end', async ($, on) => {
+    const world = worldOf(on)
+    await $.session.start(STARTED)
+    await submit($, 'fix the crash in the parser')
+    const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
+    await band.press({ key: 'lock' })
+    expect((await bandOf(band)).headline).toBeUndefined()
+    expect(world.lines).toContain('effort locked: high 🔒 (router: bug fix in existing code) · /route status')
+    await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    await settle($)
+    expect(world.efforts).toEqual(['high'])
+    await submit($, 'now also add a test for it')
+    expect(world.classifierCalls).toBe(1)
+  })
+
+  test('apply: Revert hands back to the picker level and turns the router off', async ($, on) => {
+    const world = worldOf(on)
+    await $.session.start(STARTED)
+    await submit($, 'fix the crash in the parser')
+    await step($, 0)
+    expect(world.sent).toEqual(['high'])
+    const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
+    await band.press({ key: 'revert' })
+    await step($, 1)
+    expect(world.sent.at(-1)).toBe('medium')
+    const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
+    expect((await footerOf(footer)).shown).toBe('off')
+    await submit($, 'and the lexer too')
+    expect(world.classifierCalls).toBe(1)
+  })
+
+  test('apply: when the budget runs out while provisional, the level is locked with a log line', { options: { decideWithin: 2 } }, async ($, on) => {
+    const world = worldOf(on)
+    await $.session.start(STARTED)
+    await submit($, 'fix the crash')
+    await submit($, 'it is in the parser')
+    expect(world.classifierCalls).toBe(2)
+    expect(world.lines).toContain('effort locked: high 🔒 (kept after 2 prompts; router: bug fix in existing code) · /route status')
+    const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
+    expect((await footerOf(footer)).shown).toBe('high 🔒')
+    await submit($, 'any news?')
+    expect(world.classifierCalls).toBe(2)
+    await step($, 0)
+    expect(world.sent).toEqual(['high'])
+  })
+
+  test('a classifier that does not answer within classifyTimeoutMs fails open', async ($, on) => {
+    const world = worldOf(on, 'HANG')
+    await $.session.start(STARTED)
+    const submitting = submit($, 'fix the crash in the parser')
+    await world.clock.advance(8000)
+    await submitting
+    await step($, 0)
+    expect(world.sent).toEqual(['medium'])
+    expect(await route($, 'status')).toContain('classifier timed out after 8000 ms; the turn went ahead at the current level')
+    await world.clock.advance(60_000) // the late answer is ignored
+    await settle($)
+    await step($, 1)
+    expect(world.sent.at(-1)).toBe('medium')
+  })
+
+  test('nothing suggested within the budget: no more Haiku calls, the router turns off', { options: { decideWithin: 3 } }, async ($, on) => {
     const world = worldOf(on, '{"decision":"undecided"}')
     await $.session.start(STARTED)
-    for (const text of ['hi', 'pull the latest', 'look around']) {
-      await submit($, text)
-      await settle($)
-    }
+    for (const text of ['hi', 'pull the latest', 'look around']) await submit($, text)
     expect(world.classifierCalls).toBe(3)
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
     expect((await footerOf(footer)).shown).toBe('off')
     expect(await route($, 'status')).toContain('no clear task after 3 prompts — /route to ask again')
-    for (const text of ['more', 'and more']) {
-      await submit($, text)
-      await settle($)
-    }
+    for (const text of ['more', 'and more']) await submit($, text)
     expect(world.classifierCalls).toBe(3)
   })
 
-  test('the budget with a suggestion pending: it stays pending and reads stop', { options: { decideWithin: 2 } }, async ($, on) => {
+  test('an existing session past the budget is left off: no band, no Haiku calls; /route still works', async ($, on) => {
     const world = worldOf(on)
+    world.messages = Array.from({ length: 10 }, (_, i) => ({ role: 'user' as const, text: `earlier prompt ${i}`, toolUses: [] }))
     await $.session.start(STARTED)
-    await submit($, 'fix the crash')
-    await settle($)
-    await submit($, 'it is in the parser')
-    await settle($)
-    await submit($, 'any news?')
-    await settle($)
-    expect(world.classifierCalls).toBe(2)
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
-    expect((await footerOf(footer)).shown).toBe('high?')
+    expect(await footerOf(footer)).toMatchObject({ shown: 'off' })
+    const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
+    await submit($, 'fix the crash in the parser')
+    expect(world.classifierCalls).toBe(0)
+    expect((await bandOf(band)).headline).toBeUndefined()
+    expect(world.toasts).toEqual([])
+    expect(await route($, 'status')).toStartWith('off (existing session — /route to ask)')
+    expect(await route($)).toContain('using high now')
+    expect(world.classifierCalls).toBe(1)
   })
 
-  test('manual /route with a hint: reaches the classifier prompt, ignores the budget, works when gave up / off', { options: { decideWithin: 1 } }, async ($, on) => {
+  test('an existing session under the budget: its earlier prompts count', { options: { decideWithin: 3 } }, async ($, on) => {
+    const world = worldOf(on, '{"decision":"undecided"}')
+    world.messages = [
+      { role: 'user', text: 'pull the latest code', toolUses: [] },
+      { role: 'user', text: "what's in here?", toolUses: [] },
+    ]
+    await $.session.start(STARTED)
+    await submit($, 'hello')
+    expect(world.classifierCalls).toBe(1)
+    await submit($, 'hello again')
+    expect(world.classifierCalls).toBe(1)
+  })
+
+  test('the transcript sent is capped by classifierMaxChars; status says how much was sent', { options: { classifierMaxChars: 2000 } }, async ($, on) => {
+    const world = worldOf(on, '{"decision":"undecided"}')
+    await $.session.start(STARTED)
+    world.messages = [{ role: 'user', text: 'THE ORIGINAL TASK', toolUses: [] }]
+    for (let i = 0; i < 40; i++) world.messages.push({ role: 'assistant', text: `reply ${i} ${'y'.repeat(250)}`, toolUses: [] })
+    await submit($, 'LATEST')
+    const sent = world.prompts.at(-1) ?? ''
+    expect(sent).toContain('USER: THE ORIGINAL TASK')
+    expect(sent).toContain('USER: LATEST')
+    expect(sent.length).toBeLessThan(2400)
+    expect(await route($, 'status')).toMatch(/Last read sent \d+ of \d+ transcript chars \(cap 2000; \d+ messages left out\)\./)
+  })
+
+  test('confirm: nothing is applied until Accept; a re-read can change or withdraw the suggestion', { options: { consent: 'confirm' } }, async ($, on) => {
+    const world = worldOf(on)
+    await $.session.start(STARTED)
+    await submit($, 'the checkout total is wrong when a coupon expires mid-session, fix it')
+    const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: high? — bug fix in existing code', buttons: ['Accept high', 'Turn off', 'Close'] })
+    await step($, 0)
+    expect(world.sent).toEqual(['medium'])
+
+    world.reply = '{"decision":"lock","level":"low","reason":"small fix"}'
+    await submit($, 'actually just the typo')
+    expect((await bandOf(band)).headline).toBe('Effort router: low? — small fix')
+    world.reply = '{"decision":"undecided"}'
+    await submit($, 'hmm, let me think')
+    expect((await bandOf(band)).headline).toBeUndefined()
+
+    world.reply = BUG_REPLY
+    await submit($, 'ok fix the coupon bug')
+    await band.press({ key: 'accept' })
+    await step($, 1)
+    expect(world.sent.at(-1)).toBe('high')
+    expect(await route($, 'status')).toContain('Consent: confirm.')
+  })
+
+  test('EFFORT_ROUTER_CONSENT overrides consent; the 0.5 name "band" means confirm', async ($, on) => {
+    const world = worldOf(on, BUG_REPLY, {}, { EFFORT_ROUTER_CONSENT: 'band' })
+    await $.session.start(STARTED)
+    await submit($, 'fix the crash in the parser')
+    await step($, 0)
+    expect(world.sent).toEqual(['medium'])
+    expect(await route($, 'status')).toContain('Consent: confirm.')
+  })
+
+  test('manual /route with a hint: reaches the classifier prompt, ignores the budget, works when off', { options: { decideWithin: 1 } }, async ($, on) => {
     const world = worldOf(on, '{"decision":"undecided"}')
     await $.session.start(STARTED)
     await submit($, 'hi')
-    await settle($)
     expect(await route($, 'status')).toContain('off (no clear task after 1 prompts')
 
-    // undecided even with a hint: says so, stays as is
     expect(await route($, 'not sure yet')).toContain('no clear task yet, even with your hint')
     expect(world.toasts.at(-1)).toContain('no clear task yet')
     expect(await route($, 'status')).toStartWith('off')
 
     world.reply = '{"decision":"lock","level":"max","reason":"security review"}'
-    expect(await route($, 'this is a security review')).toContain('suggesting max')
+    expect(await route($, 'this is a security review')).toContain('using max now')
     expect(world.prompts.at(-1)).toContain('<user_hint>\nthis is a security review\n</user_hint>')
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
     expect((await footerOf(footer)).shown).toBe('max?')
@@ -239,9 +352,9 @@ describe('effort-router', () => {
     const world = worldOf(on)
     await $.session.start(STARTED)
     await submit($, 'fix the crash in the parser')
-    await settle($)
+    world.messages = [{ role: 'user', text: 'fix the crash in the parser', toolUses: [] }]
     const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
-    await band.press({ key: 'accept' })
+    await band.press({ key: 'lock' })
 
     expect(await route($)).toContain('confirmed: high 🔒 still fits')
 
@@ -252,21 +365,19 @@ describe('effort-router', () => {
       buttons: ['Accept low', 'Keep high', 'Turn off', 'Close'],
     })
     await step($, 0)
-    expect(world.sent.at(-1)).toBe('high') // still locked until accepted
+    expect(world.sent.at(-1)).toBe('high')
     await band.press({ key: 'accept' })
     await step($, 1)
     expect(world.sent.at(-1)).toBe('low')
   })
 
-  test('answers to AskUserQuestion on the main thread trigger a read, count toward the budget and reach the classifier', { options: { decideWithin: 3 } }, async ($, on) => {
+  test('answers to AskUserQuestion: read before the tool result returns, counted, answers in the prompt', { options: { decideWithin: 3 } }, async ($, on) => {
     const world = worldOf(on, '```json\n{"decision":"undecided"}\n```')
     await $.session.start(STARTED)
     world.messages = [{ role: 'user', text: 'pull latest code', toolUses: [] }]
     await submit($, 'implement for me a new finance solution pulling from multiple accountancy platforms')
-    await settle($)
     expect(world.classifierCalls).toBe(1)
 
-    // the model asks; the transcript holds the call but not yet its answer
     world.messages = [
       { role: 'user', text: 'pull latest code', toolUses: [] },
       { role: 'user', text: 'implement for me a new finance solution pulling from multiple accountancy platforms', toolUses: [] },
@@ -274,31 +385,30 @@ describe('effort-router', () => {
     ]
     world.reply = '{"decision":"lock","level":"high","reason":"multi-platform finance integration"}'
     await $.tool.call({ tool: 'AskUserQuestion', tool_use_id: 'q1', ...QUESTIONS } as never)
-    await settle($)
-    expect(world.classifierCalls).toBe(2)
+    expect(world.classifierCalls).toBe(2) // awaited: done when the tool result came back
     const prompt = world.prompts.at(-1) ?? ''
     expect(prompt).toContain('ASSISTANT asked: Which platforms? [options: Xero | QuickBooks]')
     expect(prompt).toContain('USER answered: User has answered your questions: "Which platforms?"="Xero, QuickBooks"')
-    const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
-    expect((await footerOf(footer)).shown).toBe('high?')
+    await step($, 3)
+    expect(world.sent).toEqual(['high'])
 
-    // a subagent's question is not the user's turn
     await $.tool.call({ tool: 'AskUserQuestion', tool_use_id: 'q2', agentId: 'agent-1', ...QUESTIONS } as never)
-    await settle($)
-    expect(world.classifierCalls).toBe(2)
+    expect(world.classifierCalls).toBe(2) // a subagent's question is not the user's turn
 
     const status = await route($, 'status')
     expect(status).toContain('Automatic reads: 2 of 3 used.')
-    expect(status).toContain('Classifier calls this session: 2.')
+    expect(status).toContain('Consent: apply.')
+    expect(status).toMatch(/Classifier calls this session: 2\. Last read took \d+ ms\./)
     expect(status).toMatch(/Last verdict \(after answered questions, \d+s ago\): high \(multi-platform finance integration\)\. Raw: \{"decision":"lock"/)
   })
 
-  test('status reports the last error', async ($, on) => {
+  test('status reports the last error; a throwing classifier fails open', async ($, on) => {
     const world = worldOf(on, 'THROW')
     await $.session.start(STARTED)
     await submit($, 'fix the crash in the parser')
-    await settle($)
     expect(world.classifierCalls).toBe(1)
+    await step($, 0)
+    expect(world.sent).toEqual(['medium'])
     expect(await route($, 'status')).toMatch(/Last error \(\d+s ago\): \S/)
   })
 
@@ -306,7 +416,6 @@ describe('effort-router', () => {
     const world = worldOf(on)
     await $.session.start(STARTED)
     await submit($, 'fix the crash in the parser')
-    await settle($)
     await step($, 0)
     expect(world.sent).toEqual(['high'])
     await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
@@ -317,6 +426,7 @@ describe('effort-router', () => {
   test('/route commands: status, off, on, rules; decide is bare /route; no level-setting', async ($, on) => {
     const world = worldOf(on, '{"decision":"undecided"}')
     await $.session.start(STARTED)
+    world.messages = [{ role: 'user', text: 'hi', toolUses: [] }]
     expect(await route($, 'status')).toContain('deciding.')
     expect(await route($, 'off')).toContain('router off')
     await step($, 0)
@@ -329,9 +439,10 @@ describe('effort-router', () => {
     expect(await route($, 'rules')).toContain('base: shipped defaults')
   })
 
-  test('footer: a plain button on terminal and desktop that opens the band with the state\'s actions', async ($, on) => {
+  test("footer: a plain button that opens the band with the state's actions", async ($, on) => {
     const world = worldOf(on)
     await $.session.start({ ...STARTED, surface: 'desktop' })
+    world.messages = [{ role: 'user', text: 'fix the crash in the parser', toolUses: [] }]
     for (const surface of ['terminal', 'desktop'] as const) {
       const footer = await $.ui.mount({ plugin: 'effort-router', surface, ...FOOTER } as never)
       const state = await footerOf(footer)
@@ -344,7 +455,6 @@ describe('effort-router', () => {
     const band = await $.ui.mount({ plugin: 'effort-router', surface: 'desktop', ...BAND } as never)
     expect((await bandOf(band)).headline).toBeUndefined()
 
-    // deciding: the footer opens the band; pressing it again closes it
     await footer.press({ key: 'route-state' })
     let shown = await bandOf(band)
     expect(shown.headline).toStartWith('Effort router: deciding — ')
@@ -352,23 +462,23 @@ describe('effort-router', () => {
     await footer.press({ key: 'route-state' })
     expect((await bandOf(band)).headline).toBeUndefined()
 
-    // Suggest now: runs the router; the band closes and comes back with the suggestion
+    // Suggest now: the level is put in use and the band comes back with it
     await footer.press({ key: 'route-state' })
     await band.press({ key: 'suggest' })
     await settle($)
     expect(world.classifierCalls).toBe(1)
     expect((await footerOf(footer)).shown).toBe('high?')
-    expect(await bandOf(band)).toEqual({ headline: 'Effort router: high? — bug fix in existing code', buttons: ['Accept high', 'Turn off', 'Close'] })
+    expect(await bandOf(band)).toEqual({ headline: 'Using high — bug fix in existing code', buttons: ['Keep high', 'Revert to picker', 'Close'] })
 
-    // Close hides the suggestion's band; it stays pending; the footer reopens it
+    // Close: stays provisional; the footer reopens it with Suggest now too
     await band.press({ key: 'close' })
     expect((await bandOf(band)).headline).toBeUndefined()
     expect((await footerOf(footer)).shown).toBe('high?')
     await footer.press({ key: 'route-state' })
-    expect((await bandOf(band)).buttons).toEqual(['Accept high', 'Turn off', 'Close'])
+    expect((await bandOf(band)).buttons).toEqual(['Keep high', 'Revert to picker', 'Suggest now', 'Close'])
 
-    // Accept: locks and closes
-    await band.press({ key: 'accept' })
+    // Keep: locks and closes
+    await band.press({ key: 'lock' })
     expect((await bandOf(band)).headline).toBeUndefined()
     await step($, 0)
     expect(world.sent).toEqual(['high'])
@@ -376,7 +486,6 @@ describe('effort-router', () => {
     await footer.press({ key: 'route-state' })
     expect(await bandOf(band)).toEqual({ headline: 'Effort router: high 🔒 — router: bug fix in existing code', buttons: ['Suggest now', 'Turn off', 'Close'] })
 
-    // Turn off: off and closed
     await band.press({ key: 'off' })
     expect((await bandOf(band)).headline).toBeUndefined()
     await step($, 1)
@@ -385,7 +494,6 @@ describe('effort-router', () => {
     await footer.press({ key: 'route-state' })
     expect(await bandOf(band)).toEqual({ headline: 'Effort router: off — the effort picker decides', buttons: ['Turn on', 'Close'] })
 
-    // Turn on: deciding again, closed
     await band.press({ key: 'on' })
     expect((await bandOf(band)).headline).toBeUndefined()
     expect((await footerOf(footer)).shown).toBe('deciding')
@@ -399,11 +507,10 @@ describe('effort-router', () => {
     expect((await footer.find({ text: /deciding/ }))?.text).toBe('deciding')
   })
 
-  test('headless (-p): locks via turn.step but never runs /effort', { options: { consent: 'none' } }, async ($, on) => {
+  test('headless (-p): applies via turn.step but never runs /effort', async ($, on) => {
     const world = worldOf(on)
     await $.session.start({ cwd: '/repo', surface: null, isInteractive: false })
     await submit($, 'fix the crash in the parser')
-    await settle($)
     await step($, 0)
     await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
     await settle($)
@@ -411,7 +518,7 @@ describe('effort-router', () => {
     expect(world.efforts).toEqual([])
   })
 
-  test('org layer: enforce is final; allowOff false hides Turn off and a spent budget idles as deciding', { options: { decideWithin: 1 } }, async ($, on) => {
+  test('org layer: enforce is final; allowOff false hides Turn off and Revert; a spent budget idles as deciding', { options: { decideWithin: 1 } }, async ($, on) => {
     const sources = {
       policy: { pluginConfigs: { 'effort-router@tommy-mods': { options: { rules: '$defaults\nORG: payments code, never below high', rulesMode: 'enforce', allowOff: false } } } },
       user: { pluginConfigs: { 'effort-router': { options: { rules: 'USER REPLACES EVERYTHING' } } } },
@@ -432,12 +539,15 @@ describe('effort-router', () => {
     await band.press({ key: 'close' })
 
     await submit($, 'hi')
-    await settle($)
     await submit($, 'hello?')
-    await settle($)
     expect(world.classifierCalls).toBe(1)
     expect((await footerOf(footer)).shown).toBe('deciding')
     expect(await route($, 'status')).toContain('Automatic reads stopped')
+
+    world.reply = BUG_REPLY
+    world.messages = [{ role: 'user', text: 'fix the crash in the parser', toolUses: [] }]
+    await route($)
+    expect((await bandOf(band)).buttons).toEqual(['Keep high', 'Close'])
   })
 
   test('without enforce, a user settings option layers over the org', async ($, on) => {
@@ -450,14 +560,5 @@ describe('effort-router', () => {
     const rules = await route($, 'rules')
     expect(rules).toMatch(/ORG\nUSER$/)
     expect(rules).toContain('spliced: user settings (pluginConfigs option)')
-  })
-
-  test('a classifier that throws fails open', { options: { consent: 'none' } }, async ($, on) => {
-    const world = worldOf(on, 'THROW')
-    await $.session.start({ cwd: '/repo', surface: null, isInteractive: false })
-    await submit($, 'fix the crash in the parser')
-    await settle($)
-    await step($, 0)
-    expect(world.sent).toEqual(['medium'])
   })
 })

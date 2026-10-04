@@ -30,7 +30,10 @@ import {
   routeReport,
   ruleLayers,
   settingsRulesOf,
-  trimTranscript,
+  renderTranscript,
+  firstSighting,
+  humanPromptCount,
+  DEFAULT_TRIM,
   turnedOff,
   turnedOn,
   wantsRead,
@@ -41,18 +44,29 @@ import {
 
 /**
  * effort-router: reads the conversation after each human prompt until the
- * task is clear, suggests a level, and locks it once accepted (or at once
- * under consent `none`). `/route` runs it on demand, with an optional hint.
+ * task is clear and, before the turn runs, puts a level in use (consent
+ * `apply`: provisional until kept) or suggests one (`confirm`, `ask`) or locks
+ * it (`none`). `/route` runs it on demand, with an optional hint.
  *
  * Fail open everywhere: any error leaves the request at the picker's effort.
  */
 
-type Consent = 'band' | 'ask' | 'none'
+type Consent = 'apply' | 'confirm' | 'ask' | 'none'
+
+/** A consent value; `band`, the 0.5 name for confirm-first, maps to `confirm`. */
+function consentOf(value: unknown): Consent | undefined {
+  if (value === 'apply' || value === 'confirm' || value === 'ask' || value === 'none') return value
+  return value === 'band' ? 'confirm' : undefined
+}
 
 type Settings = {
   consent: Consent
   /** Human prompts the router reads automatically before it stops. */
   decideWithin: number
+  /** How long a prompt waits for a read before it runs anyway (fail open). */
+  classifyTimeoutMs: number
+  /** Cap on the transcript sent to the classifier. */
+  classifierMaxChars: number
   classifierModel: string
   syncPicker: boolean
   /** `button`: the footer state is a button that opens the band. `label`: plain text, /route is the control. */
@@ -78,6 +92,10 @@ type Session = {
   calls: number
   verdict?: ReadDiagnostics['verdict']
   error?: ReadDiagnostics['error']
+  /** How long the last read took, start to settle. */
+  lastReadMs?: number
+  /** What the last read sent. */
+  sent?: ReadDiagnostics['sent']
 }
 
 /** What one read sees beyond the stored transcript. */
@@ -100,6 +118,8 @@ const SESSIONS = new Map<string, Session>()
 let isInteractive = true
 /** The organisation's `allowOff`, as the last rules read found it. */
 let allowOff = true
+/** `decideWithin`, for a session's first sighting (set at register). */
+let budgetAtSighting = 6
 
 const FALLBACK_RULES =
   'low: quick in-the-loop work, questions, chores. medium: regular feature work (default). ' +
@@ -109,7 +129,7 @@ const FALLBACK_RULES =
 const HUMAN_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
 
 function settingsOf(options: PluginOptions): Settings {
-  const consent = options.consent === 'ask' || options.consent === 'none' ? options.consent : 'band'
+  const consent = consentOf(options.consent) ?? 'apply'
   const num = (value: unknown, fallback: number): number => {
     const n = typeof value === 'number' ? value : Number(value)
     return Number.isFinite(n) && n >= 1 ? Math.floor(n) : fallback
@@ -117,6 +137,8 @@ function settingsOf(options: PluginOptions): Settings {
   return {
     consent,
     decideWithin: num(options.decideWithin, 6),
+    classifyTimeoutMs: num(options.classifyTimeoutMs, 8000),
+    classifierMaxChars: num(options.classifierMaxChars, DEFAULT_TRIM.totalChars),
     classifierModel: typeof options.classifierModel === 'string' && options.classifierModel !== '' ? options.classifierModel : 'haiku',
     syncPicker: options.syncPicker !== false && options.syncPicker !== 'false',
     footerControl: options.footerControl === 'label' ? 'label' : 'button',
@@ -130,7 +152,15 @@ async function sessionOf($: EngineInterface): Promise<{ id: string; session: Ses
   let session = SESSIONS.get(id)
   if (!session) {
     const all = (await $.store.get(STORE_KEY).catch(() => undefined)) as Record<string, unknown> | undefined
-    const state = restored(all?.[id])
+    const saved = all?.[id]
+    let state = restored(saved)
+    if (saved === undefined) {
+      // first sighting: prompts already in the session count toward the budget
+      const prior = humanPromptCount((await $.session.messages().catch(() => [])) as TranscriptMessage[])
+      if (prior >= budgetAtSighting) await loadRules($).catch(() => undefined) // learns the org's allowOff
+      state = firstSighting(prior, budgetAtSighting, allowOff)
+      if (prior > 0) $.ui.log(`effort-router: first sighting with ${prior} prompts already in the session${state.gaveUp ? ' — left off' : ''}`, { to: 'debug' })
+    }
     session = { state, reading: false, bandOpen: false, calls: 0 }
     if (appliedLevel(state)) session.pendingSync = appliedLevel(state)
     SESSIONS.set(id, session)
@@ -280,8 +310,10 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
       loadRules($),
     ])
     const messages = input.answer ? withQuestionAnswer(stored as TranscriptMessage[], input.answer) : (stored as TranscriptMessage[])
-    const transcript = trimTranscript(messages, input.current)
+    const rendered = renderTranscript(messages, input.current, { ...DEFAULT_TRIM, totalChars: settings.classifierMaxChars })
+    const transcript = rendered.text
     if (transcript.trim() === '' && !input.hint) return undefined
+    session.sent = { sentChars: rendered.sentChars, fullChars: rendered.fullChars, maxChars: settings.classifierMaxChars, omitted: rendered.omitted }
     session.calls += 1
     const reply = await $.model.complete({
       model: settings.classifierModel,
@@ -289,7 +321,7 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
       prompt: classifierPrompt(transcript, input.hint),
       maxTokens: 200,
       effort: 'low',
-      timeoutMs: 20000,
+      timeoutMs: settings.classifyTimeoutMs,
     })
     if (!reply.isAnswered) {
       session.error = { at: await now(), text: `classifier gave no answer (${reply.reason})` }
@@ -307,15 +339,39 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
 }
 
 /**
- * Applies a read's answer, then consent: `none` locks a new suggestion at
- * once; `ask` asks when the suggested level is new; `band` shows the band.
+ * Waits for `work` at most `ms`: `{ ok: false }` on a timeout. The work goes on
+ * in the background; its late answer is ignored by the caller.
+ */
+async function timed<T>($: EngineInterface, ms: number, work: Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
+  work.catch(() => undefined) // a late failure is not unhandled
+  const abort = typeof AbortController === 'function' ? new AbortController() : undefined
+  const timeout = $.clock.sleep(ms, abort ? { signal: abort.signal } : undefined).then(
+    () => ({ ok: false as const }),
+    () => ({ ok: false as const }),
+  )
+  try {
+    return await Promise.race([work.then(value => ({ ok: true as const, value })), timeout])
+  } finally {
+    abort?.abort()
+  }
+}
+
+/**
+ * Applies a read's answer, then consent. `apply` puts a level in use at once
+ * (provisional) and shows the band when the level changes; `none` locks a new
+ * suggestion; `ask` asks when the suggested level is new; `confirm` shows the
+ * band and waits for Accept.
  */
 async function settle($: EngineInterface, id: string, session: Session, settings: Settings, consent: Consent, proposal: Proposal | undefined): Promise<void> {
-  const before = session.state.proposal?.level
-  const next = withReading(session.state, proposal)
+  const before = session.state.phase === 'provisional' ? session.state.level : session.state.proposal?.level
+  const next = withReading(session.state, proposal, consent === 'apply')
   await commit($, id, session, next)
+  if (next.phase === 'provisional') {
+    if (next.level !== before) $.ui.log(`effort-router: using ${next.level} (provisional; ${next.reason})`, { to: 'debug' })
+    return
+  }
   const offer = next.proposal
-  if (!offer) return
+  if (!offer || next.phase === 'locked') return
   if (consent === 'none') {
     await accept($, id, session, settings, offer)
     return
@@ -333,39 +389,68 @@ async function settle($: EngineInterface, id: string, session: Session, settings
   }
 }
 
-/** An automatic read after a human prompt, within the budget. */
+/**
+ * An automatic read after a human turn, within the budget, awaited before the
+ * turn goes on: at most `classifyTimeoutMs`, then fail open at the current
+ * level. Then the budget: a provisional level becomes locked when it runs out.
+ */
 async function readAfter($: EngineInterface, id: string, session: Session, settings: Settings, consent: Consent, input: ReadInput): Promise<void> {
   if (session.reading) return
   session.reading = true
+  const started = await $.clock.now().catch(() => Date.now())
+  let outcome = 'failed'
   try {
-    const proposal = await classifyNow($, settings, session, { ...input, hint: session.state.hint })
-    if (session.state.mode === 'auto' && session.state.phase !== 'locked') {
-      await settle($, id, session, settings, consent, proposal)
+    const result = await timed($, settings.classifyTimeoutMs, classifyNow($, settings, session, { ...input, hint: session.state.hint }))
+    if (!result.ok) {
+      outcome = 'timed out'
+      session.error = { at: await $.clock.now().catch(() => Date.now()), text: `classifier timed out after ${settings.classifyTimeoutMs} ms; the turn went ahead at the current level` }
+    } else {
+      outcome = result.value ? `${result.value.level} (${result.value.reason})` : 'undecided'
+      if (session.state.mode === 'auto' && session.state.phase !== 'locked') {
+        await settle($, id, session, settings, consent, result.value)
+      }
     }
   } catch (error) {
     $.ui.log(`effort-router: classification failed: ${String(error)}`, { to: 'debug' })
   } finally {
     session.reading = false
+    const took = (await $.clock.now().catch(() => Date.now())) - started
+    session.lastReadMs = took
+    $.ui.log(`effort-router: read settled in ${took} ms (${input.trigger}): ${outcome}`, { to: 'debug' })
   }
-  const spent = afterBudget(session.state, settings.decideWithin, allowOff)
-  if (spent !== session.state) {
+  const was = session.state
+  const spent = afterBudget(was, settings.decideWithin, allowOff)
+  if (spent !== was) {
     await commit($, id, session, spent)
     if (spent.mode === 'picker') restorePicker($, session, settings)
-    $.ui.log(`effort-router: ${spent.offReason ?? 'budget spent'}`, { to: 'debug' })
+    if (was.phase === 'provisional' && spent.phase === 'locked' && spent.level) {
+      if (settings.syncPicker) session.pendingSync = spent.level
+      try {
+        $.ui.log(`effort locked: ${spent.level} 🔒 (kept after ${settings.decideWithin} prompts; router: ${spent.reason}) · /route status`)
+      } catch {
+        // headless
+      }
+    }
+    $.ui.log(`effort-router: ${spent.offReason ?? (spent.phase === 'locked' ? `budget spent: ${spent.level} locked` : 'budget spent')}`, { to: 'debug' })
   }
 }
 
 /**
- * A manual run (`/route [hint]`, the footer's Suggest now): reads the whole
- * conversation now, in any state, ignoring the budget. Undecided leaves the
- * state as it is.
+ * A manual run (`/route [hint]`, the band's Suggest now): reads the whole
+ * conversation now, in any state, ignoring the budget, within the timeout.
+ * Undecided leaves the state as it is.
  */
 async function suggestNow($: EngineInterface, id: string, session: Session, settings: Settings, hint: string | undefined): Promise<string> {
   if (session.reading) return 'the router is already reading; try again in a moment.'
   session.reading = true
   let proposal: Proposal | undefined
   try {
-    proposal = await classifyNow($, settings, session, { hint, trigger: hint ? 'manual /route with a hint' : 'manual /route' })
+    const result = await timed($, settings.classifyTimeoutMs, classifyNow($, settings, session, { hint, trigger: hint ? 'manual /route with a hint' : 'manual /route' }))
+    if (!result.ok) {
+      session.error = { at: await $.clock.now().catch(() => Date.now()), text: `classifier timed out after ${settings.classifyTimeoutMs} ms` }
+      return `the classifier timed out after ${settings.classifyTimeoutMs} ms; nothing changed (${footerLabel(session.state).text}).`
+    }
+    proposal = result.value
   } finally {
     session.reading = false
   }
@@ -379,7 +464,8 @@ async function suggestNow($: EngineInterface, id: string, session: Session, sett
     return text
   }
   const { state } = session
-  if (state.mode === 'auto' && state.phase === 'locked' && state.level === proposal.level) {
+  const inUse = state.mode === 'auto' && (state.phase === 'locked' || state.phase === 'provisional') ? state.level : undefined
+  if (inUse === proposal.level && state.phase === 'locked') {
     await commit($, id, session, { ...state, proposal: undefined })
     const text = `confirmed: ${proposal.level} 🔒 still fits (${proposal.reason}).`
     try {
@@ -394,6 +480,7 @@ async function suggestNow($: EngineInterface, id: string, session: Session, sett
   session.state = withHint
   await settle($, id, session, settings, consent, proposal)
   const after = session.state
+  if (after.phase === 'provisional') return `using ${after.level} now (${after.reason}); Keep it or Revert in the band.`
   if (after.phase === 'locked' && after.level === proposal.level && !after.proposal) return `${proposal.level} 🔒 (${proposal.reason}).`
   return after.phase === 'locked'
     ? `${after.level} 🔒 now; a switch to ${proposal.level} is on offer (${proposal.reason}). Accept it in the band (press the footer to open it).`
@@ -428,7 +515,10 @@ async function bandAction($: EngineInterface, id: string, session: Session, sett
   const offer = session.state.proposal
   closeBand($, session)
   try {
+    const { state } = session
     if (value === 'accept' && offer) await accept($, id, session, settings, offer)
+    else if (value === 'lock' && state.phase === 'provisional' && state.level) await accept($, id, session, settings, { level: state.level, reason: state.reason ?? 'classifier' })
+    else if (value === 'revert') await turnOff($, id, session, settings)
     else if (value === 'keep') await commit($, id, session, { ...session.state, proposal: undefined, hint: undefined })
     else if (value === 'off') await turnOff($, id, session, settings)
     else if (value === 'on' || value === 'suggest') {
@@ -443,7 +533,8 @@ async function bandAction($: EngineInterface, id: string, session: Session, sett
 /**
  * A human turn of the conversation (a prompt, or answers to the model's
  * questions): counts it against the budget while deciding, then reads if the
- * budget allows. Awaited only under `ask` consent, so nothing is held up.
+ * budget allows, and waits for the read (within the timeout) so the turn's
+ * first request already carries the answer.
  */
 async function humanTurn($: EngineInterface, settings: Settings, input: ReadInput): Promise<void> {
   const { id, session } = await sessionOf($)
@@ -452,15 +543,13 @@ async function humanTurn($: EngineInterface, settings: Settings, input: ReadInpu
   }
   if (!wantsRead(session.state, settings.decideWithin)) return
   const consent = await consentFor($, settings)
-  const reading = readAfter($, id, session, settings, consent, input)
-  if (consent === 'ask') await reading
+  await readAfter($, id, session, settings, consent, input)
 }
 
 /** Consent as configured; `EFFORT_ROUTER_CONSENT` overrides it (handy headless). */
 async function consentFor($: EngineInterface, settings: Settings): Promise<Consent> {
   const override = await $.env.get('EFFORT_ROUTER_CONSENT').catch(() => undefined)
-  if (override === 'none' || override === 'ask' || override === 'band') return override
-  return settings.consent
+  return consentOf(override) ?? settings.consent
 }
 
 // --- /route ------------------------------------------------------------------------
@@ -477,6 +566,9 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
         calls: session.calls,
         verdict: session.verdict,
         error: session.error,
+        consent: await consentFor($, settings),
+        lastReadMs: session.lastReadMs,
+        sent: session.sent,
       })
     case 'off': {
       if (!(await loadRules($)).allowOff) return "your organisation's settings keep the router on (allowOff: false)."
@@ -516,6 +608,7 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
 
 export function register(on: On, options: PluginOptions): void {
   const settings = settingsOf(options)
+  budgetAtSighting = settings.decideWithin
 
   on('session.start', async ($, e, next) => {
     isInteractive = e.isInteractive
@@ -547,10 +640,10 @@ export function register(on: On, options: PluginOptions): void {
     }
   })
 
-  // After each human prompt while deciding or suggesting (and within the
-  // budget), read the whole conversation again: a suggestion may change level
-  // or be withdrawn. Not awaited under band/none consent, so the prompt is
-  // never held up.
+  // After each human prompt while deciding or provisional/pending (and within
+  // the budget), read the whole conversation again BEFORE the turn runs, so
+  // its first request carries the router's level. Bounded by
+  // classifyTimeoutMs; on a timeout or error the turn goes ahead as it was.
   on('prompt.submit', async ($, e, next) => {
     try {
       if (HUMAN_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) {
@@ -643,7 +736,7 @@ export function register(on: On, options: PluginOptions): void {
     const { state } = session
     const headline = bandHeadline(state)
     const level = state.proposal?.level ?? (state.mode === 'auto' && state.phase === 'locked' ? state.level : undefined)
-    const label = footerLabel(state).text
+    const label = state.phase === 'provisional' && state.level ? state.level : footerLabel(state).text
     const at = level ? headline.indexOf(label) : -1
     const line =
       at >= 0 && level
@@ -655,7 +748,7 @@ export function register(on: On, options: PluginOptions): void {
             ],
           })
         : Text({ children: [headline] })
-    const buttons = bandActions(state, allowOff).map((action, i) =>
+    const buttons = bandActions(state, allowOff, session.bandOpen).map((action, i) =>
       Button({
         key: action.value,
         label: action.label,
