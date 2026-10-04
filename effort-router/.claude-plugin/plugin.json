@@ -1,0 +1,60 @@
+{
+  "name": "effort-router",
+  "version": "0.1.0",
+  "description": "Decides the session's reasoning effort once the task is clear (a Haiku read of the transcript against Anthropic's 'Spending your effort' guidance and your own rules), asks you to confirm, then locks it for every request and subagent. /route shows, re-decides, pins, hands back to the picker or edits the rules.",
+  "author": {
+    "name": "Tommy Long"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/tommy5dollar/mods/tree/main/effort-router",
+  "repository": "https://github.com/tommy5dollar/mods",
+  "userConfig": {
+    "consent": {
+      "type": "string",
+      "title": "Consent before locking",
+      "description": "\"band\" (default): offer the level with buttons above the prompt and lock on a click. \"ask\": a blocking question before the turn runs. \"none\": lock without asking.",
+      "required": false,
+      "default": "band",
+      "options": [
+        "band",
+        "ask",
+        "none"
+      ]
+    },
+    "snoozePrompts": {
+      "type": "number",
+      "title": "Not-now snooze (prompts)",
+      "description": "After \"Not now\", how many of your prompts pass before the router reads the transcript again.",
+      "required": false,
+      "default": 5
+    },
+    "maxReads": {
+      "type": "number",
+      "title": "Classifier reads per session",
+      "description": "Most transcript reads while undecided; after that the picker's effort stands until /route auto.",
+      "required": false,
+      "default": 8
+    },
+    "classifierModel": {
+      "type": "string",
+      "title": "Classifier model",
+      "description": "Alias or id of the model that reads the transcript.",
+      "required": false,
+      "default": "haiku"
+    },
+    "syncPicker": {
+      "type": "boolean",
+      "title": "Sync the effort picker",
+      "description": "Run /effort <level> when a level locks so the native picker label matches (its echo also tells the model).",
+      "required": false,
+      "default": true
+    },
+    "rules": {
+      "type": "string",
+      "title": "Routing rules",
+      "description": "Extra routing rules in plain words. Include a line that is exactly $defaults to keep the rules beneath (shipped defaults, then your organisation's); without it these rules replace them. A ~/.claude/effort-router.md file takes precedence over this option.",
+      "required": false,
+      "default": ""
+    }
+  }
+}

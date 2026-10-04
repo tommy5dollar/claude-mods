@@ -1,0 +1,9 @@
+{
+  "name": "tommy-mods",
+  "owner": { "name": "Tommy Long" },
+  "description": "Claude Code mods by Tommy Long: automatic reasoning-effort routing and a colour-coded context gauge.",
+  "plugins": [
+    { "name": "effort-router", "source": "./effort-router", "description": "Routes reasoning effort per request, following Anthropic's guidance on spending effort." },
+    { "name": "context-gauge", "source": "./context-gauge", "description": "Context-window percentage, coloured green, yellow or red." }
+  ]
+}

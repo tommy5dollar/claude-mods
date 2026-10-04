@@ -1,0 +1,4 @@
+{
+  "description": "effort-router: prompt.submit reads the transcript while the session's effort is undecided and locks a level once the task is clear; turn.step applies the locked or pinned level to every model request, subagents included; session.start registers /route, and command.run serves it",
+  "modules": ["./register.ts"]
+}

@@ -1,0 +1,2 @@
+[test]
+pathIgnorePatterns = ["tests/register.test.ts", ".claude-plugin/**"]
