@@ -404,7 +404,7 @@ export function routeReport(state: RouterState, decideWithin: number, inForce?: 
     lines.push(`${state.level} 🔒 (router: ${state.reason}). Every request and subagent runs at ${state.level}.`)
     if (state.proposal) lines.push(`A switch to ${state.proposal.level} is on offer (${state.proposal.reason}).`)
   } else if (state.phase === 'proposed' && state.proposal) {
-    lines.push(`${state.proposal.level}? The router suggests ${state.proposal.level} (${state.proposal.reason}); accept it in the band or the footer. Until then ${now} applies.`)
+    lines.push(`${state.proposal.level}? The router suggests ${state.proposal.level} (${state.proposal.reason}); accept it in the band (press the footer to open it). Until then ${now} applies.`)
   } else {
     lines.push(`deciding. The router suggests a level once the task is clear; until then ${now} applies.`)
   }
@@ -486,26 +486,51 @@ export function footerLabel(state: RouterState): { text: string; color?: string;
   return { text: 'deciding', dim: true }
 }
 
-export type FooterMenu = {
-  options: { value: string; label: string }[]
-  /** The option for the current state (`current`, a no-op); its label is the state text. */
-  value: string
+export type BandAction = {
+  /** What the action does: `accept` the offer, `keep` the lock, `suggest` (bare `/route`), `off` or `on`. */
+  value: 'accept' | 'keep' | 'suggest' | 'off' | 'on'
+  label: string
 }
 
 /**
- * The footer dropdown. The first option is the current state (value
- * `current`, a no-op), which the closed dropdown shows. Then: `Accept <level>`
- * while a suggestion or switch is on offer, `Suggest now` (bare `/route`) in
- * every state, and `Turn off` (`Turn on` when off). `allowOff: false` (an
- * organisation's setting) leaves out Turn off.
+ * The router's band above the prompt, which the footer button opens and a new
+ * suggestion opens by itself. One line: `Effort router: <footer state> — <why>`.
  */
-export function footerMenu(state: RouterState, allowOff = true): FooterMenu {
-  const options: { value: string; label: string }[] = [{ value: 'current', label: footerLabel(state).text }]
-  if (state.mode === 'auto' && state.proposal) options.push({ value: 'accept', label: `Accept ${state.proposal.level}` })
-  options.push({ value: 'suggest', label: 'Suggest now' })
-  if (state.mode === 'picker') options.push({ value: 'on', label: 'Turn on' })
-  else if (allowOff) options.push({ value: 'off', label: 'Turn off' })
-  return { options, value: 'current' }
+export function bandHeadline(state: RouterState): string {
+  const label = footerLabel(state).text
+  let why: string
+  if (state.mode === 'picker') why = state.offReason ?? 'the effort picker decides'
+  else if (state.phase === 'locked' && state.proposal) why = `switch to ${state.proposal.level}: ${state.proposal.reason}`
+  else if (state.phase === 'locked') why = reasonText(state)
+  else if (state.proposal) why = state.proposal.reason
+  else if (state.gaveUp) why = 'stopped reading; Suggest now asks again'
+  else why = "the picker's effort applies until the task is clear"
+  return `Effort router: ${label} — ${why}`
+}
+
+/**
+ * The band's buttons for a state (then `Close`, which the caller adds):
+ * a suggestion → `Accept <level>`, `Turn off`; a switch offer while locked →
+ * `Accept <new>`, `Keep <old>`, `Turn off`; deciding or locked → `Suggest now`,
+ * `Turn off`; off → `Turn on`. `allowOff: false` (an organisation's setting)
+ * leaves out Turn off.
+ */
+export function bandActions(state: RouterState, allowOff = true): BandAction[] {
+  if (state.mode === 'picker') return [{ value: 'on', label: 'Turn on' }]
+  const actions: BandAction[] = []
+  if (state.proposal) {
+    actions.push({ value: 'accept', label: `Accept ${state.proposal.level}` })
+    if (state.phase === 'locked' && state.level) actions.push({ value: 'keep', label: `Keep ${state.level}` })
+  } else {
+    actions.push({ value: 'suggest', label: 'Suggest now' })
+  }
+  if (allowOff) actions.push({ value: 'off', label: 'Turn off' })
+  return actions
+}
+
+/** A suggestion's identity, so a band closed on it stays closed until the suggestion changes. */
+export function offerKey(state: RouterState): string | undefined {
+  return state.mode === 'auto' && state.proposal ? `${state.phase}:${state.proposal.level}:${state.proposal.reason}` : undefined
 }
 
 // --- settings-borne rules (org / user / project) --------------------------------------

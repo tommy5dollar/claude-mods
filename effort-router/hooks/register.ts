@@ -14,7 +14,9 @@ import {
   composeRules,
   critiquePrompt,
   footerLabel,
-  footerMenu,
+  bandActions,
+  bandHeadline,
+  offerKey,
   isLevel,
   lockedAt,
   parseDecision,
@@ -49,8 +51,8 @@ type Settings = {
   decideWithin: number
   classifierModel: string
   syncPicker: boolean
-  /** `select`: the footer label is a dropdown. `label`: plain text, /route is the control. */
-  footerControl: 'select' | 'label'
+  /** `button`: the footer state is a button that opens the band. `label`: plain text, /route is the control. */
+  footerControl: 'button' | 'label'
 }
 
 /** Per-session runtime facts that are not persisted. */
@@ -64,6 +66,10 @@ type Session = {
   lastSent?: string | number
   /** An /effort sync to run when the session is next idle. */
   pendingSync?: Level
+  /** The band was opened from the footer. */
+  bandOpen: boolean
+  /** The suggestion the band was last closed on: it stays closed until the suggestion changes. */
+  closedOffer?: string
 }
 
 const STORE_KEY = 'sessions'
@@ -94,7 +100,7 @@ function settingsOf(options: PluginOptions): Settings {
     decideWithin: num(options.decideWithin, 6),
     classifierModel: typeof options.classifierModel === 'string' && options.classifierModel !== '' ? options.classifierModel : 'haiku',
     syncPicker: options.syncPicker !== false && options.syncPicker !== 'false',
-    footerControl: options.footerControl === 'label' ? 'label' : 'select',
+    footerControl: options.footerControl === 'label' ? 'label' : 'button',
   }
 }
 
@@ -106,7 +112,7 @@ async function sessionOf($: EngineInterface): Promise<{ id: string; session: Ses
   if (!session) {
     const all = (await $.store.get(STORE_KEY).catch(() => undefined)) as Record<string, unknown> | undefined
     const state = restored(all?.[id])
-    session = { state, reading: false }
+    session = { state, reading: false, bandOpen: false }
     if (appliedLevel(state)) session.pendingSync = appliedLevel(state)
     SESSIONS.set(id, session)
   }
@@ -346,7 +352,13 @@ async function suggestNow($: EngineInterface, id: string, session: Session, sett
   const { state } = session
   if (state.mode === 'auto' && state.phase === 'locked' && state.level === proposal.level) {
     await commit($, id, session, { ...state, proposal: undefined })
-    return `confirmed: ${proposal.level} 🔒 still fits (${proposal.reason}).`
+    const text = `confirmed: ${proposal.level} 🔒 still fits (${proposal.reason}).`
+    try {
+      $.ui.toast(`effort-router: ${text}`)
+    } catch {
+      // headless
+    }
+    return text
   }
   const consent = await consentFor($, settings)
   const withHint = hint ? { ...session.state, hint } : session.state
@@ -355,8 +367,48 @@ async function suggestNow($: EngineInterface, id: string, session: Session, sett
   const after = session.state
   if (after.phase === 'locked' && after.level === proposal.level && !after.proposal) return `${proposal.level} 🔒 (${proposal.reason}).`
   return after.phase === 'locked'
-    ? `${after.level} 🔒 now; a switch to ${proposal.level} is on offer (${proposal.reason}). Accept it in the band or the footer.`
-    : `suggesting ${proposal.level} (${proposal.reason}). Accept it in the band or the footer.`
+    ? `${after.level} 🔒 now; a switch to ${proposal.level} is on offer (${proposal.reason}). Accept it in the band (press the footer to open it).`
+    : `suggesting ${proposal.level} (${proposal.reason}). Accept it in the band (press the footer to open it).`
+}
+
+// --- the band ------------------------------------------------------------------------
+
+/** The band shows when opened from the footer, or by itself for a suggestion it was not closed on. */
+function bandShown(session: Session): boolean {
+  const key = offerKey(session.state)
+  return session.bandOpen || (key !== undefined && key !== session.closedOffer)
+}
+
+function closeBand($: EngineInterface, session: Session): void {
+  session.bandOpen = false
+  session.closedOffer = offerKey(session.state)
+  show($)
+}
+
+/** The footer button: opens the band, or closes it when it is showing. */
+function toggleBand($: EngineInterface, session: Session): void {
+  if (bandShown(session)) closeBand($, session)
+  else {
+    session.bandOpen = true
+    show($)
+  }
+}
+
+/** A band button: closes the band, then applies the action. */
+async function bandAction($: EngineInterface, id: string, session: Session, settings: Settings, value: string): Promise<void> {
+  const offer = session.state.proposal
+  closeBand($, session)
+  try {
+    if (value === 'accept' && offer) await accept($, id, session, settings, offer)
+    else if (value === 'keep') await commit($, id, session, { ...session.state, proposal: undefined, hint: undefined })
+    else if (value === 'off') await turnOff($, id, session, settings)
+    else if (value === 'on' || value === 'suggest') {
+      const text = await route($, value === 'on' ? 'on' : '', settings)
+      $.ui.log(`effort-router: ${text}`, { to: 'debug' })
+    }
+  } catch (error) {
+    $.ui.log(`effort-router: band action ${value} failed: ${String(error)}`, { to: 'debug' })
+  }
 }
 
 /** Consent as configured; `EFFORT_ROUTER_CONSENT` overrides it (handy headless). */
@@ -507,84 +559,57 @@ export function register(on: On, options: PluginOptions): void {
     return result
   })
 
-  // The footer, beside the native effort picker: the state, and on the
-  // terminal and Desktop a dropdown whose closed face is that state.
+  // The footer, beside the native effort picker: the state as a plain button
+  // that opens the band. (Desktop silently drops a Select here, so no Select.)
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
-    const { id, session } = await sessionOf($)
+    const { session } = await sessionOf($)
     const label = footerLabel(session.state)
     const theirs = await next(e)
-    const canSelect = settings.footerControl === 'select' && (e.surface === 'terminal' || e.surface === 'desktop')
-    if (!canSelect) {
-      const { Box, Text } = $.ui.resolve(e)
-      const mine = Text({ ...(label.color ? { color: label.color } : { dimColor: true }), children: [label.text] })
-      return Box({ flexDirection: 'row', columnGap: 1, children: [theirs, mine] })
-    }
-    const { Box, Select } = $.ui.resolve(e)
-    const menu = footerMenu(session.state, allowOff)
-    const mine = Select({
-      key: 'route-state',
-      options: menu.options,
-      value: menu.value,
-      onSelect: async (value: string) => {
-        if (value === menu.value) return
-        if (value === 'accept') {
-          if (session.state.proposal) await accept($, id, session, settings, session.state.proposal)
-          return
-        }
-        const text = await route($, value === 'suggest' ? '' : value, settings).catch((error: unknown) => `effort-router: ${String(error)}`)
-        $.ui.log(text, { to: 'debug' })
-      },
-    })
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const mine =
+      settings.footerControl === 'label'
+        ? Text({ ...(label.color ? { color: label.color } : { dimColor: true }), children: [label.text] })
+        : Button({ key: 'route-state', label: label.text, plain: true, dimColor: label.dim, onPress: () => toggleBand($, session) })
     return Box({ flexDirection: 'row', columnGap: 1, children: [theirs, mine] })
   })
 
-  // The consent band above the prompt: a suggestion, or a switch offered by a
-  // manual run while locked.
+  // The band above the prompt: opened from the footer, or by itself for a new
+  // suggestion. One line of state, then that state's actions and Close.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const { id, session } = await sessionOf($)
-    const offer = session.state.mode === 'auto' ? session.state.proposal : undefined
-    if (!offer || e.props.hasSurvey) return next(e)
-    const isSwitch = session.state.phase === 'locked'
+    if (!bandShown(session) || e.props.hasSurvey) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     const theirs = await next(e)
-    const decline = isSwitch
-      ? Button({
-          key: 'keep',
-          label: `Keep ${session.state.level}`,
-          hotkey: 'x',
-          plain: true,
-          dimColor: true,
-          onPress: () => commit($, id, session, { ...session.state, proposal: undefined, hint: undefined }),
-        })
-      : allowOff
-        ? Button({ key: 'turn-off', label: 'Turn off', hotkey: 'x', plain: true, dimColor: true, onPress: () => turnOff($, id, session, settings) })
-        : undefined
+    const { state } = session
+    const headline = bandHeadline(state)
+    const level = state.proposal?.level ?? (state.mode === 'auto' && state.phase === 'locked' ? state.level : undefined)
+    const label = footerLabel(state).text
+    const at = level ? headline.indexOf(label) : -1
+    const line =
+      at >= 0 && level
+        ? Text({
+            children: [
+              headline.slice(0, at),
+              Text({ color: LEVEL_COLOR[level], bold: true, children: [label] }),
+              headline.slice(at + label.length),
+            ],
+          })
+        : Text({ children: [headline] })
+    const buttons = bandActions(state, allowOff).map((action, i) =>
+      Button({
+        key: action.value,
+        label: action.label,
+        hotkey: String(i + 1),
+        plain: true,
+        ...(i === 0 ? {} : { dimColor: true }),
+        onPress: () => bandAction($, id, session, settings, action.value),
+      }),
+    )
+    buttons.push(Button({ key: 'close', label: 'Close', hotkey: 'x', plain: true, dimColor: true, role: 'dismiss', onPress: () => closeBand($, session) }))
     return Box({
       flexDirection: 'column',
-      children: [
-        Text({
-          children: [
-            isSwitch ? `Switch from ${session.state.level?.toUpperCase()} to ` : 'Route this session at ',
-            Text({ color: LEVEL_COLOR[offer.level], bold: true, children: [offer.level.toUpperCase()] }),
-            ` — ${offer.reason}`,
-          ],
-        }),
-        Box({
-          flexDirection: 'row',
-          columnGap: 2,
-          children: [
-            Button({
-              key: 'accept',
-              label: `Accept ${offer.level}`,
-              hotkey: '1',
-              plain: true,
-              onPress: () => accept($, id, session, settings, offer),
-            }),
-            ...(decline ? [decline] : []),
-          ],
-        }),
-        theirs,
-      ],
+      children: [line, Box({ flexDirection: 'row', columnGap: 2, children: buttons }), theirs],
     })
   })
 }
+

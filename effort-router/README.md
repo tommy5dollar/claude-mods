@@ -10,30 +10,31 @@ Requires Claude Code 2.1.287 or later (Claude Mods).
 
 The footer, right beside the native model and effort pickers, shows the router's state. It leaves out the level in use, because the effort picker a few pixels away already shows it.
 
-| Footer | What it means | Dropdown |
+| Footer | What it means | Band buttons |
 | --- | --- | --- |
 | `deciding` (dim) | The router is watching. Nothing is locked, so the picker's level applies | `Suggest now`, `Turn off` |
-| `high?` | The router suggests high and is waiting for you. The band above the prompt has `1: Accept high` and `x: Turn off` | `Accept high`, `Suggest now`, `Turn off` |
-| `high 🔒` | Locked: every request and subagent runs at high. `/route status` says why | `Suggest now`, `Turn off` |
-| `high 🔒 → low?` | Locked, and a manual `/route` suggests switching to low | `Accept low`, `Suggest now`, `Turn off` |
-| `off` (dim) | The router does nothing; the picker is in charge | `Suggest now`, `Turn on` |
+| `high?` | The router suggests high and is waiting for you. The band opens by itself | `Accept high`, `Turn off` |
+| `high 🔒` | Locked: every request and subagent runs at high | `Suggest now`, `Turn off` |
+| `high 🔒 → low?` | Locked, and a manual `/route` suggests switching to low. The band opens by itself | `Accept low`, `Keep high`, `Turn off` |
+| `off` (dim) | The router does nothing; the picker is in charge | `Turn on` |
 
 <!-- screenshot: footer showing "deciding" beside the gauge and the native pickers -->
 <!-- screenshot: footer showing "high?" with the band above the prompt -->
-<!-- screenshot: the open footer dropdown -->
 
-The footer label is itself the dropdown, and the closed dropdown shows the current state.
+The footer state is a plain button. Pressing it opens the router's band above the prompt: one line such as `Effort router: high 🔒 — router: bug fix in existing code`, then that state's buttons and `Close` (hotkey `x`). The buttons are numbered `1`, `2`, `3`. Any action closes the band, and pressing the footer again closes it too. A new suggestion opens the same band by itself; `Close` hides it while the suggestion stays pending in the footer.
+
+The footer is a button, not a dropdown, because the Desktop app silently drops a `Select` in the footer: it is not drawn, and nothing reports an error (verified live on the 2.1.286 app; the test kit accepts it, so the kit cannot catch this). The footer truncates with `…` when space runs out, so the label stays short.
 
 The router never sets a level you pick by hand: that is what the native effort picker is for. To run at a specific level, turn the router off and use the picker; with the router off, every request goes out at the picker's level.
 
 ## How it decides
 
 - **After each prompt you type**, while it is deciding or a suggestion is pending, a small model (Haiku by default) reads the whole conversation again: your prompts in full, Claude's replies truncated (the last one less so) and tool calls as names only. It answers "undecided" or a level with a one-line reason, using the [routing rules](#customising-the-rules). The read runs beside your turn and never holds your prompt up.
-- **The latest exchange counts most.** A later clarification overrides an earlier ask, and a short reply is read against the question it answers. Say "refactor the payment retry logic" and the router may suggest `high?`; if Claude then asks "1. full rewrite or 2. just extract the constant?" and you answer "2", the next read can move the suggestion to `low?`. A read that finds nothing clear withdraws the suggestion. Ignoring the band is the natural "not yet".
+- **The latest exchange counts most.** A later clarification overrides an earlier ask, and a short reply is read against the question it answers. Say "refactor the payment retry logic" and the router may suggest `high?`; if Claude then asks "1. full rewrite or 2. just extract the constant?" and you answer "2", the next read can move the suggestion to `low?`. A read that finds nothing clear withdraws the suggestion. Closing or ignoring the band is the natural "not yet".
 - **Accept locks.** Every later request in the session, subagents included, runs at the locked level, and the router stops reading. In the terminal it also runs `/effort <level>` once the session is idle, so the native picker label matches. In the Desktop app the picker belongs to the app, so its label stays where you set it; trust the footer (verified: Desktop's transcript records `effort: high` on every request after a lock while the picker still reads Medium). A lock survives `claude --resume`.
 - **It gives up after `decideWithin` prompts** (6 by default). If nothing is locked by then it stops reading and never calls the model again on its own. A pending suggestion stays pending; otherwise the router turns off with the reason `no clear task after 6 prompts — /route to ask again`.
-- **`/route` asks now.** It reads the whole conversation in any state, ignoring the budget, and goes through the same consent. Add a hint to steer it: `/route this is a security review`, `/route keep it quick`. The hint is weighed strongly and kept for re-reads while that suggestion is pending. If the router still finds no clear task, it says so and changes nothing. While locked, a different answer offers a switch (`Switch from HIGH to LOW`, with `1: Accept low` and `x: Keep high`); the same answer just confirms. The footer's `Suggest now` is the same as bare `/route`.
-- **Consent.** `band` (default) shows the band and the footer offer; nothing changes until you accept. `ask` asks a blocking question whenever a new level is suggested. `none` locks at once.
+- **`/route` asks now.** It reads the whole conversation in any state, ignoring the budget, and goes through the same consent. Add a hint to steer it: `/route this is a security review`, `/route keep it quick`. The hint is weighed strongly and kept for re-reads while that suggestion is pending. If the router still finds no clear task, it says so and changes nothing. While locked, a different answer offers a switch in the band (`high 🔒 → low?`, with `Accept low`, `Keep high` and `Turn off`); the same answer just confirms. The band's `Suggest now` is the same as bare `/route`.
+- **Consent.** `band` (default) opens the band with the suggestion; nothing changes until you accept. `ask` asks a blocking question whenever a new level is suggested. `none` locks at once.
 
 ## Policy
 
@@ -70,11 +71,11 @@ Set them in `/config`, or under `pluginConfigs["effort-router@tommy-mods"].optio
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `consent` | `band` | `band` offers the level above the prompt and in the footer. `ask` asks a blocking question when a new level is suggested (skipped where nobody can answer, such as `-p`). `none` locks without asking |
+| `consent` | `band` | `band` offers the level in the band above the prompt. `ask` asks a blocking question when a new level is suggested (skipped where nobody can answer, such as `-p`). `none` locks without asking |
 | `decideWithin` | 6 | Prompts the router reads automatically before it stops |
 | `classifierModel` | `haiku` | The model that reads the transcript |
 | `syncPicker` | true | Run `/effort <level>` so the terminal's picker label matches |
-| `footerControl` | `select` | `select` makes the footer label a dropdown. `label` draws plain text, and `/route` is the control |
+| `footerControl` | `button` | `button` makes the footer state a button that opens the band. `label` draws plain text, and `/route` is the control |
 | `rules` | empty | Rules text for your user layer. A rules file takes precedence |
 
 The environment variable `EFFORT_ROUTER_CONSENT=none|ask|band` overrides `consent`, which helps in headless runs.
@@ -118,7 +119,7 @@ An organisation can set routing rules centrally in managed settings (`managed-se
 
 - `rulesMode: "extend"` (the default) layers the org rules over the shipped defaults. Users and projects can add to them with `$defaults`, or replace them.
 - `rulesMode: "enforce"` makes the org layer final. Personal and project rules are ignored, and `/route rules init` says so.
-- `allowOff: false` stops users turning the router off, so the organisation's routing always applies. `/route off` refuses, the footer dropdown has no `Turn off`, and a session saved as off comes back deciding. When the budget runs out with nothing suggested, the router idles as `deciding` (no more reads) instead of turning off. `/route` still works.
+- `allowOff: false` stops users turning the router off, so the organisation's routing always applies. `/route off` refuses, the band has no `Turn off`, and a session saved as off comes back deciding. When the budget runs out with nothing suggested, the router idles as `deciding` (no more reads) instead of turning off. `/route` still works.
 
 A top-level `"effortRouter": { "rules": ..., "rulesMode": ..., "allowOff": ... }` object works too. The router reads these three settings only from the policy source, so a user cannot claim `enforce` for themselves.
 
@@ -146,7 +147,7 @@ For development, run `claude --plugin-dir ./effort-router`.
 
 ```
 bun test                            # pure policy: trimming, parsing, rule layering, /route grammar
-claude plugin test .                # engine kit: band, buttons, footer dropdown, turn.step, /route, org layers
+claude plugin test .                # engine kit: band, buttons, footer button, turn.step, /route, org layers
 claude plugin validate . --strict
 ```
 

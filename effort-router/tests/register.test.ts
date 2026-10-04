@@ -72,12 +72,22 @@ function worldOf(on: On, reply = BUG_REPLY, sources: Record<string, unknown> = {
   return world
 }
 
-/** The footer's closed dropdown: the selected option's label, and every label. */
-async function footerOf(footer: { find: (q: { key: string }) => Promise<{ type: string; props: Record<string, unknown>; text: string } | undefined> }) {
+type Mounted = {
+  find: (q: Record<string, unknown>) => Promise<{ type: string; props: Record<string, unknown>; text: string } | undefined>
+  findAll: (q: Record<string, unknown>) => Promise<{ type: string; props: Record<string, unknown>; text: string }[]>
+}
+
+/** The footer button: its element type and label. */
+async function footerOf(footer: Mounted) {
   const found = await footer.find({ key: 'route-state' })
-  const options = (found?.props.options ?? []) as { value: string; label?: string }[]
-  const selected = options.find(o => o.value === found?.props.value)
-  return { type: found?.type, shown: selected?.label, labels: options.map(o => o.label), text: found?.text }
+  return { type: found?.type, shown: found?.props.label as string | undefined, text: found?.text }
+}
+
+/** The router's band: its headline (undefined when not drawn) and button labels. */
+async function bandOf(band: Mounted) {
+  const headline = (await band.find({ type: 'Text', text: /^Effort router: / }))?.text
+  const buttons = (await band.findAll({ type: 'Button' })).map(b => b.props.label as string)
+  return { headline, buttons }
 }
 
 async function step($: Engine, index: number, agentId?: string): Promise<void> {
@@ -115,14 +125,13 @@ describe('effort-router', () => {
     expect(world.classifierCalls).toBe(1)
 
     const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
-    expect((await band.find({ text: /Route this session at/ }))?.text).toContain('HIGH')
-    expect((await band.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Accept high', 'Turn off'])
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: high? — bug fix in existing code', buttons: ['Accept high', 'Turn off', 'Close'] })
 
     await step($, 1)
     expect(world.sent.at(-1)).toBe('medium') // pending, not yet locked
 
     await band.press({ key: 'accept' })
-    expect(await band.find({ text: /Route this session at/ })).toBeUndefined()
+    expect((await bandOf(band)).headline).toBeUndefined() // the action closes the band
 
     await step($, 2)
     await step($, 0, 'agent-7')
@@ -229,7 +238,10 @@ describe('effort-router', () => {
 
     world.reply = '{"decision":"lock","level":"low","reason":"quick follow-up"}'
     expect(await route($, 'keep it quick')).toContain('a switch to low is on offer')
-    expect((await band.find({ text: /Switch from HIGH to/ }))?.text).toContain('LOW')
+    expect(await bandOf(band)).toEqual({
+      headline: 'Effort router: high 🔒 → low? — switch to low: quick follow-up',
+      buttons: ['Accept low', 'Keep high', 'Turn off', 'Close'],
+    })
     await step($, 0)
     expect(world.sent.at(-1)).toBe('high') // still locked until accepted
     await band.press({ key: 'accept' })
@@ -264,37 +276,65 @@ describe('effort-router', () => {
     expect(await route($, 'rules')).toContain('base: shipped defaults')
   })
 
-  test('footer: a dropdown on terminal and desktop; Accept, Suggest now, Turn off, Turn on', async ($, on) => {
+  test('footer: a plain button on terminal and desktop that opens the band with the state\'s actions', async ($, on) => {
     const world = worldOf(on)
     await $.session.start({ ...STARTED, surface: 'desktop' })
     for (const surface of ['terminal', 'desktop'] as const) {
       const footer = await $.ui.mount({ plugin: 'effort-router', surface, ...FOOTER } as never)
       const state = await footerOf(footer)
-      expect(state.type).toBe('Select')
-      expect(state.labels).toEqual(['deciding', 'Suggest now', 'Turn off'])
+      expect(state.type).toBe('Button')
+      expect(state.shown).toBe('deciding')
+      expect(await footer.find({ type: 'Select' })).toBeUndefined()
       await footer.unmount()
     }
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'desktop', ...FOOTER } as never)
+    const band = await $.ui.mount({ plugin: 'effort-router', surface: 'desktop', ...BAND } as never)
+    expect((await bandOf(band)).headline).toBeUndefined()
 
-    await (footer as any).select({ key: 'route-state', value: 'suggest' })
+    // deciding: the footer opens the band; pressing it again closes it
+    await footer.press({ key: 'route-state' })
+    let shown = await bandOf(band)
+    expect(shown.headline).toStartWith('Effort router: deciding — ')
+    expect(shown.buttons).toEqual(['Suggest now', 'Turn off', 'Close'])
+    await footer.press({ key: 'route-state' })
+    expect((await bandOf(band)).headline).toBeUndefined()
+
+    // Suggest now: runs the router; the band closes and comes back with the suggestion
+    await footer.press({ key: 'route-state' })
+    await band.press({ key: 'suggest' })
+    await settle($)
     expect(world.classifierCalls).toBe(1)
-    let shown = await footerOf(footer)
-    expect(shown.shown).toBe('high?')
-    expect(shown.labels).toEqual(['high?', 'Accept high', 'Suggest now', 'Turn off'])
+    expect((await footerOf(footer)).shown).toBe('high?')
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: high? — bug fix in existing code', buttons: ['Accept high', 'Turn off', 'Close'] })
 
-    await (footer as any).select({ key: 'route-state', value: 'accept' })
+    // Close hides the suggestion's band; it stays pending; the footer reopens it
+    await band.press({ key: 'close' })
+    expect((await bandOf(band)).headline).toBeUndefined()
+    expect((await footerOf(footer)).shown).toBe('high?')
+    await footer.press({ key: 'route-state' })
+    expect((await bandOf(band)).buttons).toEqual(['Accept high', 'Turn off', 'Close'])
+
+    // Accept: locks and closes
+    await band.press({ key: 'accept' })
+    expect((await bandOf(band)).headline).toBeUndefined()
     await step($, 0)
     expect(world.sent).toEqual(['high'])
-    expect((await footerOf(footer)).labels).toEqual(['high 🔒', 'Suggest now', 'Turn off'])
+    expect((await footerOf(footer)).shown).toBe('high 🔒')
+    await footer.press({ key: 'route-state' })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: high 🔒 — router: bug fix in existing code', buttons: ['Suggest now', 'Turn off', 'Close'] })
 
-    await (footer as any).select({ key: 'route-state', value: 'off' })
+    // Turn off: off and closed
+    await band.press({ key: 'off' })
+    expect((await bandOf(band)).headline).toBeUndefined()
     await step($, 1)
     expect(world.sent.at(-1)).toBe('medium')
-    shown = await footerOf(footer)
-    expect(shown.shown).toBe('off')
-    expect(shown.labels).toEqual(['off', 'Suggest now', 'Turn on'])
+    expect((await footerOf(footer)).shown).toBe('off')
+    await footer.press({ key: 'route-state' })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: off — the effort picker decides', buttons: ['Turn on', 'Close'] })
 
-    await (footer as any).select({ key: 'route-state', value: 'on' })
+    // Turn on: deciding again, closed
+    await band.press({ key: 'on' })
+    expect((await bandOf(band)).headline).toBeUndefined()
     expect((await footerOf(footer)).shown).toBe('deciding')
   })
 
@@ -302,7 +342,7 @@ describe('effort-router', () => {
     worldOf(on)
     await $.session.start({ ...STARTED, surface: 'desktop' })
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'desktop', ...FOOTER } as never)
-    expect(await footer.find({ type: 'Select' })).toBeUndefined()
+    expect(await footer.find({ type: 'Button' })).toBeUndefined()
     expect((await footer.find({ text: /deciding/ }))?.text).toBe('deciding')
   })
 
@@ -333,7 +373,10 @@ describe('effort-router', () => {
     expect(await route($, 'off')).toContain('allowOff: false')
     expect(await route($, 'rules init')).toContain('enforces its routing rules')
     const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
-    expect((await footerOf(footer)).labels).toEqual(['deciding', 'Suggest now'])
+    const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
+    await footer.press({ key: 'route-state' })
+    expect((await bandOf(band)).buttons).toEqual(['Suggest now', 'Close'])
+    await band.press({ key: 'close' })
 
     await submit($, 'hi')
     await settle($)

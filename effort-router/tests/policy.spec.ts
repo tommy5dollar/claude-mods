@@ -11,7 +11,9 @@ import {
   classifierSystem,
   composeRules,
   footerLabel,
-  footerMenu,
+  bandActions,
+  bandHeadline,
+  offerKey,
   freshState,
   lockedAt,
   parseDecision,
@@ -247,21 +249,39 @@ describe('state', () => {
     expect(turnedOn({ ...OFF, prompts: 6, gaveUp: true, offReason: 'x' })).toMatchObject({ mode: 'auto', phase: 'undecided', prompts: 0, gaveUp: false, offReason: undefined })
   })
 
-  test('footer labels and menus per state', () => {
-    const labels = (state: typeof DECIDING, allowOff = true) => footerMenu(state, allowOff).options.map(o => o.label)
+  test('footer labels per state', () => {
     expect(footerLabel(DECIDING)).toEqual({ text: 'deciding', dim: true })
     expect(footerLabel(PROPOSED)).toEqual({ text: 'high?', color: 'yellow', dim: false })
     expect(footerLabel(LOCKED)).toEqual({ text: 'high 🔒', color: 'yellow', dim: false })
     expect(footerLabel(withReading(LOCKED, P_LOW)).text).toBe('high 🔒 → low?')
     expect(footerLabel(OFF)).toEqual({ text: 'off', dim: true })
 
-    expect(labels(DECIDING)).toEqual(['deciding', 'Suggest now', 'Turn off'])
-    expect(labels(PROPOSED)).toEqual(['high?', 'Accept high', 'Suggest now', 'Turn off'])
-    expect(labels(LOCKED)).toEqual(['high 🔒', 'Suggest now', 'Turn off'])
-    expect(labels(withReading(LOCKED, P_LOW))).toEqual(['high 🔒 → low?', 'Accept low', 'Suggest now', 'Turn off'])
-    expect(labels(OFF)).toEqual(['off', 'Suggest now', 'Turn on'])
-    expect(labels(DECIDING, false)).toEqual(['deciding', 'Suggest now'])
-    expect(footerMenu(PROPOSED).value).toBe('current')
+  })
+
+  test('band headline and actions per state', () => {
+    const labels = (state: typeof DECIDING, allowOff = true) => bandActions(state, allowOff).map(a => a.label)
+    expect(labels(PROPOSED)).toEqual(['Accept high', 'Turn off'])
+    expect(labels(DECIDING)).toEqual(['Suggest now', 'Turn off'])
+    expect(labels(LOCKED)).toEqual(['Suggest now', 'Turn off'])
+    expect(labels(withReading(LOCKED, P_LOW))).toEqual(['Accept low', 'Keep high', 'Turn off'])
+    expect(labels(OFF)).toEqual(['Turn on'])
+    expect(labels(DECIDING, false)).toEqual(['Suggest now'])
+    expect(labels(PROPOSED, false)).toEqual(['Accept high'])
+
+    expect(bandHeadline(LOCKED)).toBe('Effort router: high 🔒 — router: bug fix in existing code')
+    expect(bandHeadline(PROPOSED)).toBe('Effort router: high? — bug fix in existing code')
+    expect(bandHeadline(withReading(LOCKED, P_LOW))).toBe('Effort router: high 🔒 → low? — switch to low: minimal patch')
+    expect(bandHeadline(OFF)).toBe('Effort router: off — the effort picker decides')
+    expect(bandHeadline(DECIDING)).toStartWith('Effort router: deciding — ')
+    expect(bandHeadline({ ...DECIDING, gaveUp: true })).toBe('Effort router: deciding — stopped reading; Suggest now asks again')
+  })
+
+  test('a suggestion has an identity so a closed band stays closed until it changes', () => {
+    expect(offerKey(DECIDING)).toBeUndefined()
+    expect(offerKey(LOCKED)).toBeUndefined()
+    expect(offerKey(PROPOSED)).toBe(offerKey(withReading(PROPOSED, P_HIGH)))
+    expect(offerKey(PROPOSED)).not.toBe(offerKey(withReading(PROPOSED, P_LOW)))
+    expect(offerKey(withReading(LOCKED, P_LOW))).toBeDefined()
   })
 
   test('reasons and status', () => {
