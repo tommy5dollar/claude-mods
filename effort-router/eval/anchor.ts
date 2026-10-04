@@ -121,7 +121,7 @@ function report({ model, reads }: Results, bar: number): string {
       const a = cell(f, l).map(s => OFFERED.indexOf(judgeSpread(s, undefined, OFFERED).level as never))
       const b = cell(f, 'none').map(s => OFFERED.indexOf(judgeSpread(s, undefined, OFFERED).level as never))
       return mean(a) - mean(b)
-    })
+    }).filter(d => !Number.isNaN(d))
     return `${l} ${mean(moved) >= 0 ? '+' : ''}${mean(moved).toFixed(2)}`
   })
   lines.push(`  median level shift in levels when a level is stated (vs none; + higher): ${medianShift.join(', ')}`)

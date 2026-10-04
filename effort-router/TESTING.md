@@ -127,6 +127,28 @@ against medium, Fable against high: Claude Code's default for each.
 - Sonnet and Fable put edge-case tests at medium with high close behind (for example medium 45%, high 40%), expected high or
   xhigh. Below the bar, so the router would stay on the setting and check again.
 
+### Consistency and anchoring (2026-10-05, `bun eval/anchor.ts --model <m> --runs 5`)
+
+Each session fixture with a task, 5 runs under 5 conditions: no level stated, and "The session is at X effort now" for
+low, medium, high and xhigh. The run hit the account's weekly limit partway, so it has 334 reads on Opus, 350 on
+Sonnet and 222 on Fable (the rest errored and are left out).
+
+| | Opus 5.5 | Sonnet 5.5 | Fable 5.1 |
+|---|---|---|---|
+| A level's probability between identical calls, mean wobble | 1.0 pts | 1.7 pts | 1.6 pts |
+| Same median level in all 5 runs | 64/67 | 59/70 | 30/45 |
+| Same router action in all 5 runs (a level stated) | 48/53 | 44/55 | 29/36 |
+| Stated level's probability vs none (+ sticky, - grass is greener) | +1.2 pts | +0.9 pts | +2.3 pts |
+| Confident moves / moves that would move again from where they landed | 159 / 0 | 165 / 0 | 94 / 0 |
+
+- Stating the level barely moves the spread, and the small shift is towards the stated level, not away. No sign of
+  "grass is greener", and no move that would be followed by another.
+- The bar makes the start matter when a spread is split. Opus on the brownfield bug fix (medium 30%, high 53%,
+  xhigh 14%): from medium it waits (67% up, below the bar), from xhigh it moves to high. Different starts can settle on
+  different levels, but each one is stable.
+- Fable is the least consistent on the median. Its spreads often sit near 50/50 between two levels, so small wobbles
+  flip the median.
+
 ### Prompt variants (2026-10-04, `--variant shipped|light|hybrid`, 2 runs per fixture; the light variant became the 0.11 prompt and the flag was removed)
 
 An experiment on whether the per-model element should be rules or evidence. 23 session fixtures (a research fixture
