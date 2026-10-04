@@ -207,6 +207,8 @@ claude plugin marketplace add tommy5dollar/claude-mods
 claude plugin install effort-router@tommy-mods
 ```
 
+There's nothing to configure: every option has a default. `/plugin configure` lists the options as not yet set, which just means the defaults apply. Change one only when you want something different (see [Options](#options)).
+
 For development, run `claude --plugin-dir ./effort-router`.
 
 ## Known limits
