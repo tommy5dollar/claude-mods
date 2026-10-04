@@ -3,16 +3,29 @@
 ## Automated
 
 ```
-bun test                            # 49 tests: trimming (incl. the last assistant message kept long), reply parsing,
-                                    # $defaults layering, settings layers, /route grammar and hints, re-read and budget state
-claude plugin test .                # 14 tests in the engine's kit: band Accept/Turn off/Close, a pending suggestion re-read
+bun test                            # 56 tests: trimming (incl. the last assistant message kept long and AskUserQuestion
+                                    # questions and answers kept), reply parsing (incl. fenced json), the classifier frame
+                                    # (undecided only before a task, worked examples), $defaults layering, settings layers,
+                                    # /route grammar and hints, re-read and budget state, status diagnostics
+claude plugin test .                # 16 tests in the engine's kit: answered AskUserQuestion triggering a read (counted,
+                                    # answers in the classifier prompt, not for subagents), status with last verdict and error,
+                                    # band Accept/Turn off/Close, a pending suggestion re-read
                                     # from high? to low? after "2", the budget stopping Haiku calls, manual /route with a hint (in
                                     # the classifier prompt; works when gave up/off), switch offers while locked, the footer Button
                                     # on terminal and desktop opening the band with each state's buttons and every action closing
                                     # it, turn.step for main loop and subagents, org allowOff, fail-open
-"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 14 under Desktop's engine
+"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 16 under Desktop's engine
 claude plugin validate . --strict
+bun run eval -- --runs 3            # opt-in, real model: 22 fixtures, see below
 ```
+
+### Classifier eval (2026-10-04, haiku, `bun run eval -- --runs 3`)
+
+0.5.2: `66/66 reads passed (100%); 22/22 fixtures passed every run`.
+
+Against the 0.5.1 prompt and rules (same fixtures): `53/66 reads passed (80%); 17/22 fixtures passed every run`. The live miss reproduced 0/3: "implement for me a new finance solution pulling from multiple accountancy platforms" after "pull latest code" came back `undecided` every time, as did a vague feature, a vague bank-statement importer and the AskUserQuestion case (whose answers 0.5.1 reduced to a tool name).
+
+Five fixtures (marked "held out") are not mirrored by the prompt's worked examples; several others are, so read 100% as "the examples are followed", not as a general accuracy figure.
 
 The kit passes a `Select` in the SessionMode footer on both surfaces, but the real Desktop app (2.1.286) silently drops it, so the footer is a `Button`. Footer and band rendering on Desktop has to be checked live (steps 1, 3 and 8 below).
 
@@ -47,6 +60,7 @@ Run `claude --plugin-dir D:/code/mods/effort-router --model sonnet --debug-file 
 11. Rules: `/route rules init project`, add a line after `$defaults`, run `/route rules`. It lists `spliced: <path>` and shows your line.
 12. Desktop: repeat 1, 3, 5 and 8 in the Desktop Code tab. The Desktop effort picker never moves (the app owns it); the footer is the source of truth.
 13. If the footer button does not draw or press on some surface, set `footerControl` to `label` in `/config` and use `/route`.
+14. Questions: in a fresh session, type `pull latest code`, then "implement for me a new finance solution pulling from multiple accountancy platforms". The band offers a level (high expected) without waiting. If Claude asks AskUserQuestion questions, answer them: `grep "classifier said (after answered questions)" router.log` shows a read, and `/route status` shows `Last verdict (after answered questions, ...)` with the raw reply.
 
 ## Org layer
 

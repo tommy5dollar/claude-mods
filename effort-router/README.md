@@ -29,7 +29,8 @@ The router never sets a level you pick by hand: that is what the native effort p
 
 ## How it decides
 
-- **After each prompt you type**, while it is deciding or a suggestion is pending, a small model (Haiku by default) reads the whole conversation again: your prompts in full, Claude's replies truncated (the last one less so) and tool calls as names only. It answers "undecided" or a level with a one-line reason, using the [routing rules](#customising-the-rules). The read runs beside your turn and never holds your prompt up.
+- **After each prompt you type, and after you answer Claude's multiple-choice questions** (AskUserQuestion on the main thread), while it is deciding or a suggestion is pending, a small model (Haiku by default) reads the whole conversation again. It sees your prompts in full, Claude's questions with your answers, Claude's replies truncated (the last one less so) and other tool calls as names only. Answered questions count toward the budget like a prompt. The read runs beside your turn and never holds it up.
+- **Undecided only before there is a task.** The model answers "undecided" only for opening filler: greetings, housekeeping such as "pull the latest code", or questions before any work. Once you state a real task it suggests the level that task most likely needs, even while the details are open ("implement a finance solution pulling from several accountancy platforms" gets `high?` straight away), and later reads refine it. The prompt carries ten worked examples on top of the [routing rules](#customising-the-rules).
 - **The latest exchange counts most.** A later clarification overrides an earlier ask, and a short reply is read against the question it answers. Say "refactor the payment retry logic" and the router may suggest `high?`; if Claude then asks "1. full rewrite or 2. just extract the constant?" and you answer "2", the next read can move the suggestion to `low?`. A read that finds nothing clear withdraws the suggestion. Closing or ignoring the band is the natural "not yet".
 - **Accept locks.** Every later request in the session, subagents included, runs at the locked level, and the router stops reading. In the terminal it also runs `/effort <level>` once the session is idle, so the native picker label matches. In the Desktop app the picker belongs to the app, so its label stays where you set it; trust the footer (verified: Desktop's transcript records `effort: high` on every request after a lock while the picker still reads Medium). A lock survives `claude --resume`.
 - **It gives up after `decideWithin` prompts** (6 by default). If nothing is locked by then it stops reading and never calls the model again on its own. A pending suggestion stays pending; otherwise the router turns off with the reason `no clear task after 6 prompts — /route to ask again`.
@@ -56,7 +57,7 @@ xhigh earns its place because the article's own worked examples (the HTML saniti
 | --- | --- |
 | `/route` | Runs the router now over the whole conversation, in any state |
 | `/route <hint>` | The same, with a hint for the classifier (`/route this is a security review`) |
-| `/route status` | Shows the state, why, and how many automatic reads are left |
+| `/route status` | Shows the state and why, automatic reads used of the budget, classifier calls, the last verdict (with the raw reply and when) and the last error |
 | `/route off` | Turns the router off and restores the picker's earlier level |
 | `/route on` | Turns the router back on: deciding over the whole conversation, with a fresh budget |
 | `/route rules` | Prints the effective rules and which layers contributed |
@@ -149,7 +150,10 @@ For development, run `claude --plugin-dir ./effort-router`.
 bun test                            # pure policy: trimming, parsing, rule layering, /route grammar
 claude plugin test .                # engine kit: band, buttons, footer button, turn.step, /route, org layers
 claude plugin validate . --strict
+bun run eval                        # opt-in: the real classifier over eval/fixtures.ts (see below)
 ```
+
+`bun run eval` sends each fixture's transcript to the real model through `claude -p --safe-mode` (no plugins or hooks, no tools), with exactly the system prompt and transcript the router builds from `rules/default.md`. It parses the reply with the router's own parser and prints each verdict, the pass rate and every miss. `--runs 3` repeats each fixture (the model is not deterministic), `--model sonnet` tries another model and `--only <text>` filters fixtures by name. It uses your Claude Code login, and each fixture costs one small model call.
 
 [TESTING.md](TESTING.md) lists the live checks.
 

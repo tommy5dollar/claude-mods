@@ -1,6 +1,6 @@
 {
   "name": "effort-router",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Reads the conversation after each prompt until the task is clear (a Haiku read against Anthropic's 'Spending your effort' guidance and your own rules), suggests a reasoning-effort level, and locks it for every request and subagent once you accept. /route runs it on demand, optionally with a hint. The footer shows the state (deciding, high?, high 🔒, off) and is a button that opens the router's band above the prompt.",
   "author": {
     "name": "Tommy Long"

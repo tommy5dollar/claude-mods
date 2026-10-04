@@ -21,16 +21,32 @@ export const rank = (level: Level): number => LEVELS.indexOf(level)
 /**
  * The fixed frame around the routing rules. The rules themselves (the
  * article's policy) live in `rules/default.md` and the user's markdown files;
- * this frame holds what the parser depends on, so no rules file can break it:
- * the job, the "wait until the task is clear" bias, and the JSON contract.
+ * this frame holds what no rules file should be able to break: the job, when
+ * to answer undecided (only before any task is stated), the worked examples
+ * and the JSON contract.
  */
 export const CLASSIFIER_FRAME = `You pick the reasoning-effort level for a whole Claude Code session from its transcript. Levels, lowest to highest: low, medium, high, xhigh, max.
 
-Read the transcript as one conversation and judge the task as it stands now:
+When to answer undecided, and when to suggest:
+- Answer undecided ONLY when no actionable task has been stated yet: greetings, setup or housekeeping ("pull the latest code", "install the deps", "what's in this repo?"), or pure questions asked before any work. That opening filler is not the task.
+- Once the user has stated a real task, suggest the best level for it NOW, even if the details are still unclear. Do not wait for a full spec: you are asked again after every user message and the level is refined as clarification arrives. Unclear details are a reason to pick the level the task most likely needs, never a reason to answer undecided.
+
+Judge the task as it stands now:
 - Weigh the latest exchange most. A later clarification of scope overrides an earlier ask: "fix the whole auth system" followed by "actually just the typo in the login message" is a small change.
-- Read short replies against the question they answer. If the assistant asked "1. full rewrite or 2. minimal patch?" and the user replied "2", the task is the minimal patch.
-- Decide only when the actual task is clear. Opening filler (greetings, "pull the latest code", "what's in this repo?", setup chatter, a warm-up command) is NOT the task: answer undecided. When unsure, answer undecided; you will be asked again after the next user message.
+- Read short replies against the question they answer. If the assistant asked "1. full rewrite or 2. minimal patch?" and the user replied "2", the task is the minimal patch. Answers to the assistant's multiple-choice questions appear as "ASSISTANT asked:" then "USER answered:"; they are the user's words about the task.
 - If a user hint is given, the user asked for this routing explicitly: weigh the hint strongly.
+
+Worked examples (transcript, then the reply):
+1. USER: hi → {"decision":"undecided"}
+2. USER: pull the latest code → {"decision":"undecided"}
+3. USER: what's in this repo? / ASSISTANT: A Next.js storefront with a Postgres backend. → {"decision":"undecided"}
+4. USER: pull latest code / ASSISTANT: Pulled, 3 new commits. / USER: implement for me a new finance solution pulling from multiple accountancy platforms → {"decision":"lock","level":"high","reason":"new multi-platform finance integration build"} (money, reconciliation and several external APIs: edge cases, even though the details are not settled yet)
+5. USER: add a dark mode toggle to the settings page → {"decision":"lock","level":"medium","reason":"regular feature work"}
+6. USER: the checkout total is wrong when a coupon expires mid-session, fix it → {"decision":"lock","level":"high","reason":"bug fix in existing code"}
+7. USER: refactor the payment retry logic / ASSISTANT: 1. a full rewrite with a state machine or 2. just extract the backoff constant? / USER: 2, keep it simple → {"decision":"lock","level":"low","reason":"small constant extraction"}
+8. USER: build a sync job for our invoices / ASSISTANT asked: Which platforms? [options: Xero | QuickBooks | Sage] / USER answered: Xero and QuickBooks, nightly, EU data residency → {"decision":"lock","level":"high","reason":"multi-platform invoice sync"}
+9. USER: rename getUser to fetchUser across the repo → {"decision":"lock","level":"low","reason":"mechanical rename"}
+10. USER: find security vulnerabilities in our auth service and fix them, work through it on your own, I'm away all day → {"decision":"lock","level":"max","reason":"autonomous security vulnerability hunt"}
 
 Apply these routing rules. Later rules override earlier ones where they conflict:`
 
@@ -130,11 +146,62 @@ ${composed.text}
 // --- transcript trimming ---------------------------------------------------------
 
 /** The shape `$.session.messages()` returns, as far as trimming needs it. */
+export type TranscriptToolUse = {
+  tool: string
+  tool_use_id?: string
+  input?: unknown
+  /** The result as the model read it; absent while the call is in flight. */
+  text?: string
+}
+
 export type TranscriptMessage = {
   role: 'user' | 'assistant'
   text: string
-  toolUses?: readonly { tool: string }[]
+  toolUses?: readonly TranscriptToolUse[]
   toolResults?: readonly unknown[]
+}
+
+/** The tool the model asks the user multiple-choice questions with; its answers are kept. */
+export const QUESTION_TOOL = 'AskUserQuestion'
+
+/** `Which platforms? [options: Xero | QuickBooks]; Where? [options: UK | EU]` from AskUserQuestion's input. */
+export function questionText(input: unknown): string {
+  const questions = (input as { questions?: unknown } | null | undefined)?.questions
+  if (!Array.isArray(questions)) return ''
+  return questions
+    .map(q => {
+      const record = (q ?? {}) as { question?: unknown; options?: unknown }
+      const question = typeof record.question === 'string' ? record.question.trim() : ''
+      const labels = Array.isArray(record.options)
+        ? record.options.map(o => (typeof o === 'string' ? o : (o as { label?: unknown } | null)?.label)).filter((l): l is string => typeof l === 'string')
+        : []
+      return `${question}${labels.length ? ` [options: ${labels.join(' | ')}]` : ''}`
+    })
+    .filter(Boolean)
+    .join('; ')
+}
+
+/**
+ * The transcript with an AskUserQuestion call's answer filled in: at
+ * `tool.call` the answer is known before the transcript holds it. Patches the
+ * matching tool use, or appends one when the transcript has not got it yet.
+ */
+export function withQuestionAnswer(
+  messages: readonly TranscriptMessage[],
+  answer: { toolUseId?: string; input: unknown; text: string },
+): TranscriptMessage[] {
+  const out = messages.map(m => ({ ...m }))
+  for (const message of out) {
+    const uses = message.toolUses ?? []
+    const at = uses.findIndex(u => u.tool === QUESTION_TOOL && answer.toolUseId !== undefined && u.tool_use_id === answer.toolUseId)
+    if (at >= 0) {
+      if (uses[at]?.text) return out
+      message.toolUses = uses.map((u, i) => (i === at ? { ...u, text: answer.text } : u))
+      return out
+    }
+  }
+  out.push({ role: 'assistant', text: '', toolUses: [{ tool: QUESTION_TOOL, tool_use_id: answer.toolUseId, input: answer.input, text: answer.text }] })
+  return out
 }
 
 export type TrimLimits = {
@@ -155,8 +222,9 @@ const COMMAND_MESSAGE = /^\s*<(command-name|command-message|local-command-stdout
 const cut = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max)}… [${text.length - max} more chars]`
 
-/** Tool names with repeat counts, in first-use order: `Read×3, Edit, Bash`. */
+/** Tool names with repeat counts, in first-use order: `Read×3, Edit, Bash`. AskUserQuestion is left out: it is rendered in full. */
 export function toolNames(uses: readonly { tool: string }[] | undefined): string {
+  uses = uses?.filter(use => use.tool !== QUESTION_TOOL)
   if (!uses || uses.length === 0) return ''
   const counts = new Map<string, number>()
   for (const use of uses) counts.set(use.tool, (counts.get(use.tool) ?? 0) + 1)
@@ -166,7 +234,9 @@ export function toolNames(uses: readonly { tool: string }[] | undefined): string
 /**
  * Renders the transcript for the classifier: human prompts in full (capped),
  * assistant text truncated, tool uses as names only, tool results and slash
- * command echoes dropped. The last assistant message keeps more of its text
+ * command echoes dropped. AskUserQuestion is the exception: its questions
+ * (`ASSISTANT asked:`) and the user's answers (`USER answered:`) are kept,
+ * because they are the user's words about the task. The last assistant message keeps more of its text
  * (`lastAssistantChars`): it is often the question that a short reply such as
  * "2" answers. `current` is the prompt being submitted, which
  * `$.session.messages()` does not hold yet at `prompt.submit`.
@@ -194,8 +264,14 @@ export function trimTranscript(
       const tools = toolNames(message.toolUses)
       const cap = index === lastAssistant ? limits.lastAssistantChars : limits.assistantChars
       const said = text === '' ? '' : cut(text.replace(/\s+/g, ' '), cap)
-      if (said === '' && tools === '') continue
-      lines.push(`ASSISTANT: ${said}${said && tools ? ' ' : ''}${tools ? `[tools: ${tools}]` : ''}`)
+      if (said !== '' || tools !== '') lines.push(`ASSISTANT: ${said}${said && tools ? ' ' : ''}${tools ? `[tools: ${tools}]` : ''}`)
+      for (const use of message.toolUses ?? []) {
+        if (use.tool !== QUESTION_TOOL) continue
+        const asked = questionText(use.input)
+        if (asked) lines.push(`ASSISTANT asked: ${cut(asked, limits.lastAssistantChars)}`)
+        const answered = typeof use.text === 'string' ? use.text.replace(/\s+/g, ' ').trim() : ''
+        if (answered) lines.push(`USER answered: ${cut(answered, limits.userChars)}`)
+      }
     }
   }
 
@@ -223,7 +299,7 @@ export function trimTranscript(
 export const classifierPrompt = (transcript: string, hint?: string): string => {
   const said = hint?.trim()
   const hintBlock = said ? `\n\n<user_hint>\n${said}\n</user_hint>\nThe user asked for this routing explicitly and gave this hint; weigh it strongly.` : ''
-  return `Transcript so far (oldest first):\n<transcript>\n${transcript}\n</transcript>${hintBlock}\n\nPick the session's effort level now, or answer undecided. JSON only.`
+  return `Transcript so far (oldest first):\n<transcript>\n${transcript}\n</transcript>${hintBlock}\n\nSuggest the session's effort level now; answer undecided only if no actionable task has been stated yet. JSON only.`
 }
 
 // --- parsing the classifier's reply ---------------------------------------------
@@ -233,8 +309,9 @@ export type Decision =
   | { decision: 'lock'; level: Level; reason: string }
 
 /**
- * Reads the classifier's reply. Anything unparseable, an unknown level or a
- * missing reason is `undecided`: the router never locks on a reply it cannot
+ * Reads the classifier's reply: the first `{...}` in it, so a reply fenced
+ * in a json code block or wrapped in prose still parses. Anything
+ * unparseable or an unknown level is `undecided`: the router never locks on a reply it cannot
  * read (fail open).
  */
 export function parseDecision(reply: string | undefined | null): Decision {
@@ -250,7 +327,7 @@ export function parseDecision(reply: string | undefined | null): Decision {
   if (typeof data !== 'object' || data === null) return { decision: 'undecided' }
   const record = data as Record<string, unknown>
   const level = typeof record.level === 'string' ? record.level.trim().toLowerCase() : undefined
-  if (record.decision !== 'lock' || !isLevel(level)) return { decision: 'undecided' }
+  if ((record.decision !== 'lock' && record.decision !== 'suggest') || !isLevel(level)) return { decision: 'undecided' }
   const reason = typeof record.reason === 'string' ? record.reason.replace(/\s+/g, ' ').trim() : ''
   return { decision: 'lock', level, reason: reason === '' ? 'classifier' : cut(reason, 60).replace(/… \[\d+ more chars\]$/, '…') }
 }
@@ -394,8 +471,26 @@ export function reasonText(state: RouterState): string {
   return "deciding: the picker's effort applies until the task is clear"
 }
 
+/** What the router knows about its own reads, for `/route status`. */
+export type ReadDiagnostics = {
+  /** Now, in ms since the epoch. */
+  now: number
+  /** Classifier calls this session, automatic and manual. */
+  calls: number
+  verdict?: { at: number; trigger: string; raw: string; decision: Decision }
+  error?: { at: number; text: string }
+}
+
+/** `12s ago`, `4m ago`, `2h ago`. */
+export function ago(now: number, at: number): string {
+  const seconds = Math.max(0, Math.round((now - at) / 1000))
+  if (seconds < 60) return `${seconds}s ago`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
+  return `${Math.floor(seconds / 3600)}h ago`
+}
+
 /** What `/route status` prints. */
-export function routeReport(state: RouterState, decideWithin: number, inForce?: string | number): string {
+export function routeReport(state: RouterState, decideWithin: number, inForce?: string | number, diagnostics?: ReadDiagnostics): string {
   const now = inForce === undefined ? "the picker's level" : String(inForce)
   const lines: string[] = []
   if (state.mode === 'picker') {
@@ -411,9 +506,18 @@ export function routeReport(state: RouterState, decideWithin: number, inForce?: 
   if (state.mode === 'auto' && state.phase !== 'locked') {
     lines.push(state.gaveUp
       ? `Automatic reads stopped (${state.offReason ?? `budget of ${decideWithin} prompts spent`}). /route asks now.`
-      : `Automatic reads left: ${Math.max(0, decideWithin - state.prompts)} of ${decideWithin} prompts.`)
+      : `Automatic reads: ${Math.min(state.prompts, decideWithin)} of ${decideWithin} used.`)
   }
   if (state.hint) lines.push(`Hint: ${state.hint}`)
+  if (diagnostics) {
+    lines.push(`Classifier calls this session: ${diagnostics.calls}.`)
+    const verdict = diagnostics.verdict
+    if (verdict) {
+      const said = verdict.decision.decision === 'lock' ? `${verdict.decision.level} (${verdict.decision.reason})` : 'undecided'
+      lines.push(`Last verdict (${verdict.trigger}, ${ago(diagnostics.now, verdict.at)}): ${said}. Raw: ${cut(verdict.raw.replace(/\s+/g, ' ').trim(), 200)}`)
+    }
+    if (diagnostics.error) lines.push(`Last error (${ago(diagnostics.now, diagnostics.error.at)}): ${cut(diagnostics.error.text, 200)}`)
+  }
   lines.push(ROUTE_USAGE)
   return lines.join('\n')
 }

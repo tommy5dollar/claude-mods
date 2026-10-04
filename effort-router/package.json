@@ -1,0 +1,8 @@
+{
+  "name": "effort-router-dev",
+  "private": true,
+  "scripts": {
+    "test": "bun test",
+    "eval": "bun eval/run.ts"
+  }
+}

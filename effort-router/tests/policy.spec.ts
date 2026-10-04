@@ -29,7 +29,10 @@ import {
   turnedOn,
   wantsRead,
   withReading,
+  withQuestionAnswer,
   withSaved,
+  questionText,
+  ago,
   type TranscriptMessage,
 } from '../hooks/policy'
 
@@ -83,6 +86,45 @@ describe('trimTranscript', () => {
   })
 })
 
+describe('AskUserQuestion in the transcript', () => {
+  const QUESTIONS = {
+    questions: [
+      { question: 'Which platforms?', header: 'Platforms', options: [{ label: 'Xero', description: '' }, { label: 'QuickBooks', description: '' }], multiSelect: true },
+      { question: 'Where is the data held?', header: 'Region', options: [{ label: 'UK', description: '' }, { label: 'EU', description: '' }], multiSelect: false },
+    ],
+  }
+  const ANSWER = 'User has answered your questions: "Which platforms?"="Xero, QuickBooks", "Where is the data held?"="EU". You can now continue.'
+
+  test('questions and answers are kept, not reduced to a tool name', () => {
+    const out = trimTranscript([
+      { role: 'user', text: 'build a finance sync' },
+      { role: 'assistant', text: 'A few questions first.', toolUses: [{ tool: 'Read' }, { tool: 'AskUserQuestion', tool_use_id: 'q1', input: QUESTIONS, text: ANSWER }] },
+    ])
+    expect(out.split('\n')).toEqual([
+      'USER: build a finance sync',
+      'ASSISTANT: A few questions first. [tools: Read]',
+      'ASSISTANT asked: Which platforms? [options: Xero | QuickBooks]; Where is the data held? [options: UK | EU]',
+      `USER answered: ${ANSWER}`,
+    ])
+  })
+
+  test('an unanswered question shows the question only', () => {
+    const out = trimTranscript([{ role: 'assistant', text: '', toolUses: [{ tool: 'AskUserQuestion', input: QUESTIONS }] }])
+    expect(out).toBe('ASSISTANT asked: Which platforms? [options: Xero | QuickBooks]; Where is the data held? [options: UK | EU]')
+    expect(questionText({ nope: 1 })).toBe('')
+  })
+
+  test('the answer known at tool.call is patched in, or appended when the transcript lacks the call', () => {
+    const stored = [{ role: 'assistant' as const, text: '', toolUses: [{ tool: 'AskUserQuestion', tool_use_id: 'q1', input: QUESTIONS }] }]
+    const patched = withQuestionAnswer(stored, { toolUseId: 'q1', input: QUESTIONS, text: ANSWER })
+    expect(patched).toHaveLength(1)
+    expect(patched[0]?.toolUses?.[0]?.text).toBe(ANSWER)
+    expect(stored[0]?.toolUses[0]).not.toHaveProperty('text') // not mutated
+    const appended = withQuestionAnswer([{ role: 'user', text: 'build it' }], { toolUseId: 'q9', input: QUESTIONS, text: ANSWER })
+    expect(trimTranscript(appended)).toContain(`USER answered: ${ANSWER}`)
+  })
+})
+
 describe('parseDecision', () => {
   const cases: [string | undefined, ReturnType<typeof parseDecision>][] = [
     ['{"decision":"undecided"}', { decision: 'undecided' }],
@@ -92,6 +134,9 @@ describe('parseDecision', () => {
     ['{"decision":"lock","level":"low"}', { decision: 'lock', level: 'low', reason: 'classifier' }],
     ['not json at all', { decision: 'undecided' }],
     ['{broken', { decision: 'undecided' }],
+    ['```json\n{"decision":"undecided"}\n```', { decision: 'undecided' }],
+    ['```json\n{"decision":"lock","level":"high","reason":"finance integration build"}\n```', { decision: 'lock', level: 'high', reason: 'finance integration build' }],
+    ['{"decision":"suggest","level":"medium","reason":"feature work"}', { decision: 'lock', level: 'medium', reason: 'feature work' }],
     [undefined, { decision: 'undecided' }],
   ]
   for (const [reply, expected] of cases) {
@@ -179,6 +224,19 @@ describe('the classifier prompt', () => {
     expect(system).toContain('Weigh the latest exchange most')
     expect(system).toContain('A later clarification of scope overrides an earlier ask')
     expect(system).toContain('replied "2"')
+  })
+
+  test('undecided only before any task; an underspecified task still gets a level; worked examples', () => {
+    const system = classifierSystem('RULES')
+    expect(system).toContain('Answer undecided ONLY when no actionable task has been stated yet')
+    expect(system).toContain('suggest the best level for it NOW, even if the details are still unclear')
+    expect(system).not.toContain('When unsure, answer undecided')
+    expect(system).toContain('implement for me a new finance solution pulling from multiple accountancy platforms → {"decision":"lock","level":"high"')
+    expect(system).toContain('USER: pull the latest code → {"decision":"undecided"}')
+    expect(system).toContain('2, keep it simple → {"decision":"lock","level":"low"')
+    expect(system).toContain('USER answered:')
+    expect((system.match(/^\d+\. USER:/gm) ?? []).length).toBeGreaterThanOrEqual(6)
+    expect(classifierPrompt('USER: hi')).toContain('answer undecided only if no actionable task has been stated yet')
   })
 
   test('a manual hint is passed and weighted', () => {
@@ -288,7 +346,18 @@ describe('state', () => {
     expect(reasonText(LOCKED)).toBe('router: bug fix in existing code')
     expect(reasonText(afterBudget({ ...DECIDING, prompts: 6 }, 6, true))).toBe('router off: no clear task after 6 prompts — /route to ask again')
     expect(routeReport(LOCKED, 6)).toStartWith('high 🔒 (router: bug fix in existing code)')
-    expect(routeReport({ ...DECIDING, prompts: 2 }, 6, 'medium')).toContain('Automatic reads left: 4 of 6 prompts.')
+    expect(routeReport({ ...DECIDING, prompts: 2 }, 6, 'medium')).toContain('Automatic reads: 2 of 6 used.')
+    const report = routeReport({ ...DECIDING, prompts: 2 }, 6, 'medium', {
+      now: 100_000,
+      calls: 3,
+      verdict: { at: 88_000, trigger: 'after a prompt', raw: '```json\n{"decision":"undecided"}\n```', decision: { decision: 'undecided' } },
+      error: { at: 100_000 - 5 * 60_000, text: 'Error: timeout' },
+    })
+    expect(report).toContain('Classifier calls this session: 3.')
+    expect(report).toContain('Last verdict (after a prompt, 12s ago): undecided. Raw: ```json {"decision":"undecided"} ```')
+    expect(report).toContain('Last error (5m ago): Error: timeout')
+    expect(ago(0, 2 * 3600_000)).toBe('0s ago')
+    expect(ago(3 * 3600_000, 0)).toBe('3h ago')
     expect(routeReport({ ...PROPOSED, hint: 'keep it quick' }, 6)).toContain('Hint: keep it quick')
   })
 

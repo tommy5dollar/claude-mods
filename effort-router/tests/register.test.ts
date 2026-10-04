@@ -17,6 +17,14 @@ const BAND = {
 
 const FOOTER = { component: 'SessionMode', props: { modes: [] } } as const
 
+const QUESTIONS = {
+  questions: [
+    { question: 'Which platforms?', header: 'Platforms', options: [{ label: 'Xero', description: '' }, { label: 'QuickBooks', description: '' }], multiSelect: true },
+    { question: 'What is it for?', header: 'Purpose', options: [{ label: 'Month-end close', description: '' }, { label: 'Live dashboard', description: '' }], multiSelect: false },
+  ],
+}
+const ANSWERS = 'User has answered your questions: "Which platforms?"="Xero, QuickBooks", "What is it for?"="Month-end close". You can now continue.'
+
 const BUG_REPLY = '{"decision":"lock","level":"high","reason":"bug fix in existing code"}'
 
 type World = {
@@ -69,6 +77,7 @@ function worldOf(on: On, reply = BUG_REPLY, sources: Record<string, unknown> = {
   on('turn.complete', ($, e) => ({ text: e.answer }))
   on('settings.read', ($, e) => ({ value: (e.source ? sources[e.source] ?? {} : { effortLevel: 'medium' }) as never }))
   on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('tool.call', { tool: 'AskUserQuestion' }, () => ({ result: { questions: QUESTIONS.questions, answers: {} }, text: ANSWERS }) as never)
   return world
 }
 
@@ -247,6 +256,50 @@ describe('effort-router', () => {
     await band.press({ key: 'accept' })
     await step($, 1)
     expect(world.sent.at(-1)).toBe('low')
+  })
+
+  test('answers to AskUserQuestion on the main thread trigger a read, count toward the budget and reach the classifier', { options: { decideWithin: 3 } }, async ($, on) => {
+    const world = worldOf(on, '```json\n{"decision":"undecided"}\n```')
+    await $.session.start(STARTED)
+    world.messages = [{ role: 'user', text: 'pull latest code', toolUses: [] }]
+    await submit($, 'implement for me a new finance solution pulling from multiple accountancy platforms')
+    await settle($)
+    expect(world.classifierCalls).toBe(1)
+
+    // the model asks; the transcript holds the call but not yet its answer
+    world.messages = [
+      { role: 'user', text: 'pull latest code', toolUses: [] },
+      { role: 'user', text: 'implement for me a new finance solution pulling from multiple accountancy platforms', toolUses: [] },
+      { role: 'assistant', text: 'A couple of questions first.', toolUses: [{ tool: 'AskUserQuestion', tool_use_id: 'q1', input: QUESTIONS } as never] },
+    ]
+    world.reply = '{"decision":"lock","level":"high","reason":"multi-platform finance integration"}'
+    await $.tool.call({ tool: 'AskUserQuestion', tool_use_id: 'q1', ...QUESTIONS } as never)
+    await settle($)
+    expect(world.classifierCalls).toBe(2)
+    const prompt = world.prompts.at(-1) ?? ''
+    expect(prompt).toContain('ASSISTANT asked: Which platforms? [options: Xero | QuickBooks]')
+    expect(prompt).toContain('USER answered: User has answered your questions: "Which platforms?"="Xero, QuickBooks"')
+    const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
+    expect((await footerOf(footer)).shown).toBe('high?')
+
+    // a subagent's question is not the user's turn
+    await $.tool.call({ tool: 'AskUserQuestion', tool_use_id: 'q2', agentId: 'agent-1', ...QUESTIONS } as never)
+    await settle($)
+    expect(world.classifierCalls).toBe(2)
+
+    const status = await route($, 'status')
+    expect(status).toContain('Automatic reads: 2 of 3 used.')
+    expect(status).toContain('Classifier calls this session: 2.')
+    expect(status).toMatch(/Last verdict \(after answered questions, \d+s ago\): high \(multi-platform finance integration\)\. Raw: \{"decision":"lock"/)
+  })
+
+  test('status reports the last error', async ($, on) => {
+    const world = worldOf(on, 'THROW')
+    await $.session.start(STARTED)
+    await submit($, 'fix the crash in the parser')
+    await settle($)
+    expect(world.classifierCalls).toBe(1)
+    expect(await route($, 'status')).toMatch(/Last error \(\d+s ago\): \S/)
   })
 
   test('consent none: locks at once and syncs the picker at turn end', { options: { consent: 'none' } }, async ($, on) => {

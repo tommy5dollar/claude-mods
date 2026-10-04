@@ -15,5 +15,7 @@ Levels:
 Signals:
 
 - A tight, detailed spec makes effort matter less: lean lower.
+- Money (payments, accounting, invoicing, reconciliation) and integrations with several external systems are edge-case-heavy: lean high, even for a new build whose spec is not settled yet.
+- An underspecified task is still a task: pick the level it most likely needs now. Later messages will refine it.
 - No user in the loop ("do it all", "I'm going away", "don't ask me questions") makes higher effort better: lean higher.
 - The article's feature loop is: interview for a spec (low), implement (low or medium), review (low), verify and test (high). A session that is clearly the verify step is high.

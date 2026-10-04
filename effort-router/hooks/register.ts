@@ -2,6 +2,9 @@ import type { EngineInterface, On, PluginOptions } from 'claude-code'
 
 import {
   type ComposedRules,
+  type ReadDiagnostics,
+  type TranscriptMessage,
+  QUESTION_TOOL,
   type Level,
   type Proposal,
   type RouterState,
@@ -32,6 +35,7 @@ import {
   turnedOn,
   wantsRead,
   withReading,
+  withQuestionAnswer,
   withSaved,
 } from './policy'
 
@@ -70,6 +74,21 @@ type Session = {
   bandOpen: boolean
   /** The suggestion the band was last closed on: it stays closed until the suggestion changes. */
   closedOffer?: string
+  /** Classifier calls this session, for `/route status`. */
+  calls: number
+  verdict?: ReadDiagnostics['verdict']
+  error?: ReadDiagnostics['error']
+}
+
+/** What one read sees beyond the stored transcript. */
+type ReadInput = {
+  /** The prompt being submitted (not yet in the transcript at prompt.submit). */
+  current?: string
+  /** An AskUserQuestion call just answered (not yet in the transcript at tool.call). */
+  answer?: { toolUseId?: string; input: unknown; text: string }
+  hint?: string
+  /** What prompted the read, for `/route status`. */
+  trigger: string
 }
 
 const STORE_KEY = 'sessions'
@@ -112,7 +131,7 @@ async function sessionOf($: EngineInterface): Promise<{ id: string; session: Ses
   if (!session) {
     const all = (await $.store.get(STORE_KEY).catch(() => undefined)) as Record<string, unknown> | undefined
     const state = restored(all?.[id])
-    session = { state, reading: false, bandOpen: false }
+    session = { state, reading: false, bandOpen: false, calls: 0 }
     if (appliedLevel(state)) session.pendingSync = appliedLevel(state)
     SESSIONS.set(id, session)
   }
@@ -252,29 +271,39 @@ async function loadRules($: EngineInterface): Promise<LoadedRules> {
 
 // --- deciding ----------------------------------------------------------------------
 
-/** One classifier read of the whole conversation. Undefined = undecided (or failed). */
-async function classifyNow($: EngineInterface, settings: Settings, current: string | undefined, hint: string | undefined): Promise<Proposal | undefined> {
-  const [messages, rules] = await Promise.all([
-    $.session.messages().catch(() => []),
-    loadRules($),
-  ])
-  const transcript = trimTranscript(messages, current)
-  if (transcript.trim() === '' && !hint) return undefined
-  const reply = await $.model.complete({
-    model: settings.classifierModel,
-    system: classifierSystem(rules.composed.text),
-    prompt: classifierPrompt(transcript, hint),
-    maxTokens: 200,
-    effort: 'low',
-    timeoutMs: 20000,
-  })
-  if (!reply.isAnswered) {
-    $.ui.log(`effort-router: classifier gave no answer (${reply.reason})`, { to: 'debug' })
-    return undefined
+/** One classifier read of the whole conversation. Undefined = undecided (or failed). Records the verdict or error for `/route status`. */
+async function classifyNow($: EngineInterface, settings: Settings, session: Session, input: ReadInput): Promise<Proposal | undefined> {
+  const now = async () => $.clock.now().catch(() => Date.now())
+  try {
+    const [stored, rules] = await Promise.all([
+      $.session.messages().catch(() => [] as TranscriptMessage[]),
+      loadRules($),
+    ])
+    const messages = input.answer ? withQuestionAnswer(stored as TranscriptMessage[], input.answer) : (stored as TranscriptMessage[])
+    const transcript = trimTranscript(messages, input.current)
+    if (transcript.trim() === '' && !input.hint) return undefined
+    session.calls += 1
+    const reply = await $.model.complete({
+      model: settings.classifierModel,
+      system: classifierSystem(rules.composed.text),
+      prompt: classifierPrompt(transcript, input.hint),
+      maxTokens: 200,
+      effort: 'low',
+      timeoutMs: 20000,
+    })
+    if (!reply.isAnswered) {
+      session.error = { at: await now(), text: `classifier gave no answer (${reply.reason})` }
+      $.ui.log(`effort-router: ${session.error.text}`, { to: 'debug' })
+      return undefined
+    }
+    const decision = parseDecision(reply.text)
+    session.verdict = { at: await now(), trigger: input.trigger, raw: reply.text, decision }
+    $.ui.log(`effort-router: classifier said (${input.trigger}) ${reply.text.trim().slice(0, 200)}`, { to: 'debug' })
+    return decision.decision === 'lock' ? { level: decision.level, reason: decision.reason } : undefined
+  } catch (error) {
+    session.error = { at: await now(), text: String(error) }
+    throw error
   }
-  const decision = parseDecision(reply.text)
-  $.ui.log(`effort-router: classifier said ${reply.text.trim().slice(0, 200)}`, { to: 'debug' })
-  return decision.decision === 'lock' ? { level: decision.level, reason: decision.reason } : undefined
 }
 
 /**
@@ -305,11 +334,11 @@ async function settle($: EngineInterface, id: string, session: Session, settings
 }
 
 /** An automatic read after a human prompt, within the budget. */
-async function readAfterPrompt($: EngineInterface, id: string, session: Session, settings: Settings, consent: Consent, current: string): Promise<void> {
+async function readAfter($: EngineInterface, id: string, session: Session, settings: Settings, consent: Consent, input: ReadInput): Promise<void> {
   if (session.reading) return
   session.reading = true
   try {
-    const proposal = await classifyNow($, settings, current, session.state.hint)
+    const proposal = await classifyNow($, settings, session, { ...input, hint: session.state.hint })
     if (session.state.mode === 'auto' && session.state.phase !== 'locked') {
       await settle($, id, session, settings, consent, proposal)
     }
@@ -336,7 +365,7 @@ async function suggestNow($: EngineInterface, id: string, session: Session, sett
   session.reading = true
   let proposal: Proposal | undefined
   try {
-    proposal = await classifyNow($, settings, undefined, hint)
+    proposal = await classifyNow($, settings, session, { hint, trigger: hint ? 'manual /route with a hint' : 'manual /route' })
   } finally {
     session.reading = false
   }
@@ -411,6 +440,22 @@ async function bandAction($: EngineInterface, id: string, session: Session, sett
   }
 }
 
+/**
+ * A human turn of the conversation (a prompt, or answers to the model's
+ * questions): counts it against the budget while deciding, then reads if the
+ * budget allows. Awaited only under `ask` consent, so nothing is held up.
+ */
+async function humanTurn($: EngineInterface, settings: Settings, input: ReadInput): Promise<void> {
+  const { id, session } = await sessionOf($)
+  if (session.state.mode === 'auto' && session.state.phase !== 'locked' && !session.state.gaveUp) {
+    session.state = { ...session.state, prompts: session.state.prompts + 1 }
+  }
+  if (!wantsRead(session.state, settings.decideWithin)) return
+  const consent = await consentFor($, settings)
+  const reading = readAfter($, id, session, settings, consent, input)
+  if (consent === 'ask') await reading
+}
+
 /** Consent as configured; `EFFORT_ROUTER_CONSENT` overrides it (handy headless). */
 async function consentFor($: EngineInterface, settings: Settings): Promise<Consent> {
   const override = await $.env.get('EFFORT_ROUTER_CONSENT').catch(() => undefined)
@@ -427,7 +472,12 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
     case 'suggest':
       return suggestNow($, id, session, settings, command.hint)
     case 'status':
-      return routeReport(session.state, settings.decideWithin, session.lastSent)
+      return routeReport(session.state, settings.decideWithin, session.lastSent, {
+        now: await $.clock.now().catch(() => Date.now()),
+        calls: session.calls,
+        verdict: session.verdict,
+        error: session.error,
+      })
     case 'off': {
       if (!(await loadRules($)).allowOff) return "your organisation's settings keep the router on (allowOff: false)."
       await turnOff($, id, session, settings)
@@ -504,20 +554,30 @@ export function register(on: On, options: PluginOptions): void {
   on('prompt.submit', async ($, e, next) => {
     try {
       if (HUMAN_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) {
-        const { id, session } = await sessionOf($)
-        if (session.state.mode === 'auto' && session.state.phase !== 'locked' && !session.state.gaveUp) {
-          session.state = { ...session.state, prompts: session.state.prompts + 1 }
-        }
-        if (wantsRead(session.state, settings.decideWithin)) {
-          const consent = await consentFor($, settings)
-          const reading = readAfterPrompt($, id, session, settings, consent, e.text)
-          if (consent === 'ask') await reading
-        }
+        await humanTurn($, settings, { current: e.text, trigger: 'after a prompt' })
       }
     } catch (error) {
       $.ui.log(`effort-router: prompt.submit failed: ${String(error)}`, { to: 'debug' })
     }
     return next(e)
+  })
+
+  // The model asked the user multiple-choice questions on the main thread and
+  // got answers: that is a human turn too (platforms, scope, "keep it simple").
+  on('tool.call', { tool: QUESTION_TOOL }, async ($, e, next) => {
+    const result = await next(e)
+    try {
+      const answered = !('deny' in result && result.deny) && !result.isError && typeof result.text === 'string' && result.text.trim() !== ''
+      if (e.agentId === undefined && answered) {
+        await humanTurn($, settings, {
+          answer: { toolUseId: e.tool_use_id, input: { questions: e.questions }, text: result.text as string },
+          trigger: 'after answered questions',
+        })
+      }
+    } catch (error) {
+      $.ui.log(`effort-router: tool.call failed: ${String(error)}`, { to: 'debug' })
+    }
+    return result
   })
 
   // Every model request, main loop and subagents alike: the locked level, or
