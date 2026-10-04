@@ -14,7 +14,7 @@ Your effort picker's level is the default. After each prompt, until the task is 
 - **The router names your picker's level:** the turn runs, and that level is kept for the session.
 - **The router names a different level:** the turn runs at the router's level, which is kept for the session. The band above the prompt opens once to say so, with why, and a button to stop routing and go back to your setting.
 
-Either way, once a level is kept the session is decided and the router stops checking by itself. `Reassess` in the band, or `/route`, asks again.
+Either way, once a level is kept the session is decided and the router stops checking by itself. In the band, `Reassess now` (or `/route`) asks again about the conversation so far. `Reassess with my next prompt` (or `/route next`) goes back to your setting and checks again when you send your next message, which is the one to use when you're about to steer the work somewhere else.
 
 With consent `ask`, a different level waits for your answer instead. Claude's own question card asks "Effort router: Multi-platform finance integration. Use high effort instead of medium?", with any levels in between as options too. `Use high` runs the turn at high and keeps high. `Keep medium` runs it at medium and keeps medium. If you dismiss the question, the turn runs at your picker's level, the router stays undecided, and a later prompt can ask again.
 
@@ -26,7 +26,7 @@ The footer, right beside the native model and effort pickers, shows the router's
 | --- | --- | --- |
 | `deciding` (dim) | The router is reading your prompts. Requests run at the picker's level | `Assess now`, `Stop routing (back to medium)` |
 | `high?` | The question is open: the turn waits for your answer | `Assess now`, `Stop routing (back to medium)` |
-| `using high` | Decided: every main-thread request runs at high, and the router stops checking by itself | `Reassess`, `Stop routing (back to medium)` |
+| `using high` | Decided: every main-thread request runs at high, and the router stops checking by itself | `Reassess now`, `Reassess with my next prompt`, `Stop routing (back to medium)` |
 | `off` (dim) | The router does nothing; the picker is in charge | `Start routing` |
 
 `Stop routing` turns the router off for this session: no more checks, subagents aren't routed and your effort setting (named in the button) applies again. `/route` still answers, and `Start routing` or `/route on` starts it again. New sessions are routed as usual.
@@ -133,6 +133,7 @@ They come from the article above and Anthropic's effort docs. What each level ca
 | `/route report [session\|week\|month\|all]` | Shows [where the effort went](#where-the-effort-went): requests and output tokens per level, what the router moved, its own reads, and output by repo. The last 7 days by default |
 | `/route off` | Turns the router off and restores the picker's earlier level |
 | `/route on` | Turns the router back on: deciding over the whole conversation, with a fresh budget |
+| `/route next` | Back to deciding at your setting, with a fresh budget: your next prompt is checked before its turn starts (the band's `Reassess with my next prompt`) |
 | `/route rules` | Prints the effective rules and which layers contributed |
 | `/route rules init [user\|project]` | Writes a starter rules file that keeps the defaults |
 | `/route rules critique` | Asks Sonnet to critique your custom rules |
@@ -228,7 +229,7 @@ For development, run `claude --plugin-dir ./effort-router`.
 - A request whose picker level is a number rather than a named level, or a model that takes no effort, can't be compared, so the waiting verdict waits for the next request that can.
 - The router changes effort only, never the model. A request to a model that takes no effort is left alone.
 - Each automatic check is one call per prompt while deciding, for at most `decideWithin` prompts. Nothing more is spent once a level is locked or the budget is spent, except when you run `/route`. `/route report` shows what the checks cost.
-- Once decided, the router does not notice a change of phase on its own (for example "now verify it" after an implementation). Run `/route` (or the band's `Reassess`), optionally with a hint, to be asked again.
+- Once decided, the router does not notice a change of phase on its own (for example "now verify it" after an implementation). Run `/route` (or the band's `Reassess now`), optionally with a hint, or `/route next` to be asked with your next prompt.
 - A definition's `effort:` is respected for user and project agent files and for the `agents` key in settings, not for plugin agents (`<plugin>:<name>`), which can't be located reliably. Those are routed from their brief, which replaces any effort their definition sets. A mod's `$.agent.register({ effort })` is ignored by the engine itself (an engine bug), and the router routes those agents too.
 - An agent file added or edited mid-session is seen from the next session: definitions are scanned once per session.
 - Workflow agents that don't launch through the Agent tool raise no `agent.spawn`, so they keep the main thread's level.

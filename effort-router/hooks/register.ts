@@ -604,6 +604,9 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
   }
 }
 
+/** The user's own effort setting: what the picker was before the router moved it, else the picker's level now. */
+const settingOf = (session: Session): Level | undefined => session.baseline ?? (isLevel(session.picker) ? session.picker : undefined)
+
 /** The levels a check is offered: low up to `highestLevel`. */
 const levelsFor = (settings: Settings): readonly Level[] => levelsUpTo(settings.highestLevel)
 
@@ -1030,8 +1033,8 @@ async function bandAction($: EngineInterface, id: string, session: Session, sett
     if (value === 'ok') return
     if (value === 'previous' && notice?.from) await lock($, id, session, settings, notice.from, 'your choice')
     else if (value === 'off' || value === 'revert') await turnOff($, id, session, settings)
-    else if (value === 'on') {
-      const text = await route($, 'on', settings)
+    else if (value === 'on' || value === 'next') {
+      const text = await route($, value, settings)
       $.ui.log(`effort-router: ${text}`, { to: 'debug' })
     } else if (value === 'suggest') {
       // The footer reads `checking…` while the check runs, then the band opens with what it found (unless consent
@@ -1112,7 +1115,17 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
     case 'off': {
       if (!(await loadRules($)).allowOff) return 'Your organisation keeps the router on.'
       await turnOff($, id, session, settings)
-      return `Routing stopped for this session. Your effort setting${session.baseline ? ` (${session.baseline})` : ''} applies again. /route on starts it again.`
+      const setting = settingOf(session)
+      return `Routing stopped for this session. Your effort setting${setting ? ` (${setting})` : ''} applies again. /route on starts it again.`
+    }
+    case 'next': {
+      // Back to deciding with a fresh budget: the next prompt, with whatever steer it carries, is checked before its
+      // turn starts. Until then the user's setting applies.
+      if (!supportedModel(session.model)) return unsupportedText(session.model)
+      await commit($, id, session, turnedOn(session.state))
+      restorePicker($, session, settings)
+      const setting = settingOf(session)
+      return `The router will reassess with your next prompt. Until then your effort setting${setting ? ` (${setting})` : ''} applies.`
     }
     case 'on': {
       if (!supportedModel(session.model)) return unsupportedText(session.model)
@@ -1362,7 +1375,7 @@ export function register(on: On, options: PluginOptions): void {
     const state = view(session)
     const result = !notice && !session.bandOpen ? session.result : undefined
     const headline = notice && !session.bandOpen ? noticeHeadline(notice) : result ? `Effort router: ${result}` : bandHeadline(state)
-    const setting = session.baseline ?? (isLevel(session.picker) ? session.picker : undefined)
+    const setting = settingOf(session)
     const noticeShown = notice !== undefined && !session.bandOpen
     const actions = noticeShown ? noticeActions(allowOff, setting, notice.from) : result ? [] : bandActions(state, allowOff, setting)
     const level = noticeShown ? notice.level : state.asking?.level ?? (state.mode === 'auto' && state.phase === 'locked' ? state.level : undefined)

@@ -454,10 +454,12 @@ describe('state', () => {
   test('the band: headline per state; Assess now or Reassess / Stop routing, or Start routing; the auto notice with Stop routing', () => {
     const labels = (state: typeof DECIDING, allowOff = true, setting?: 'medium') => bandActions(state, allowOff, setting).map(a => a.label)
     expect(labels(DECIDING, true, 'medium')).toEqual(['Assess now', 'Stop routing (back to medium)'])
-    expect(labels(LOCKED, true, 'medium')).toEqual(['Reassess', 'Stop routing (back to medium)'])
-    expect(labels(LOCKED)).toEqual(['Reassess', 'Stop routing'])
+    expect(labels(LOCKED, true, 'medium')).toEqual(['Reassess now', 'Reassess with my next prompt', 'Stop routing (back to medium)'])
+    expect(labels(LOCKED)).toEqual(['Reassess now', 'Reassess with my next prompt', 'Stop routing'])
     expect(labels(OFF)).toEqual(['Start routing'])
     expect(labels(DECIDING, false)).toEqual(['Assess now'])
+    expect(labels(LOCKED, false)).toEqual(['Reassess now', 'Reassess with my next prompt'])
+    expect(parseRoute('next')).toEqual({ kind: 'next' })
 
     expect(bandHeadline(LOCKED)).toBe('Effort router: using high for this session (bug fix in existing code).')
     expect(bandHeadline({ ...LOCKED, why: 'A crash fix needs the code traced, but the scope is one function.' })).toBe(

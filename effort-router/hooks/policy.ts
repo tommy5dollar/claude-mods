@@ -781,13 +781,14 @@ export type RouteCommand =
   | { kind: 'status' }
   | { kind: 'off' }
   | { kind: 'on' }
+  | { kind: 'next' }
   | { kind: 'rules' }
   | { kind: 'rules-init'; scope: 'user' | 'project' }
   | { kind: 'rules-critique' }
   | { kind: 'report'; period: SpendPeriod }
 
 export const ROUTE_USAGE =
-  '/route checks now (add a hint if you like). Also: /route status, report [session|week|month|all], off, on, rules [init|critique].'
+  '/route checks now (add a hint if you like). /route next checks again with your next prompt. Also: /route status, report [session|week|month|all], off, on, rules [init|critique].'
 
 /**
  * `/route` arguments. Bare `/route` runs the router now; any other text that
@@ -803,6 +804,7 @@ export function parseRoute(args: string): RouteCommand {
     if (verb === 'status') return { kind: 'status' }
     if (verb === 'off') return { kind: 'off' }
     if (verb === 'on') return { kind: 'on' }
+    if (verb === 'next') return { kind: 'next' }
     if (verb === 'decide') return { kind: 'suggest' }
     if (verb === 'rules') return { kind: 'rules' }
   }
@@ -1283,7 +1285,7 @@ export const turnedOff = (state: RouterState): RouterState => ({
 
 /** On: deciding again over the whole conversation, with a fresh prompt budget. */
 export const turnedOn = (state: RouterState): RouterState => ({
-  ...state, mode: 'auto', phase: 'undecided', level: undefined, reason: undefined, pending: undefined, asking: undefined, hint: undefined, prompts: 0, gaveUp: false, offReason: undefined,
+  ...state, mode: 'auto', phase: 'undecided', level: undefined, reason: undefined, why: undefined, pending: undefined, asking: undefined, hint: undefined, prompts: 0, gaveUp: false, offReason: undefined,
 })
 
 /** What the router knows about its own reads, for `/route status`. */
@@ -1439,7 +1441,7 @@ export type BandAction = {
    * auto notice, `ok` (hide it), `previous` (back to the level before the
    * change) or `revert` (off).
    */
-  value: 'suggest' | 'off' | 'on' | 'revert' | 'ok' | 'previous'
+  value: 'suggest' | 'next' | 'off' | 'on' | 'revert' | 'ok' | 'previous'
   label: string
 }
 
@@ -1479,16 +1481,22 @@ export function bandHeadline(state: RouterState): string {
 
 /**
  * The band's buttons for a state (then `Hide`, which the caller adds): off →
- * `Start routing`; deciding → `Assess now`; decided → `Reassess`; and, while
- * routing, `Stop routing (back to <setting>)`. Tommy, 2026-10-04: "Check now"
+ * `Start routing`; deciding → `Assess now`; decided → `Reassess now` and
+ * `Reassess with my next prompt` (back to deciding, so the steer the user is
+ * about to type is what gets judged: Tommy, 2026-10-04, "as soon as I realise
+ * I'm on the wrong setting, I want to steer it off somewhere else"); and,
+ * while routing, `Stop routing (back to <setting>)`. Tommy, 2026-10-04: "Check now"
  * read as deterministic and free, and "Turn off" didn't say what it turned
  * off. `allowOff: false` (an organisation's setting) leaves out Stop routing.
  */
 export function bandActions(state: RouterState, allowOff = true, setting?: Level): BandAction[] {
   if (state.unsupported) return []
   if (state.mode === 'picker') return [{ value: 'on', label: 'Start routing' }]
-  const assess: BandAction = { value: 'suggest', label: state.phase === 'locked' ? 'Reassess' : 'Assess now' }
-  return allowOff ? [assess, { value: 'off', label: stopLabel(setting) }] : [assess]
+  const assess: BandAction[] =
+    state.phase === 'locked'
+      ? [{ value: 'suggest', label: 'Reassess now' }, { value: 'next', label: 'Reassess with my next prompt' }]
+      : [{ value: 'suggest', label: 'Assess now' }]
+  return allowOff ? [...assess, { value: 'off', label: stopLabel(setting) }] : assess
 }
 
 // --- settings-borne rules (org / user / project) --------------------------------------

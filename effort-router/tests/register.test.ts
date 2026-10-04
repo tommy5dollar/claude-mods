@@ -552,7 +552,7 @@ describe('effort-router', () => {
     expect((await bandOf(band)).headline).toBeUndefined()
     expect((await footerOf(footer)).shown).toBe('using high')
     await footer.press({ key: 'route-state' })
-    expect(await bandOf(band)).toEqual({ headline: 'Effort router: using high for this session (bug fix in existing code).', buttons: ['Reassess', 'Stop routing (back to medium)', 'Hide'] })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: using high for this session (bug fix in existing code).', buttons: ['Reassess now', 'Reassess with my next prompt', 'Stop routing (back to medium)', 'Hide'] })
 
     await band.press({ key: 'off' })
     await step($, 0)
@@ -607,6 +607,26 @@ describe('effort-router', () => {
     expect((await bandOf(band)).headline).toBeUndefined()
     await step($, 0)
     expect(world.sent).toEqual(['high'])
+  })
+
+  test('Reassess with my next prompt: back to deciding at your setting, and the next prompt is checked before its turn', async ($, on) => {
+    const world = worldOf(on, BUG_REPLY, {}, AUTO)
+    await $.session.start(STARTED)
+    await submit($, 'fix the crash in the parser')
+    await step($, 0) // high
+    await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    const band = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...BAND } as never)
+    const footer = await $.ui.mount({ plugin: 'effort-router', surface: 'terminal', ...FOOTER } as never)
+    await band.press({ key: 'ok' })
+    await footer.press({ key: 'route-state' })
+    await band.press({ key: 'next' })
+    await settle($)
+    expect((await footerOf(footer)).shown).toBe('deciding')
+    world.reply = '{"decision":"level","level":"low","confidence":0.9,"reason":"one-line patch"}'
+    await submit($, 'actually just patch the null check, nothing else')
+    await step($, 1)
+    expect(world.sent.at(-1)).toBe('low')
+    expect(await route($, 'next')).toBe('The router will reassess with your next prompt. Until then your effort setting (medium) applies.')
   })
 
   test('auto: Reassess from a kept level says what it changed from, and Go back to restores that level', async ($, on) => {
