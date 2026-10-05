@@ -182,7 +182,9 @@ const LOADING = new Map<string, Promise<Session>>()
 /** Whether this session draws a band: an interactive terminal or Desktop. VS Code and `-p` don't. */
 let hasBand = true
 /** An assessment that takes longer is abandoned and the prompt runs at the level it has (fail open). */
-const TIMEOUT_MS = 15_000
+// 30 s: on Fable 5.1 at xhigh a fork took 7 s and 15 s (2026-10-05). A shorter limit made the prompt wait and then
+// threw away an answer already paid for.
+const TIMEOUT_MS = 30_000
 /** The most of the conversation a separate call reads, before the prompt being assessed (about 6k tokens). */
 const MAX_CHARS = DEFAULT_TRIM.totalChars
 /** The most instruction text a first assessment sends (about 20k tokens). */
@@ -887,7 +889,7 @@ function subagentRouting(settings: Settings, session: Session): SubagentStatus['
  * The level for a spawn, decided before it starts. A fork takes the parent's
  * level. An agent whose definition sets an effort keeps it: no read, and
  * `byDefinition` so its requests are left to the engine. Anything else waits
- * (at most 15 s) for one read: a fork of the parent plus the brief, else, with
+ * (at most 30 s) for one read: a fork of the parent plus the brief, else, with
  * nothing to fork, a separate call on the brief alone. A failed, late or
  * unusable read takes the parent's level. Undefined leaves the subagent's
  * requests as they would have been.
@@ -1028,7 +1030,7 @@ export function register(on: On, options: PluginOptions): void {
   })
 
   // After each human prompt while unlocked and within the window: assess the whole conversation BEFORE the turn
-  // runs, so its first request carries the level. At most 15 s; on a timeout or error the turn goes ahead.
+  // runs, so its first request carries the level. At most 30 s; on a timeout or error the turn goes ahead.
   on('prompt.submit', async ($, e, next) => {
     try {
       if (HUMAN_ORIGINS.has(e.origin.kind) && !e.text.trimStart().startsWith('/')) {

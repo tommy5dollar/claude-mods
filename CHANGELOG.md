@@ -18,6 +18,7 @@ A redesign of the main thread's rule, the footer, the band and the command. Sett
 - **Sessions first seen mid-flow** count their earlier prompts toward the window, and start off with five or more. The 20,000-token rule is gone.
 - **A session set to max** is offered levels up to max, so it can stay there. Before, it was always moved down.
 - **State** is saved in each session's ledger, so the plugin store and its 100-session limit are gone.
+- An assessment may take up to 30 seconds (was 15): on Fable 5.1 at xhigh a fork took 15 seconds in testing.
 - A failed assessment still uses up its prompt. Each assessment in the ledger names the prompt it assessed.
 
 ### 0.16 (2026-10-05)

@@ -415,15 +415,15 @@ describe('effort-router', () => {
       expect(await route($, 'status')).toContain('Assessed 2 of 5 prompts.')
     })
 
-    test('an assessment that does not answer within 15 s fails open; status says why', async ($, on) => {
+    test('an assessment that does not answer within 30 s fails open; status says why', async ($, on) => {
       const world = worldOf(on, 'HANG')
       await $.session.start(STARTED)
       const submitting = submit($, 'fix the crash in the parser')
-      await world.clock.advance(15_000)
+      await world.clock.advance(30_000)
       await submitting
       await step($, 0)
       expect(world.sent).toEqual(['medium'])
-      expect(await route($, 'status')).toContain('the assessment timed out after 15 s')
+      expect(await route($, 'status')).toContain('the assessment timed out after 30 s')
     })
 
     test('a throwing assessment fails open, still counts, and status reports the error', async ($, on) => {
@@ -834,7 +834,7 @@ describe('effort-router', () => {
       const unusable = await spawn($, { prompt: 'review the diff' })
       world.subagentReply = 'HANG'
       const spawning = spawn($, { prompt: 'review the diff' })
-      await world.clock.advance(15000)
+      await world.clock.advance(30_000)
       const late = await spawning
 
       for (const id of [failed, unusable, late]) await step($, 0, id)

@@ -269,7 +269,7 @@ prompts fed into one process with `--input-format stream-json`, a minute or more
 
 Opus 5.5 at medium for comparison: a separate call took 2.8 s. A fork thinks at the session's effort and
 `$.model.fork` takes only a prompt, so the router can't cap it. On Fable at xhigh, one fork in two hit the
-15-second limit in this run.
+15-second limit in this run. 0.17.0 raises the limit to 30 seconds for that reason.
 
 ## Live, Desktop: verified
 
