@@ -12,7 +12,7 @@ Claude Code runs every task at the effort level you picked, whether it's renamin
 touches three services. Anthropic's [Spending your effort](https://claude.dev/blog/spending-your-effort/) says to
 match the effort to the task. effort-router is a mod that does that for you.
 
-![The footer in the Desktop app: the router moved this session to high while the effort picker still shows Medium](effort-router/docs/footer-moved.png)
+<img src="effort-router/docs/demo.gif" width="560" alt="A Claude Code session in the Desktop app with the effort picker on Medium. A rename is assessed and moved to low, then a production coupon bug is assessed and moved from low to high, and the band shows the last assessment">
 
 - **Your session.** Your session's own model assesses each of your first five prompts and steps the level both ways:
   up for a prompt that needs more, back down for follow-ups that don't. It moves only when it's at least 70% sure the

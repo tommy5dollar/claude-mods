@@ -4,7 +4,7 @@ A Claude Code mod that picks the reasoning effort each task needs. Your session'
 five prompts and steps the level up or down when it's confident the current one is wrong. Then the level locks for the
 rest of the session. Each subagent gets its own level, chosen by the agent that launches it.
 
-![The footer in the Desktop app: the router running high, unlocked with two of five prompts assessed, while the effort picker still shows Medium](docs/footer-moved.png)
+<img src="docs/demo.gif" width="560" alt="A Claude Code session in the Desktop app with the effort picker on Medium. A rename is assessed and moved to low, then a production coupon bug is assessed and moved from low to high, and the band shows the last assessment">
 
 It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the terminal and in the Desktop app's Code tab. It requires
 Claude Code 2.1.286 or later.
