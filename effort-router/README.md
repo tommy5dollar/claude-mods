@@ -8,7 +8,7 @@ It follows Anthropic's guidance in [Using Claude Code: Spending your effort](htt
 
 **What it costs.** Each of the first five prompts waits about 1.5 seconds for an assessment. The first is a separate call that can't use the prompt cache: about 5 cents on Opus 5.5 or 13 cents on Fable 5.1. The other four read your conversation from the session's cache, about 3 cents each on Opus. So a session costs about 20 cents to route on Opus, then nothing more. A subagent's assessment is about 2 cents. `/er report` shows what the router itself spent beside everything else.
 
-<!-- screenshot: the footer reading "🔓 high ◑" beside the native model and effort pickers -->
+![The footer in the Desktop app: the router running high, unlocked with two of five prompts assessed, while the effort picker still shows Medium](docs/footer-moved.png)
 
 ## The rule
 
@@ -69,7 +69,7 @@ The four buttons always sit in the same slots, so the digit keys are learnable. 
 
 A greyed-out button stays in its slot. Pressing it says why it's greyed out. In the Desktop app, Hide is drawn as the panel's own close control.
 
-<!-- screenshot: the band open under the footer, unlocked, with the four buttons -->
+![The band in the Desktop app after a move to high, with its four buttons](docs/band-unlocked.png)
 
 ## Messages in the conversation
 
