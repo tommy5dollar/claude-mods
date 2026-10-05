@@ -53,9 +53,3 @@ The marketplace is now `tommy5dollar`, at `tommy5dollar/claude-plugins` (it was 
 ### 0.1 to 0.4 (2026-10-04)
 
 The first versions: a footer state, a band, and leaving manual levels to the effort picker.
-
-## context-gauge
-
-### 0.1.2 (2026-10-04)
-
-The footer shows just the percentage, and `/ctx` leads with "Session context: 310k / 1m (31%)". It keeps other mods' footer labels and updates after compaction and mid-turn.

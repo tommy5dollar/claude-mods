@@ -1,3 +1,0 @@
-# bun test runs only spec/ (pure logic). tests/*.test.ts are for `claude plugin test`.
-[test]
-root = "spec"

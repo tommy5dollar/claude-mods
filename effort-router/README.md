@@ -1,14 +1,50 @@
 # effort-router
 
-A Claude Code mod that picks the reasoning effort your task needs. Your session's own model assesses each of your first five prompts and moves the level when it's confident your current one is wrong. Then the level locks for the rest of the session. Each subagent gets its own level, chosen by the agent that launches it.
-
-It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the terminal and in the Desktop app's Code tab. It requires Claude Code 2.1.286 or later (Claude Mods).
-
-It follows Anthropic's guidance in [Using Claude Code: Spending your effort](https://claude.dev/blog/spending-your-effort/) (Thariq Shihipar, 25 September 2026). The article found that effort buys verification and edge-case testing, not a better approach. The router gives your session's model those principles and sourced notes on what each level can do on that model, then lets it judge. It never maps a kind of task to a fixed level, because level names mean different things on Opus, Sonnet and Fable.
-
-**What it costs.** Each of the first five prompts waits about 1.5 seconds for an assessment. The first is a separate call that can't use the prompt cache: about 5 cents on Opus 5.5 or 13 cents on Fable 5.1. The other four read your conversation from the session's cache, about 3 cents each on Opus. So a session costs about 20 cents to route on Opus, then nothing more. A subagent's assessment is about 2 cents. `/er report` shows what the router itself spent beside everything else.
+A Claude Code mod that picks the reasoning effort each task needs. Your session's own model assesses each of your first
+five prompts and moves the level when it's confident the current one is wrong. Then the level locks for the rest of
+the session. Each subagent gets its own level, chosen by the agent that launches it.
 
 ![The footer in the Desktop app: the router running high, unlocked with two of five prompts assessed, while the effort picker still shows Medium](docs/footer-moved.png)
+
+It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the terminal and in the Desktop app's Code tab. It requires
+Claude Code 2.1.286 or later.
+
+```
+claude plugin marketplace add tommy5dollar/claude-plugins
+claude plugin install effort-router@tommy5dollar
+```
+
+Then start a new session. In the Desktop app the footer appears once you've sent the first message.
+
+## Why
+
+Claude Code runs every request at the level you picked. Anthropic's
+[Using Claude Code: Spending your effort](https://claude.dev/blog/spending-your-effort/) (Thariq Shihipar, 25
+September 2026) found that effort buys verification and edge-case testing, not a better approach, so the right level
+depends on the task. The router gives your session's model those principles and sourced notes on what each level can
+do on that model, then lets it judge. It never maps a kind of task to a fixed level, because level names mean
+different things on Opus, Sonnet and Fable.
+
+**Does it save money?** Often, but not by always going lower. Where it moves depends on where you start: if you run
+everything at high it moves easy work down, and at medium it moves hard work up. Running a hard task at a higher level
+often costs less overall, because getting it right first time saves the rework, which costs tokens and your own time.
+`/er report` shows what ran at each level, so you can see what it did to your own work.
+
+**What routing costs.** Each of the first five prompts waits about 1.5 seconds for an assessment. The first is a
+separate call that can't use the prompt cache: about 5 cents on Opus 5.5 or 13 cents on Fable 5.1. The other four read
+your conversation from the session's cache, about 3 cents each on Opus. So a session costs about 20 cents to route on
+Opus, then nothing more. A subagent's assessment is about 2 cents.
+
+## What it reads, sends and stores
+
+Mods run inside Claude Code without a sandbox, so here's exactly what this one does:
+
+- **Sends:** assessments go to your session's own model through Claude Code, on your existing login. Nothing else
+  leaves your machine: no telemetry and no other network calls.
+- **Reads:** your conversation, your CLAUDE.md files, rules and memory, your agent definitions and its own rules files
+  (see [How it assesses](#how-it-assesses) for what goes into each assessment).
+- **Writes:** one small JSON file per session in `~/.claude/effort-router/spend/`, and nothing else.
+- **Never:** runs a process, changes your saved effort setting or changes the model.
 
 ## The rule
 
@@ -232,15 +268,6 @@ An organisation can add routing rules for everyone in managed settings (`managed
 ```
 
 The organisation's rules layer over the shipped defaults, and each person's and project's rules layer over those. They're there to help people pick well, not to stop anyone changing their effort, so a person can still turn the router off or replace the rules with their own. A top-level `"effortRouter": { "rules": "..." }` object works too.
-
-## Install
-
-```
-claude plugin marketplace add tommy5dollar/claude-plugins
-claude plugin install effort-router@tommy5dollar
-```
-
-Start a new session (or restart the Desktop app) after installing.
 
 ## Known limits
 

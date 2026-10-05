@@ -1,4 +1,0 @@
-{
-  "description": "context-gauge: session.measure and classic.SessionStart keep a context-window reading; a ui.render hook draws it coloured in the prompt footer (or the hint line, band or status line, by the site option); /ctx prints the breakdown",
-  "modules": ["./register.ts"]
-}
