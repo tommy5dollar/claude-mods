@@ -1,7 +1,7 @@
 {
   "name": "effort-router",
-  "version": "0.16.2",
-  "description": "Picks the reasoning effort each task needs. Your session's own model judges the task, knowing what each level can do on that model, and the router only acts once it's confident. When it disagrees with your effort setting, it asks before the task runs. Subagents get their own level, chosen by the agent that starts them. /route report shows where your effort went.",
+  "version": "0.16.3",
+  "description": "Picks the reasoning effort each task needs. Your session's own model judges the task, knowing what each level can do on that model, and the router only acts once it's confident. When it disagrees with your effort setting it switches and says so once, or asks first if you set consent to ask. Subagents get their own level, chosen by the agent that starts them. /route report shows where your effort went.",
   "author": {
     "name": "Tommy Long"
   },

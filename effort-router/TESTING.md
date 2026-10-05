@@ -3,7 +3,7 @@
 ## Automated
 
 ```
-bun test                            # 97 tests: trimming (incl. the last assistant message kept long and AskUserQuestion
+bun test                            # 101 tests: trimming (incl. the last assistant message kept long and AskUserQuestion
                                     # questions and answers kept), the classifier input cap (first prompt, then human lines
                                     # before assistant text), reply parsing (incl. fenced json), the classifier frame,
                                     # $defaults layering, settings layers, /route grammar and hints, state: consent names
@@ -274,6 +274,14 @@ grep "effort-router: \|effort locked" r*.log
 ```
 
 Expected: r1 `classifier said {"decision":"undecided"}` and `medium -> medium`. r2 `classifier said {"decision":"lock","level":"high",...}` and `effort locked: high 🔒 (router: ...)`; under 0.6.0 its `step index=0` already logs `medium -> high`. r3 (a resumed session) `step index=0 ... medium -> high` with no classifier call.
+
+## Live, Desktop: verified
+
+### 0.16.2: changing the picker yourself stops routing (2026-10-05, Desktop 2.1.286, Fable 5.1)
+
+In a two-day session the router had kept at high (248 requests, picker at medium), the model was switched to Fable 5.1
+and the picker to xhigh. The router's store for that session went to `mode: picker` at 08:46:19Z, on the first request
+after the change, and every request since has run at xhigh (`perTurnEffort` in the transcript). Nothing was pressed.
 
 ## Live, Desktop (0.8.0 and 0.9.0, still to run by hand)
 

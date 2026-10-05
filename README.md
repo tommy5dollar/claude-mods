@@ -10,9 +10,9 @@ too unless its agent definition fixes one. A parent can't choose a subagent's ef
 [Spending your effort](https://claude.dev/blog/spending-your-effort/) guidance.
 
 - **Your session.** Your session's own model judges what the task needs, using sourced notes on what each level
-  can do on that model, and the router acts only once it's confident. It goes up to xhigh unless you allow max. If that matches your effort picker, nothing changes. If it doesn't, the turn waits and Claude's own
-  question card asks: "Use high effort instead of medium?" Nothing runs at a level you didn't agree to. Prefer not
-  to be asked? Set consent to `auto`. It works with Fable 5.1, Opus 5.5 and Sonnet 5.5.
+  can do on that model, and the router acts only once it's confident. It goes up to xhigh unless you allow max. If that matches your effort picker, nothing changes. If it doesn't, the turn runs at the router's level and the band above the prompt says so once, with a button to
+  stop routing. Prefer to be asked first? Set consent to `ask`, and Claude's own question card asks "Use high effort
+  instead of medium?" before the turn runs. It works with Fable 5.1, Opus 5.5 and Sonnet 5.5.
 - **Subagents.** Before each subagent starts, the agent launching it says what level it needs on the model it runs
   on: it knows the task and why it's delegating. An agent whose definition sets its own `effort:`, or one running
   on Haiku, is left alone.

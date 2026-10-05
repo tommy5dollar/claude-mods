@@ -1,6 +1,6 @@
 # effort-router
 
-A Claude Code mod that checks your session's reasoning effort against the task once the task is clear, asks before changing it, then holds it. Each subagent gets its own level, chosen by the agent that launches it.
+A Claude Code mod that checks your session's reasoning effort against the task once the task is clear, changes it when it's sure (the band says so once, with a button to stop routing), then holds it. Set `consent` to `ask` to be asked first. Each subagent gets its own level, chosen by the agent that launches it.
 
 It follows Anthropic's guidance in [Using Claude Code: Spending your effort](https://claude.dev/blog/spending-your-effort/) (Thariq Shihipar, 25 September 2026). The article found that effort buys verification and edge-case testing, not a better approach. The router gives your session's model those principles and sourced notes on what each level can do on that model, then lets it judge. It never maps a kind of task to a fixed level, because level names mean different things on Opus, Sonnet and Fable.
 
