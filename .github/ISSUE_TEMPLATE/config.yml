@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Common questions
+    url: https://github.com/tommy5dollar/claude-plugins/tree/main/effort-router#common-questions
+    about: Check whether it's answered there first.

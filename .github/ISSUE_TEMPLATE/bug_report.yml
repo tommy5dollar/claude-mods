@@ -1,0 +1,41 @@
+name: Something's wrong
+description: effort-router did something unexpected, or didn't do something it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected and what you saw instead. Screenshots of the footer or band help.
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: /er status
+      description: Run `/er status` in the session and paste the output. It has the last assessment and any error.
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Claude Code (`claude --version`) and effort-router (`claude plugin list`).
+      placeholder: Claude Code 2.1.289, effort-router 0.17.2
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Terminal
+        - Desktop app (Code tab)
+        - VS Code
+        - Headless (-p or the SDK)
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model and effort setting
+      placeholder: Opus 5.5 at medium

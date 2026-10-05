@@ -16,6 +16,14 @@ claude plugin install effort-router@tommy5dollar
 
 Then start a new session. In the Desktop app the footer appears once you've sent the first message.
 
+## Contents
+
+- **Start here:** [Why](#why) · [What it reads, sends and stores](#what-it-reads-sends-and-stores) · [Common questions](#common-questions) · [How it works](#how-it-works)
+- **Using it:** [The footer](#the-footer) · [The band](#the-band) · [Commands](#commands) · [Messages in the conversation](#messages-in-the-conversation) · [Changing the level yourself](#changing-the-level-yourself)
+- **How it decides:** [How it assesses](#how-it-assesses) · [Sessions that started before the router](#sessions-that-started-before-the-router) · [Subagents](#subagents) · [Models](#models) · [Where the effort went](#where-the-effort-went)
+- **Setting it up:** [Options](#options) · [Customising the rules](#customising-the-rules) · [For organisations](#for-organisations) · [Telemetry for organisations](#telemetry-for-organisations) · [Turning it off and uninstalling](#turning-it-off-and-uninstalling)
+- **Reference:** [Known limits](#known-limits) · [Development](#development)
+
 ## Why
 
 Claude Code runs every request at the level you picked. Anthropic's
@@ -48,9 +56,36 @@ Mods run inside Claude Code without a sandbox, so here's exactly what this one d
 - **Writes:** one small JSON file per session in `~/.claude/effort-router/spend/`, and nothing else.
 - **Never:** runs a process, changes your saved effort setting or changes the model.
 
-## The rule
+## Common questions
 
-1. **Your effort setting is where it starts.** The router runs nothing of its own until it's sure.
+- **Does it change my model?** No. It only changes effort, and stands aside on models it doesn't support.
+- **What if I disagree with it?** Change the effort picker and routing turns off for that session, with your level in
+  force. Or press Lock, Unlock or Assess in the band.
+- **What if an assessment fails or is slow?** The prompt runs at the level it already had. Nothing waits longer than
+  30 seconds.
+- **Does it work in VS Code or with `-p`?** It routes there too, but there's no footer or band. Use `/er` instead.
+- **Can it keep assessing instead of locking?** Set `promptsToAssess` higher (say 50). Each extra assessment costs
+  about 3 cents and 1.5 seconds on Opus 5.5.
+- **Why does Claude Code still say "with medium effort"?** That line shows your setting, not the level the request
+  was sent at. See [Known limits](#known-limits).
+
+## How it works
+
+```mermaid
+flowchart TD
+    P["You send a prompt"] --> F{"One of the session's<br>first five?"}
+    F -- "no" --> R["It runs at the locked level"]
+    F -- "yes" --> S["Your session's model rates each level<br>e.g. medium 10%, high 50%, xhigh 40%"]
+    S --> C{"At least 70% sure the<br>level running is wrong?"}
+    C -- "yes" --> M["Step to the middle of the spread"]
+    C -- "no" --> K["Stay"]
+    M --> T["The turn runs"]
+    K --> T
+    T --> L{"Was that the fifth?"}
+    L -- "yes" --> Lock["Lock the level for the session"]
+```
+
+1. **It starts from your effort setting.** Nothing changes until an assessment is sure.
 2. **Each of your first five prompts is assessed before its turn runs.** The model gives every level a probability of being right, for example `medium 10%, high 50%, xhigh 40%`.
 3. **It moves when it's at least 70% sure the level running is wrong in one direction.** Here it's 90% sure medium is too low, so it moves to the middle of the spread: the lowest level at least as likely as not to be enough, which is high. Otherwise it stays.
 4. **After the fifth assessment it locks** whatever level is running. A move never locks early.
@@ -111,6 +146,23 @@ A greyed-out button stays in its slot. Pressing it says why it's greyed out. In 
 
 ![The band in the Desktop app after a move to high, with its four buttons](docs/band-unlocked.png)
 
+## Commands
+
+`/effort-router` sits beside `/effort` in the typeahead, and `/er` is its short form. Each verb does what the band's matching button does, so the commands are also the controls where there's no band (VS Code and `-p`).
+
+| Command | Band | What it does |
+| --- | --- | --- |
+| `/er` | Clicking the footer | Opens the band. Where there's no band it prints the band's lines |
+| `/er lock` | Slot 2 | Locks at the level running. When off, turns on locked at the router's last level |
+| `/er unlock` | Slot 2 | Unlocks. When off, turns on unlocked |
+| `/er off`, `/er on` | Slot 3 | Turns routing off, or on and unlocked |
+| `/er assess [hint]` | Slot 4 | Assesses now. While unlocked it keeps the hint for your next prompt's assessment instead (`/er assess this is a security review`) |
+| `/er report [session\|week\|month\|all]` | | Where the effort went |
+| `/er status` | | The band's lines, then the details for troubleshooting: the last reply in full and what it was judged against, assessments used, the last error and the routed subagents |
+| `/er rules` | | The rules in force, where each layer came from, and the notes for your model |
+
+The verbs are explicit rather than toggles, so repeating one is safe ("Already locked at high"). Anything else is refused with the list above, so a typo never runs an assessment.
+
 ## Messages in the conversation
 
 Each change adds one dim line to the conversation, labelled `effort-router` by Claude Code. These lines are for you and are never sent to the model. An assessment that stays put adds nothing.
@@ -151,16 +203,6 @@ The first time the router sees a session, it counts the prompts already in it. T
 
 The router keeps each session's status in that session's ledger, so `claude --resume` picks up where it was.
 
-## Models
-
-The router supports Fable 5.1, Opus 5.5 and Sonnet 5.5. Level names don't mean the same amount of thinking on each, and each responds to effort differently. In Claude Code, Opus 5.5 and Sonnet 5.5 default to medium and Fable 5.1 to high. Opus 5.5 gains most from low to medium and little above high, while Sonnet 5.5 gains a lot at every step. Routing one like another would be a mistake.
-
-Each has a notes file in [`rules/models/`](rules/models/) on what each level can do there: what it's good for, what it misses and its measured gains and costs. Every assessment carries the notes for the model it's about, after the routing rules, as the main guide to the level. `/er rules` prints them. The evidence behind each note, with sources, is in [`rules/models/research-2026-10.md`](rules/models/research-2026-10.md).
-
-The notes guide the level instead of fixed rules because of an eval on 4 October 2026. With rules that tied kinds of task to levels, all three models gave almost the same answers and ignored their notes. Without those rules, each model's answers moved the way its evidence predicts (`TESTING.md`, "Prompt variants").
-
-On any other model the router stands aside: the footer shows `⏸️` with your level, the band names the models it works with, and nothing is assessed. Its state is kept, so switching back with `/model` picks up where it was. A new model needs a new version of the router.
-
 ## Subagents
 
 Claude can't set a subagent's effort itself: the Agent tool takes a model but no effort. Without the router every subagent runs at the session's level unless its agent definition sets one.
@@ -174,6 +216,16 @@ Claude can't set a subagent's effort itself: the Agent tool takes a model but no
 - **Seeing it.** The band counts the subagents routed this session. `/er status` lists the last ten, newest first, with each one's level and why.
 
 Set `routeSubagents` to `false` to leave subagents at the session's level.
+
+## Models
+
+The router supports Fable 5.1, Opus 5.5 and Sonnet 5.5. Level names don't mean the same amount of thinking on each, and each responds to effort differently. In Claude Code, Opus 5.5 and Sonnet 5.5 default to medium and Fable 5.1 to high. Opus 5.5 gains most from low to medium and little above high, while Sonnet 5.5 gains a lot at every step. Routing one like another would be a mistake.
+
+Each has a notes file in [`rules/models/`](rules/models/) on what each level can do there: what it's good for, what it misses and its measured gains and costs. Every assessment carries the notes for the model it's about, after the routing rules, as the main guide to the level. `/er rules` prints them. The evidence behind each note, with sources, is in [`rules/models/research-2026-10.md`](rules/models/research-2026-10.md).
+
+The notes guide the level instead of fixed rules because of an eval on 4 October 2026. With rules that tied kinds of task to levels, all three models gave almost the same answers and ignored their notes. Without those rules, each model's answers moved the way its evidence predicts (`TESTING.md`, "Prompt variants").
+
+On any other model the router stands aside: the footer shows `⏸️` with your level, the band names the models it works with, and nothing is assessed. Its state is kept, so switching back with `/model` picks up where it was. A new model needs a new version of the router.
 
 ## Where the effort went
 
@@ -196,23 +248,6 @@ No "saved" figure: the router lowers easy tasks and raises hard ones, so these a
 - **What it records.** Every model request in every session with the router installed, on the main thread and in subagents, with the router on or off. For each it keeps the level the request arrived at, the level it went out at, and its tokens as the API reported them. Requests are summed per day into one small JSON file per session in `~/.claude/effort-router/spend/`, which also holds the session's status and its assessments. Nothing leaves your machine.
 - **Why output tokens.** Output (thinking plus the answer) is what effort changes most. Input is recorded too.
 - **Why there's no "saved" figure.** A lowered request is small partly because its task was small, so comparing it with the average medium request would overstate the saving. Only running the same task at both levels could say what a request would have cost at its old level. The report gives the measured numbers side by side and leaves that estimate out.
-
-## Commands
-
-`/effort-router` sits beside `/effort` in the typeahead, and `/er` is its short form. Each verb does what the band's matching button does, so the commands are also the controls where there's no band (VS Code and `-p`).
-
-| Command | Band | What it does |
-| --- | --- | --- |
-| `/er` | Clicking the footer | Opens the band. Where there's no band it prints the band's lines |
-| `/er lock` | Slot 2 | Locks at the level running. When off, turns on locked at the router's last level |
-| `/er unlock` | Slot 2 | Unlocks. When off, turns on unlocked |
-| `/er off`, `/er on` | Slot 3 | Turns routing off, or on and unlocked |
-| `/er assess [hint]` | Slot 4 | Assesses now. While unlocked it keeps the hint for your next prompt's assessment instead (`/er assess this is a security review`) |
-| `/er report [session\|week\|month\|all]` | | Where the effort went |
-| `/er status` | | The band's lines, then the details for troubleshooting: the last reply in full and what it was judged against, assessments used, the last error and the routed subagents |
-| `/er rules` | | The rules in force, where each layer came from, and the notes for your model |
-
-The verbs are explicit rather than toggles, so repeating one is safe ("Already locked at high"). Anything else is refused with the list above, so a typo never runs an assessment.
 
 ## Options
 
@@ -294,6 +329,13 @@ and a general-purpose subagent was `agent:builtin:general-purpose`. Check the va
   so a subagent's record carries its session's status and setting.
 - **Nothing is sent anywhere new.** The attributes ride on records Claude Code was already sending to your collector.
   Without telemetry configured there are no records and nothing is added. Other records are left alone.
+
+## Turning it off and uninstalling
+
+- **For one session:** `/er off`, or Turn off in the band. Changing the effort picker does the same.
+- **Everywhere, keeping it installed:** `claude plugin disable effort-router@tommy5dollar`.
+- **Removing it:** `claude plugin uninstall effort-router@tommy5dollar`. Then delete `~/.claude/effort-router/` to
+  remove its ledgers, and `~/.claude/effort-router.md` if you wrote your own rules there.
 
 ## Known limits
 

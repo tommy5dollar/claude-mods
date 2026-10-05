@@ -4,6 +4,10 @@ Claude Code plugins by [Tommy Long](https://www.tommylong.com).
 
 ## effort-router
 
+[![effort-router version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Ftommy5dollar%2Fclaude-plugins%2Fmain%2Feffort-router%2F.claude-plugin%2Fplugin.json&query=%24.version&label=effort-router&color=blue)](CHANGELOG.md)
+[![Claude Code 2.1.286 or later](https://img.shields.io/badge/Claude%20Code-2.1.286%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
+[![MIT licence](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
+
 Claude Code runs every task at the effort level you picked, whether it's renaming a variable or a migration that
 touches three services. Anthropic's [Spending your effort](https://claude.dev/blog/spending-your-effort/) says to
 match the effort to the task. effort-router is a mod that does that for you.
@@ -12,14 +16,14 @@ match the effort to the task. effort-router is a mod that does that for you.
 
 - **Your session.** Your session's own model assesses each of your first five prompts and steps the level both ways:
   up for a prompt that needs more, back down for follow-ups that don't. It moves only when it's at least 70% sure the
-  level running is wrong, then locks. The footer shows where it is, and clicking it gives you
-  Lock, Unlock, Turn off and Assess.
+  level running is wrong, then locks. The footer shows where it is, and clicking it gives you Lock, Unlock, Turn off
+  and Assess.
 - **Subagents.** Each subagent gets its own level, chosen by the agent launching it, which knows why it's delegating.
 - **Your rules.** Add to the routing rules in plain markdown, per user, per project or for a whole organisation.
 - **Where it went.** `/er report` shows the requests and output tokens at each level, and what the router changed.
+  Organisations that collect Claude Code's OpenTelemetry see it there too.
 
-It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the terminal and in the Desktop app's Code tab. It requires
-Claude Code 2.1.286 or later.
+It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the terminal and in the Desktop app's Code tab.
 
 ### Install
 
@@ -28,7 +32,8 @@ claude plugin marketplace add tommy5dollar/claude-plugins
 claude plugin install effort-router@tommy5dollar
 ```
 
-Then start a new session. In the Desktop app the footer appears once you've sent the first message.
+Then start a new session. In the Desktop app the footer appears once you've sent the first message. `/er off` turns
+it off for a session, and `claude plugin uninstall effort-router@tommy5dollar` removes it.
 
 ### Does it save money and time?
 
@@ -49,4 +54,5 @@ Mods run inside Claude Code without a sandbox, so here's exactly what this one d
 - **Writes:** one small JSON file per session in `~/.claude/effort-router/spend/`, and nothing else.
 - **Never:** runs a process, changes your saved effort setting or changes the model.
 
-[Full documentation](effort-router/) · [Changelog](CHANGELOG.md) · MIT licensed
+[Full documentation](effort-router/) · [Common questions](effort-router/#common-questions) ·
+[Changelog](CHANGELOG.md) · [Report a problem](https://github.com/tommy5dollar/claude-plugins/issues/new/choose)
