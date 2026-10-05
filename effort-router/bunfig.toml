@@ -1,2 +1,2 @@
 [test]
-pathIgnorePatterns = ["tests/register.test.ts", ".claude-plugin/**"]
+pathIgnorePatterns = ["tests/register.test.ts", ".claude-plugin/**", "eval/scenarios/hidden/**", "eval/scenarios/fixtures/**", "eval/scenarios/overlays/**"]

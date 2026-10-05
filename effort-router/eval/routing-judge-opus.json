@@ -1,0 +1,509 @@
+{
+  "session:pay: README typo": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Fixing a single typo in the README is mechanical work that low handles well at about half the cost and time of medium, and no higher level would do it any better."
+  },
+  "session:greeting": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "The only message is a greeting, so no task has been stated yet."
+  },
+  "session:pull latest": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "Pulling the latest code is setup before any task has been stated, so per the router's rule the right level is undecided."
+  },
+  "session:pull, then what does it do": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "So far the user has only pulled code and asked a question about the billing module, and both come before any task has been stated, so undecided is right."
+  },
+  "session:repo question before work": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "\"What's in this repo?\" is an orientation question asked before any work, so no task has been stated yet and the router should stay undecided."
+  },
+  "session:finance build after filler (the live miss)": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "A task is now stated, so undecided is out; it is a broad, underspecified greenfield multi-integration build rather than a hunt for hidden edge cases, so medium handles it well, while high or xhigh would cost more and add unrequested changes and low is too shallow for multi-platform financial integration."
+  },
+  "session:install and run (housekeeping)": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "Installing dependencies and starting the dev server is environment setup, like pulling code, so no real task has been stated yet and the router should stay undecided."
+  },
+  "session:ordinary feature": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding a dark mode toggle is well-scoped, everyday feature work that still means wiring theme state, styling and probably persistence, so it is beyond low's mechanical scope but has no hidden edge cases that would justify high on Opus 5.5."
+  },
+  "session:mechanical rename": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "A repo-wide rename of getUser to fetchUser is mechanical work, and low is Anthropic's recommended level for renames on Opus 5.5, doing it well at about half medium's cost and time."
+  },
+  "session:brownfield bug fix": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is a well-scoped bug fix (recomputing the checkout total when a coupon expires) that Opus 5.5 handles well at medium; low risks editing before reproducing the timing issue, and high or xhigh would add cost without a likely gain."
+  },
+  "session:storage engine concurrency": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "A lock-free ring buffer for a write-ahead log has many hidden edge cases, such as memory ordering, ABA, wraparound and durability ordering, that medium is likely to miss and that would cause costly rework in a storage engine, while xhigh costs more with no measured gain over high."
+  },
+  "session:edge-case tests": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Writing tests for three named edge-case categories is well-scoped, day-to-day work that medium handles well on Opus 5.5, so high would cost about 30% more for no real gain, and low risks shallow coverage of tricky DST and leap-year cases."
+  },
+  "session:autonomous end-to-end build": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Building a standard booking app end to end is large but well-scoped, everyday work that medium handles well on Opus 5.5, so high or xhigh would cost more without improving the result."
+  },
+  "session:autonomous vulnerability hunt": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Finding and fixing security vulnerabilities in an auth service, unattended all day, is open-ended work full of hidden edge cases that medium is likely to miss, and a bad fix can break existing auth code; xhigh adds cost with no measured gain over high."
+  },
+  "session:research on current tools": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is a well-scoped research task: checking each assistant's current remote HTTP MCP support and building a linked table, which medium handles well, while low tends to stop early and miss tools or skip verifying claims, and high or xhigh would cost more for the same result."
+  },
+  "session:vague feature": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "The user has only voiced a vague intent with no defined scope ('not sure exactly what yet'), so no concrete task has been stated and the next step is clarifying what to build."
+  },
+  "session:held out: morning + git status": {
+    "right": [
+      "undecided",
+      "low"
+    ],
+    "best": "undecided",
+    "why": "A greeting plus running git status is setup before any real task has been stated, so undecided is right, and low would also handle this mechanical command cheaply."
+  },
+  "session:held out: payout reconciliation webhook": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Building a Stripe payout reconciliation webhook is well-scoped, common work: Opus 5.5 at medium will handle the well-known pitfalls (signature verification, idempotency, duplicate and out-of-order events, failed or reversed payouts), so high would cost about 1.3x for the same result, and low risks stopping early on money-handling logic."
+  },
+  "session:held out: pagination": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding pagination to an existing endpoint is well-scoped, everyday work that Opus 5.5 does well at medium, but it is more than a mechanical rename: it needs sensible defaults, limits, stable ordering, and care not to break existing callers or tests, so low risks rework and high would only add cost."
+  },
+  "session:held out: bank statement importer, vague": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "A task is now stated, so undecided is wrong; building a bank-statement importer is well-scoped day-to-day work that Opus 5.5 handles well at medium, while low risks cutting corners on parsing and format details and high or xhigh would cost more for the same result."
+  },
+  "session:scope narrowed by a later clarification": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "The task has been narrowed to fixing a typo in the login error message, which is mechanical work that low effort handles well at about half medium's cost."
+  },
+  "session:held out: \"b\" after a lettered question": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "The user chose the narrow option of adding one status column to orders, which is mechanical, well-scoped migration work that low effort handles well at about half the cost of medium, with nothing here that needs the extra edge-case checking of higher levels."
+  },
+  "session:\"2, keep it simple\" after a numbered question": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Moving one backoff constant into config is small mechanical work, and \"keep it simple\" limits scope rather than naming an effort level, so low does it well at about half the cost of medium."
+  },
+  "session:pay: rename and run tests": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "A rename across the codebase plus running the tests is mechanical, well-scoped work that low handles well at about half the cost, so any higher level would just be paying more for the same result."
+  },
+  "session:AskUserQuestion answers refine the task": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "A nightly invoice sync to Xero and QuickBooks is well-scoped, everyday integration work that Opus 5.5 handles well at medium; low is too thin for the API, pagination and idempotency details, and high would cost more for the same result."
+  },
+  "session:pay: what does this repo do": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "Asking what the repo does comes before any work has been set, so under the router's rules no effort level should be committed yet."
+  },
+  "session:pay: --json flag": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding a --json flag is a small, well-scoped feature that medium handles reliably, but it is not purely mechanical: it means reading the existing command and serializing its data faithfully (e.g., decimals or dates), which low may rush, and high or xhigh would only add cost."
+  },
+  "session:pay: explain fees, no changes": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Explaining how monthly fees are calculated is a real read-only task, not a pre-task question, so undecided doesn't fit; it requires tracing fee logic through the code, where low tends to stop early and miss details, while high would cost more for no better result."
+  },
+  "session:pay: fees from a spec": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Implementing monthly fees from a written spec is well-scoped feature work that medium on Opus 5.5 handles well, while low risks stopping early on billing edge cases like month boundaries, and high or above would cost more for the same result."
+  },
+  "session:pay: CSV exporter": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding a CSV exporter alongside the JSON one is well-scoped, everyday feature work that medium handles fully, but it isn't purely mechanical, since CSV quoting, escaping and flattening any nested payout fields could trip up low, and there are too few hidden edge cases to justify the extra cost of high or xhigh."
+  },
+  "session:pay: date edge-case tests": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Writing tests for date-based fee logic is well-scoped day-to-day work, and the user has already named the edge cases (month ends, leap years, mid-month openings), so medium covers it; low risks shallow date handling and stopping early, and high adds cost for edge cases that aren't hidden."
+  },
+  "session:pay: sketch designs, no code": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Sketching three multi-currency designs is well-scoped work that needs some care with the existing account model, FX conversion and rounding, which low may skim, while nothing here needs the extra edge-case testing that high pays for."
+  },
+  "session:pay: double debit bug": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "A double debit on a payout usually comes from retry, idempotency or race-condition edge cases in live payment code, which medium is likely to miss and where a wrong fix means real money loss and rework, so high's extra testing is worth its 1.3x cost."
+  },
+  "session:pay: concurrency-safe billing": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Making a money-charging job safe across two concurrent servers without a duplicate-key guard has many hidden edge cases that medium is likely to miss, such as races, crashes mid-run, lock expiry and retries causing double charges, and any miss means real rework and financial risk."
+  },
+  "session:ask: quick one on a money bug": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "The user explicitly asked for a quick one and not to overthink it, which maps to low, and the user's stated pace wins even though a double-debit payout bug would otherwise warrant more care."
+  },
+  "session:pay: security review": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "A security review of whether one account can see or change another's money depends on finding authorization edge cases hidden across the CLI and exporters, which medium is likely to miss and which would be costly to get wrong, so high is warranted while xhigh adds cost without benefit."
+  },
+  "session:ask: think hard on a small task": {
+    "right": [
+      "high",
+      "xhigh"
+    ],
+    "best": "xhigh",
+    "why": "The task itself is simple, but the user explicitly asked to think particularly hard, long and deep with way more inference than usual, and that instruction overrides the task-based choice, pointing to the top level on offer (xhigh) with high as a close match."
+  },
+  "session:pay: unattended bigint migration": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Converting every amount to bigint without changing output is full of hidden edge cases that medium is likely to miss, such as mixed-type arithmetic, division truncating, JSON serialization, Math and toFixed calls, and formatting, and with the user offline any rework would be costly, so high is justified while xhigh adds cost without benefit."
+  },
+  "session:ask: medium on a security review": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "The user explicitly asked for medium effort, so medium is right regardless of the security review's difficulty."
+  },
+  "session:ask: xhigh on a typo": {
+    "right": [
+      "xhigh"
+    ],
+    "best": "xhigh",
+    "why": "The user explicitly asked to run at xhigh, so that level is the right one even though the typo fix itself is mechanical."
+  },
+  "session:ask: max on a rename": {
+    "right": [
+      "xhigh"
+    ],
+    "best": "xhigh",
+    "why": "The user explicitly asked for max effort, which isn't offered on this model, so the nearest available level, xhigh, matches their request even though the rename itself is mechanical."
+  },
+  "subagent:web research, tabulate lender criteria": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is well-scoped web research across four lenders, which medium on Opus 5.5 handles well; low risks stopping early or missing nuances such as limited-company ICR rules versus individual higher-rate rules, and high or xhigh would add cost without a better result."
+  },
+  "subagent:Explore: where is the token refreshed": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "This is a read-only Explore search to locate token-refresh code and its triggering hooks, which Opus 5.5 handles well at low for about half the cost of medium; 'search breadth: medium' sets how widely to search, not the effort level, and no hidden edge cases justify a higher level."
+  },
+  "subagent:run the tests and report, no fixing": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Running a test command and reporting failures without changing code is mechanical work, so low does it well at about half the cost of medium."
+  },
+  "subagent:summarise a given doc": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Reading one document and summarizing it into 10 bullets with quoted headings is a well-scoped task with no hidden edge cases, so low does it well at about half the cost of medium."
+  },
+  "subagent:list npm scripts across the monorepo": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Collecting the npm scripts from each package.json into a table is mechanical work with no hidden edge cases, so low does it well at about half the cost of medium."
+  },
+  "session:ask: low effort on a spec": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "The user explicitly asked for low effort, so low is right whatever the task needs."
+  },
+  "subagent:extract action items from given text": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Pulling three action items with owners and dates from four sentences of notes into a table is simple mechanical work, so low does it well at about half the cost of medium."
+  },
+  "subagent:add translation keys in the existing format": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding one key with given strings to two JSON files is mechanical, well-scoped work that low handles fine at about half the cost of medium."
+  },
+  "subagent:debug a failing test after a merge": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Tracing one failing test back through yesterday's merge is a well-scoped debugging task that medium handles well on Opus 5.5, so high would cost about 1.3 times as much with no clear need, and low risks editing before it has reproduced the cross-currency failure."
+  },
+  "subagent:Plan: design proposal for event-driven reconciliation": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Writing a design proposal with options, trade-offs, a parallel-run migration and month-end risks is well-scoped planning that Opus 5.5 does well at medium; high or xhigh would cost more for the same document, and low risks a shallow treatment of the reconciliation risks."
+  },
+  "subagent:implement rate limiting from a spec, with tests": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is a well-scoped feature with a clear spec (token bucket, Redis, 429 with Retry-After, env config, exemptions, tests), so medium on Opus 5.5 handles it well; low risks cutting corners on the bucket maths and Redis atomicity, and high or xhigh would cost more for the same result."
+  },
+  "subagent:security review of a branch": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is a well-scoped, read-only security review of a small diff against an explicit checklist (CSRF, open redirects, token leakage, cookie flags), which medium handles well on Opus 5.5; low risks stopping early on the subtler OAuth issues, and high or xhigh would cost more for the same findings."
+  },
+  "subagent:review a PR for correctness": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "This review exists to find hidden edge cases in retry middleware (non-idempotent retries, request body reuse, timeout budgets across attempts, cancellation, backoff and jitter, retry storms), which is the edge-case-heavy work medium is likely to miss on Opus 5.5; it changes no code, so high's habit of extra edits doesn't apply, while low would stop early and xhigh gains nothing over high for twice medium's cost."
+  },
+  "subagent:autonomous port with property tests": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Porting a well-scoped state machine has a strong feedback loop (recorded fixtures plus property-based tests, iterated until passing), so medium on Opus 5.5 should catch the C#-to-TypeScript edge cases. Low risks stopping early on payment semantics, and high or xhigh would cost more for the same result."
+  },
+  "subagent:vague: \"same for the invoices table\"": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "The brief asks the subagent to repeat earlier work on the invoices table without saying what that work was, so it must first work out the prior change and then apply it to a different schema; that is well-scoped day-to-day work where medium does well and higher levels only add cost."
+  },
+  "session:cheap: add a log line": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding one debug log line is mechanical work that low handles fully at about half medium's cost, so any higher level would only add time and cost."
+  },
+  "session:cheap: fix a lint error": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Removing an unused import so lint passes is mechanical, well within the model's ability, so low does it as well as any higher level at about half the cost."
+  },
+  "session:cheap: document a flag": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding one flag to the README in the same style as the existing entries is a mechanical doc edit that low handles well at about half the cost of medium."
+  },
+  "session:cheap: commit message": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Writing a commit message for staged changes and committing is quick, mechanical work that low does well at about half the cost and time of medium, so only the cheapest level counts as right."
+  },
+  "session:cheap: bump a dependency": {
+    "right": [
+      "low",
+      "medium"
+    ],
+    "best": "low",
+    "why": "Bumping zod within 3.x and rerunning the build is mostly mechanical, since minor versions are generally non-breaking and the build itself exposes any type breakage, so low should handle it; medium is acceptable only in case the bump brings type-inference changes that need real fixes."
+  },
+  "session:cheap: explain an error": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "The user has only asked what an error message means, a question before any work rather than a stated task, so the level stays undecided until they ask for something to be done."
+  },
+  "session:cheap: add a field following the pattern": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding an optional field by copying how the existing description field is done (type, parser, JSON output, tests) is mechanical, well-scoped work, so low does it well at about half medium's cost and time."
+  },
+  "session:cheap: update snapshots": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Regenerating the snapshots is mechanical, but checking nothing else broke means reviewing each snapshot diff to separate the intended format change from real regressions, which low tends to rush. Nothing here has the hidden edge cases that would justify high on Opus 5.5."
+  },
+  "session:cheap: change a default": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Changing one default value from 20 to 50 is mechanical work, so low does it well at about half the cost of medium."
+  },
+  "session:cheap: delete dead code": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Deleting the exporter means tracing which helpers only it uses without breaking shared code; medium handles that reliably, while low risks removing something still in use and high adds cost for no gain."
+  },
+  "session:cheap: small UI tweak": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Making a header bold and moving the currency code after the amount is a small, well-scoped UI edit with no hidden edge cases, so low does it as well as medium at about half the cost."
+  },
+  "session:cheap: convert config": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is a well-scoped format conversion plus a loader change. The details (adding a YAML parser dependency, quoting values YAML would coerce like yes/no or version strings, finding other references to settings.json) make it more than a purely mechanical edit that low would handle reliably, but it doesn't need high's extra edge-case hunting."
+  },
+  "session:cheap: follow-up, same again": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "This repeats the --json pattern just built for balance on the payouts command, which is mechanical, well-scoped work that low handles at about half medium's cost."
+  },
+  "session:cheap: ordinary feature with tests": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding a list command that returns the last 10 payouts, along with a test, is well-scoped, everyday integration work that medium handles well on Opus 5.5, while low risks skipping the repo exploration and test verification, and high or above would just cost more."
+  },
+  "session:cheap: follow-up, run and fix the tests": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Running the tests and fixing failures from a rename is mechanical cleanup, such as missed references or name strings, and low handles that well at about half the cost of medium."
+  },
+  "session:cheap: ordinary bug with a clear cause": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding a missing leading zero to a currency formatter and writing one test is small, clearly scoped work that low handles well at about half of medium's cost, and nothing here has the hidden edge cases that would justify a higher level."
+  }
+}

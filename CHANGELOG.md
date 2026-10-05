@@ -20,11 +20,14 @@
 - **A shorter prompt.** What a check adds after the conversation went from about 1,200 words to about 800. The
   worked examples and the advice on reading a conversation are gone: the checks run on Opus 5.5 and Fable 5.1, which
   don't need either. Undecided is now just another answer in the one reply format.
-- **Model notes in one shape for every model.** One table of three coding benchmarks with the same columns at every
-  level (CursorBench 4.0, Terminal-Bench 4.0 and FrontierCode, with cost and time per task), then the behaviours that
-  change which level to pick. The notes say the benchmarks are hard by design and the gaps are smaller on everyday
-  work, and carry Anthropic's own advice on when to reach for xhigh. The advice that tied kinds of task to levels is
-  gone. Lines about max only reach the check when max is on offer.
+- **Model notes are heuristics, in one shape for every model.** How effort pays on the model, Anthropic's advice for it,
+  then each level with its cost and time against medium and how it behaves. No benchmark scores: a few points on a hard
+  benchmark means a few more of the hardest tasks solved, and a model reads it as every task done better. On Opus the
+  notes now say what medium already covers (most bug fixes, integrations and builds, including unattended ones), and
+  the rules no longer count money or other systems as hidden risk on their own. Before that, routine payments work went
+  to high. Lines about max only reach the check when max is on offer.
+- **A routing eval.** 72 prompts, each with an approved level per model, and a judge with a written rubric. Any change
+  to the prompt, rules or notes runs it first, and a prompt that moves off its approved level is flagged.
 
 ### 0.17.3 (2026-10-05)
 

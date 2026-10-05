@@ -10,7 +10,7 @@ and Anthropic's effort docs (see models/research-2026-10.md).
 What effort buys: more verification, more edge-case testing and more independent judgement. It does not buy a better approach: higher effort cuts failures from missed edge cases, not from a wrong approach. It costs time and tokens on every turn, and on routine work it can make the model do more than it was asked.
 
 What to weigh:
-- How much is hidden: edge cases, existing code the change can break, money, several external systems, concurrency, security. The more there is, the more effort pays.
+- How much is hidden: edge cases, existing code the change can break, concurrency, security. The more there is, the more effort pays. Hidden means the request doesn't name it, no spec covers it and the usual way of doing this kind of work doesn't handle it. Work that touches money or other systems is often still routine.
 - Whether the user is in the loop. Quick back-and-forth while the user steers wants fast replies. A user who is away and wants the work finished needs the model to check its own work.
 - How well specified the task is. A tight spec makes the levels behave more alike, so effort matters less.
 - How big and long the work is, and whether it is mechanical (a known pattern, a rename, chores) or needs judgement.

@@ -1,25 +1,19 @@
 <!--
-What each effort level does on Claude Opus 5.5. The router sends these notes with every check while the session (or a
-subagent) runs on this model. Every model's notes have the same shape: one table of coding benchmarks with the same
-columns at every level, then the behaviours Anthropic reports that change which level to pick. A line that starts with
-a level the check can't pick (max, unless offered) is left out of the prompt. Evidence for each number and line, with
-sources and quotes, is in research-2026-10.md and research-2026-10-addendum.md. Add only what published evidence
-supports: the plugin's own eval runs are too small and too artificial to go in here.
+How effort pays on Claude Opus 5.5. The router sends these notes with every check while the session (or a subagent) runs
+on this model. They are heuristics, not results: benchmark scores are left out because a few points more on a hard
+benchmark means a few more of the hardest tasks solved, not every task done better, and a model reads them as the
+latter (Tommy, 2026-10-05). Cost and time against medium do scale with the level, so they stay, rounded from the
+CursorBench 4.0 and Terminal-Bench 4.0 cost and time per task. Every model's notes have the same shape: how effort pays,
+Anthropic's advice, then each level with its cost, time and behaviours. A line that starts with a level the check
+can't pick (max, unless offered) is left out of the prompt. Evidence: research-2026-10.md and
+research-2026-10-addendum.md. Never add eval results, ours or anyone's: these have to stay heuristics.
 -->
-Three coding benchmarks, measured at every level. CursorBench 4.0 (run by Cursor): ambiguous multi-file tasks taken from real Cursor sessions. Terminal-Bench 4.0 (run by Artificial Analysis): agentic tasks in a terminal, with time per task. FrontierCode (run by Cognition): graded for a clean, mergeable diff, so changes nobody asked for count against it. These are hard tasks, chosen because the levels score differently on them. On everyday work the gaps are smaller: Anthropic reports nearly flat curves on research and knowledge work, and the levels behave more alike when a task is tightly specified.
+How effort pays on this model: most of what it buys comes between low and medium. Above medium it only solves more of the hardest tasks, the ones with edge cases medium misses. Well-scoped work comes out the same at medium, and above medium it makes more changes nobody asked for. Medium already reproduces bugs, tests the usual edge cases and checks its own work, which covers most bug fixes, integrations and builds, including loosely specified ones, ones the user leaves it to finish alone and ones handed to a subagent. High pays where the hard part is something careful engineers often miss, such as races, security holes or a change that ripples through a lot of existing code.
 
-| level | CursorBench | cost per task | Terminal-Bench | cost per task | time per task | FrontierCode |
-|---|---|---|---|---|---|---|
-| low | 44% | $1.17 | 31% | $2.08 | 5.3 min | 47% |
-| medium | 53% | $2.91 | 53% | $4.04 | 10.8 min | 55% |
-| high | 56% | $3.97 | 57% | $5.12 | 13.7 min | 54% |
-| xhigh | 56% | $6.98 | 60% | $8.78 | 22.1 min | 51% |
-| max | 58% | $13.43 | 60% | $13.11 | 28.4 min | 54% |
+Anthropic's advice for this model: medium for well-scoped, day-to-day work, high when medium stalls, low for mechanical work such as renames, and xhigh only where a gain has been measured.
 
-Other findings:
-- Anthropic's advice: start at medium, and keep xhigh for work where a gain has been measured.
-- On SWE-bench Pro (fixes in real repositories) it solved 87.4% at low for $0.12 per solved task, 92.8% at medium for $0.22 and about 95% at high for $0.29. xhigh added about 1.4 points over high for 2.5 times the cost.
-- low: on edge-case-heavy work it edits before reproducing the problem and stops early (0 of 5 on a storage-engine task where xhigh passed 4).
-- medium: its best FrontierCode score. Above medium it makes more changes nobody asked for.
-- xhigh: no better than high on CursorBench and below it on FrontierCode, for about 1.7 times the cost.
-- max: prone to overthinking.
+Each level, with its cost and time against medium:
+- low: about half the cost and time. Right for mechanical work and quick exchanges. On edge-case-heavy work it edits before reproducing the problem and stops early.
+- high: about 1.3 times the cost and time. Tests more edge cases and checks more of its own work.
+- xhigh: about 2.2 times the cost and twice the time, and no better than high on Cursor's benchmark of real multi-file tasks.
+- max: 3 to 5 times the cost and 2.6 times the time. Prone to overthinking.

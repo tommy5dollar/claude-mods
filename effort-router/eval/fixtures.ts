@@ -140,6 +140,58 @@ export const FIXTURES: Fixture[] = [
     current: undefined,
     expect: ['high', 'xhigh', 'medium'],
   },
+  // --- added 2026-10-05 for the routing set: everyday asks in a small payments repo (probe-mix.txt) ----------------
+  { name: 'pay: what does this repo do', messages: [], current: 'What does this repo do?', expect: ['undecided'] },
+  { name: 'pay: README typo', messages: [], current: 'Fix the typo in the README: "recieve" should be "receive".', expect: ['low'] },
+  { name: 'pay: rename and run tests', messages: [], current: 'Rename getAccount to findAccount everywhere and run the tests.', expect: ['low'] },
+  { name: 'pay: explain fees, no changes', messages: [], current: "How are monthly fees worked out today? Just explain, don't change anything.", expect: ['undecided', 'low'] },
+  { name: 'pay: --json flag', messages: [], current: "Add a --json flag to the CLI's balance command that prints the same data as JSON.", expect: ['low', 'medium'] },
+  { name: 'pay: CSV exporter', messages: [], current: 'Add a CSV exporter for payouts next to the JSON one, with the same fields.', expect: ['low', 'medium'] },
+  { name: 'pay: fees from a spec', messages: [], current: 'Implement the monthly fees described in docs/monthly-fees.md.', expect: ['medium'] },
+  { name: 'pay: date edge-case tests', messages: [], current: 'Add unit tests for src/fees.ts covering month ends, leap years and accounts opened mid-month.', expect: ['medium'] },
+  { name: 'pay: sketch designs, no code', messages: [], current: 'Sketch three ways we could support accounts in more than one currency. No code yet, I want to pick one first.', expect: ['medium'] },
+  { name: 'pay: double debit bug', messages: [], current: 'A customer got debited twice for the same payout last week. Find out why and fix it.', expect: ['medium', 'high'] },
+  { name: 'pay: concurrency-safe billing', messages: [], current: "Make chargeMonthlyFees safe to run on two servers at the same time. Today the only guard is the ledger's duplicate key, and we're moving to a database that doesn't have one.", expect: ['high'] },
+  { name: 'pay: security review', messages: [], current: "Do a security review of the CLI and the exporters: can anyone see or change another account's money?", expect: ['high'] },
+  { name: 'pay: unattended bigint migration', messages: [], current: "I'm going offline for the evening. Change every amount from a number to a bigint without changing any output, and don't stop until the whole test suite passes.", expect: ['medium', 'high'] },
+
+  // --- added 2026-10-05: everyday work that should step down from the default (Opus medium or high, Fable high) --
+  // These are the router's bread and butter (Tommy, 2026-10-05): most of its value is moving routine sessions to a
+  // cheaper level, so the set needs plenty of them.
+  { name: 'cheap: fix a lint error', messages: [], current: 'npm run lint is failing on an unused import in src/cli.ts. Fix it.', expect: ['low'] },
+  { name: 'cheap: bump a dependency', messages: [], current: 'Bump zod to the latest 3.x and make sure the build still passes.', expect: ['low'] },
+  { name: 'cheap: add a log line', messages: [], current: 'Add a debug log in chargeMonthlyFees that prints the account id and the fee before it posts.', expect: ['low'] },
+  { name: 'cheap: document a flag', messages: [], current: 'Add the new --json flag to the README usage section, matching how the other flags are written up.', expect: ['low'] },
+  { name: 'cheap: commit message', messages: [], current: 'Write a commit message for the staged changes and commit them.', expect: ['low'] },
+  { name: 'cheap: explain an error', messages: [], current: 'What does this mean? TypeError: Cannot read properties of undefined (reading \'currency\') at formatAmount (src/format.ts:12)', expect: ['low', 'medium'] },
+  { name: 'cheap: add a field following the pattern', messages: [], current: 'Add an optional reference field to Payout, the same way description is done: type, parser, JSON output and the existing tests.', expect: ['low', 'medium'] },
+  { name: 'cheap: update snapshots', messages: [], current: 'The output format changed on purpose. Update the snapshot tests and check nothing else broke.', expect: ['low'] },
+  { name: 'cheap: change a default', messages: [], current: 'Change the default page size from 20 to 50.', expect: ['low'] },
+  { name: 'cheap: convert config', messages: [], current: 'Convert config/settings.json to YAML and update the loader to read the YAML file.', expect: ['low', 'medium'] },
+  { name: 'cheap: delete dead code', messages: [], current: 'Delete the old v1 exporter and anything only it uses. Nothing calls it any more.', expect: ['low', 'medium'] },
+  { name: 'cheap: small UI tweak', messages: [], current: 'Make the balance header bold and move the currency code after the amount.', expect: ['low'] },
+  {
+    name: 'cheap: follow-up, same again',
+    messages: [u('Add a --json flag to the balance command.'), a('Done: the balance command takes --json and prints the same fields as JSON. Tests added and passing.', [{ tool: 'Edit', text: 'src/commands/balance.ts' }, { tool: 'Bash', text: 'npm test' }])],
+    current: 'Nice. Same for the payouts command.',
+    expect: ['low'],
+  },
+  {
+    name: 'cheap: follow-up, run and fix the tests',
+    messages: [u('Rename Ledger to AccountLedger everywhere.'), a('Renamed across 14 files.', [{ tool: 'Edit', text: 'src/ledger.ts' }])],
+    current: 'Run the tests and fix anything that broke.',
+    expect: ['low'],
+  },
+  { name: 'cheap: ordinary feature with tests', messages: [], current: 'Add a command that lists the last 10 payouts for an account, with a test.', expect: ['medium', 'low'] },
+  { name: 'cheap: ordinary bug with a clear cause', messages: [], current: 'Amounts under £1 print as "£.50" instead of "£0.50". Fix it and add a test.', expect: ['low', 'medium'] },
+
+  // --- the user's own words about effort win -------------------------------------------------------------------
+  { name: 'ask: think hard on a small task', messages: [], current: "Think particularly hard, long and deep on this one, and use way more inference than usual: add a --json flag to the CLI's balance command that prints the same data as JSON.", expect: ['xhigh'] },
+  { name: 'ask: quick one on a money bug', messages: [], current: "Quick one, don't overthink it: a customer got debited twice for the same payout last week. Find out why and fix it.", expect: ['low'] },
+  { name: 'ask: low effort on a spec', messages: [], current: 'Use low effort for this: implement the monthly fees described in docs/monthly-fees.md.', expect: ['low'] },
+  { name: 'ask: xhigh on a typo', messages: [], current: 'Run this at xhigh: fix the typo in the README, "recieve" should be "receive".', expect: ['xhigh'] },
+  { name: 'ask: medium on a security review', messages: [], current: "Use medium effort. Do a security review of the CLI and the exporters: can anyone see or change another account's money?", expect: ['medium'] },
+  { name: 'ask: max on a rename', messages: [], current: 'Do this on max effort please: rename getAccount to findAccount everywhere and run the tests.', expect: ['xhigh'] },
 ]
 
 // --- subagent briefs: one read of the brief at spawn, no undecided -------------------

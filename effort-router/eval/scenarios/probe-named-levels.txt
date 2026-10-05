@@ -1,0 +1,8 @@
+# One prompt per line, run against the payouts repo with the fees overlay. Each names the level the user wants, in
+# different phrasings, mostly against what the check would pick on its own (see probe-mix.txt for the unasked picks).
+Use low effort for this: implement the monthly fees described in docs/monthly-fees.md.
+Run this at xhigh: fix the typo in the README, "recieve" should be "receive".
+Use medium effort. Do a security review of the CLI and the exporters: can anyone see or change another account's money?
+effort: high. Add a CSV exporter for payouts next to the JSON one, with the same fields.
+Do this on max effort please: rename getAccount to findAccount everywhere and run the tests.
+Make chargeMonthlyFees safe to run on two servers at the same time, we're losing the ledger's duplicate key. Low effort is fine, I'll review it closely.

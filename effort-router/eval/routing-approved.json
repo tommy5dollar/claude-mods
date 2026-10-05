@@ -1,0 +1,407 @@
+{
+  "session:pay: README typo": {
+    "opus": "low",
+    "sonnet": "low"
+  },
+  "session:greeting": {
+    "opus": "undecided",
+    "sonnet": "undecided"
+  },
+  "session:pull latest": {
+    "opus": "undecided",
+    "sonnet": "undecided"
+  },
+  "session:repo question before work": {
+    "opus": "undecided",
+    "sonnet": [
+      "undecided",
+      "low"
+    ],
+    "why": "Before any task undecided is right. Low on a question is harmless and cheaper."
+  },
+  "session:pull, then what does it do": {
+    "opus": "undecided",
+    "sonnet": [
+      "undecided",
+      "low"
+    ],
+    "why": "As the repo question."
+  },
+  "session:install and run (housekeeping)": {
+    "opus": "undecided",
+    "sonnet": [
+      "undecided",
+      "low"
+    ],
+    "why": "As the repo question."
+  },
+  "session:finance build after filler (the live miss)": {
+    "opus": "medium",
+    "sonnet": "high"
+  },
+  "session:vague feature": {
+    "opus": [
+      "medium",
+      "low",
+      "undecided"
+    ],
+    "sonnet": [
+      "medium",
+      "low",
+      "undecided"
+    ],
+    "why": "Borderline between no task yet and a vague one. Medium or low is cheaper for a session that starts on high, but undecided follows the frame."
+  },
+  "session:ordinary feature": {
+    "opus": "medium",
+    "sonnet": "medium"
+  },
+  "session:brownfield bug fix": {
+    "opus": "medium",
+    "sonnet": "high"
+  },
+  "session:mechanical rename": {
+    "opus": "low",
+    "sonnet": [
+      "low",
+      "medium"
+    ],
+    "why": "Mechanical. The judge wanted medium on Sonnet because its notes say low checks in early, but low is fine for a rename."
+  },
+  "session:edge-case tests": {
+    "opus": "medium",
+    "sonnet": [
+      "medium",
+      "high"
+    ]
+  },
+  "session:storage engine concurrency": {
+    "opus": "high",
+    "sonnet": "high"
+  },
+  "session:autonomous vulnerability hunt": {
+    "opus": "high",
+    "sonnet": "high"
+  },
+  "session:autonomous end-to-end build": {
+    "opus": "medium",
+    "sonnet": "high"
+  },
+  "session:research on current tools": {
+    "opus": "medium",
+    "sonnet": "medium"
+  },
+  "session:held out: morning + git status": {
+    "opus": [
+      "undecided",
+      "low"
+    ],
+    "sonnet": [
+      "undecided",
+      "low"
+    ],
+    "why": "As the repo question."
+  },
+  "session:held out: payout reconciliation webhook": {
+    "opus": "medium",
+    "sonnet": "high"
+  },
+  "session:held out: bank statement importer, vague": {
+    "opus": "medium",
+    "sonnet": "medium"
+  },
+  "session:held out: pagination": {
+    "opus": "medium",
+    "sonnet": "medium"
+  },
+  "session:held out: \"b\" after a lettered question": {
+    "opus": "low",
+    "sonnet": "medium"
+  },
+  "session:\"2, keep it simple\" after a numbered question": {
+    "opus": "low",
+    "sonnet": [
+      "low",
+      "medium"
+    ],
+    "why": "\"Keep it simple\" narrows the change, it does not ask for less thinking. Low or medium."
+  },
+  "session:scope narrowed by a later clarification": {
+    "opus": "low",
+    "sonnet": "low"
+  },
+  "session:AskUserQuestion answers refine the task": {
+    "opus": "medium",
+    "sonnet": "high"
+  },
+  "session:pay: what does this repo do": {
+    "opus": "undecided",
+    "sonnet": [
+      "undecided",
+      "low"
+    ],
+    "why": "As the repo question."
+  },
+  "session:pay: rename and run tests": {
+    "opus": "low",
+    "sonnet": [
+      "low",
+      "medium"
+    ],
+    "why": "As the mechanical rename."
+  },
+  "session:pay: explain fees, no changes": {
+    "opus": [
+      "undecided",
+      "low",
+      "medium"
+    ],
+    "sonnet": [
+      "undecided",
+      "low",
+      "medium"
+    ],
+    "why": "A question asked before any work, which the frame says is undecided. Low or medium are fine too, since it is read-only tracing."
+  },
+  "session:pay: --json flag": {
+    "opus": [
+      "low",
+      "medium"
+    ],
+    "sonnet": [
+      "low",
+      "medium"
+    ],
+    "why": "A small feature in one command. Either cheap level."
+  },
+  "session:pay: CSV exporter": {
+    "opus": "medium",
+    "sonnet": "medium"
+  },
+  "session:pay: fees from a spec": {
+    "opus": "medium",
+    "sonnet": "medium"
+  },
+  "session:pay: date edge-case tests": {
+    "opus": "medium",
+    "sonnet": "medium"
+  },
+  "session:pay: sketch designs, no code": {
+    "opus": "medium",
+    "sonnet": "medium"
+  },
+  "session:pay: double debit bug": {
+    "opus": "high",
+    "sonnet": "high"
+  },
+  "session:pay: concurrency-safe billing": {
+    "opus": "high",
+    "sonnet": "high"
+  },
+  "session:pay: security review": {
+    "opus": "high",
+    "sonnet": "high"
+  },
+  "session:pay: unattended bigint migration": {
+    "opus": "high",
+    "sonnet": "high"
+  },
+  "session:ask: think hard on a small task": {
+    "opus": [
+      "high",
+      "xhigh"
+    ],
+    "sonnet": "xhigh"
+  },
+  "session:ask: quick one on a money bug": {
+    "opus": "low",
+    "sonnet": "low"
+  },
+  "session:ask: low effort on a spec": {
+    "opus": "low",
+    "sonnet": "low"
+  },
+  "session:ask: xhigh on a typo": {
+    "opus": "xhigh",
+    "sonnet": "xhigh"
+  },
+  "session:ask: medium on a security review": {
+    "opus": "medium",
+    "sonnet": "medium"
+  },
+  "session:ask: max on a rename": {
+    "opus": "xhigh",
+    "sonnet": "xhigh"
+  },
+  "subagent:web research, tabulate lender criteria": {
+    "opus": "medium",
+    "sonnet": "medium"
+  },
+  "subagent:Explore: where is the token refreshed": {
+    "opus": "low",
+    "sonnet": "low"
+  },
+  "subagent:summarise a given doc": {
+    "opus": "low",
+    "sonnet": "low"
+  },
+  "subagent:run the tests and report, no fixing": {
+    "opus": "low",
+    "sonnet": "low"
+  },
+  "subagent:list npm scripts across the monorepo": {
+    "opus": "low",
+    "sonnet": "low"
+  },
+  "subagent:extract action items from given text": {
+    "opus": "low",
+    "sonnet": "low"
+  },
+  "subagent:add translation keys in the existing format": {
+    "opus": "low",
+    "sonnet": "low"
+  },
+  "subagent:implement rate limiting from a spec, with tests": {
+    "opus": [
+      "medium",
+      "high"
+    ],
+    "sonnet": [
+      "medium",
+      "high"
+    ],
+    "why": "A specified feature, so medium should do, but Redis atomicity is a race and the Opus notes say high pays for races."
+  },
+  "subagent:debug a failing test after a merge": {
+    "opus": "medium",
+    "sonnet": [
+      "medium",
+      "high"
+    ]
+  },
+  "subagent:security review of a branch": {
+    "opus": [
+      "medium",
+      "high"
+    ],
+    "sonnet": "high",
+    "why": "Security is one of the hidden-risk areas the rules name, and no user is there to catch a miss. High is acceptable here, but medium is enough for a small diff with a checklist."
+  },
+  "subagent:Plan: design proposal for event-driven reconciliation": {
+    "opus": [
+      "medium",
+      "high"
+    ],
+    "sonnet": "high",
+    "why": "A design doc with no user in the loop. Medium is enough; high is tolerated rather than wanted."
+  },
+  "subagent:review a PR for correctness": {
+    "opus": "high",
+    "sonnet": "high"
+  },
+  "subagent:autonomous port with property tests": {
+    "opus": "medium",
+    "sonnet": "high"
+  },
+  "subagent:vague: \"same for the invoices table\"": {
+    "opus": "medium",
+    "sonnet": [
+      "medium",
+      "high"
+    ],
+    "why": "The brief is vague, so the subagent has to work out the earlier change. Medium or high."
+  },
+  "session:cheap: fix a lint error": {
+    "opus": "low",
+    "sonnet": "low"
+  },
+  "session:cheap: bump a dependency": {
+    "opus": [
+      "low",
+      "medium"
+    ],
+    "sonnet": [
+      "low",
+      "medium"
+    ],
+    "why": "It is a task, so undecided is wrong. Low or medium."
+  },
+  "session:cheap: add a log line": {
+    "opus": "low",
+    "sonnet": "low"
+  },
+  "session:cheap: document a flag": {
+    "opus": "low",
+    "sonnet": "low"
+  },
+  "session:cheap: commit message": {
+    "opus": "low",
+    "sonnet": "low"
+  },
+  "session:cheap: explain an error": {
+    "opus": [
+      "low",
+      "undecided"
+    ],
+    "sonnet": [
+      "low",
+      "undecided"
+    ],
+    "why": "Diagnosing one error message is a small task. Low is cheapest; undecided is fine too as it comes before other work."
+  },
+  "session:cheap: add a field following the pattern": {
+    "opus": "low",
+    "sonnet": "medium"
+  },
+  "session:cheap: update snapshots": {
+    "opus": [
+      "low",
+      "medium"
+    ],
+    "sonnet": "medium",
+    "why": "An intended format change: updating snapshots and running tests is mostly mechanical, so low is fine."
+  },
+  "session:cheap: change a default": {
+    "opus": "low",
+    "sonnet": "low"
+  },
+  "session:cheap: convert config": {
+    "opus": [
+      "low",
+      "medium"
+    ],
+    "sonnet": "medium",
+    "why": "A known pattern with a small loader change. Low or medium."
+  },
+  "session:cheap: delete dead code": {
+    "opus": "medium",
+    "sonnet": "medium"
+  },
+  "session:cheap: small UI tweak": {
+    "opus": "low",
+    "sonnet": "low"
+  },
+  "session:cheap: follow-up, same again": {
+    "opus": "low",
+    "sonnet": "medium"
+  },
+  "session:cheap: follow-up, run and fix the tests": {
+    "opus": "low",
+    "sonnet": "medium"
+  },
+  "session:cheap: ordinary feature with tests": {
+    "opus": "medium",
+    "sonnet": "medium"
+  },
+  "session:cheap: ordinary bug with a clear cause": {
+    "opus": [
+      "low",
+      "medium"
+    ],
+    "sonnet": [
+      "low",
+      "medium"
+    ],
+    "why": "The cause is stated in the prompt. Either cheap level does it."
+  }
+}

@@ -1,0 +1,11 @@
+# One prompt per line, run against the payouts repo. Candidates for an Opus step up from medium.
+The bank sometimes sends us the settled webhook twice for the same payout, and a customer got debited twice last week. Can you fix it?
+Our ledger and the bank's settlement report disagree by a few pence for some accounts in September. Find out why and fix it.
+Make chargeMonthlyFees safe to run on two servers at the same time. Today the only guard is the ledger's duplicate key, and we're moving to a database that doesn't have one.
+Add retries for failed payouts: back off exponentially, give up after 5 attempts, and never pay twice if the bank's response to a request was lost.
+Payouts can now be in a different currency from the account. Convert at the FX rate at settlement, debit the account in its own currency, and charge the fee on the converted amount.
+Do a security review of the CLI and the exporters: can anyone see or change another account's money?
+Change every amount in the codebase from a number to a bigint without changing any output, so we can hold amounts above 2^53.
+Refunds can be partial and can be split across the original payment and its fee. Work out how refunds should hit the ledger and implement it.
+A customer in Tokyo says their September fee included a payout they made on 1 October. Can you fix it?
+Finance has had complaints from a few customers about September's monthly fees. Can you find what's wrong in src/fees.ts and fix it?

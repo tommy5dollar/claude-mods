@@ -1,0 +1,20 @@
+# One prompt per line, run against the payouts repo with the fees overlay. A spread of everyday Claude Code asks, from
+# filler to long work done alone, written after the 0.18 prompt review and never used to tune it. What a sensible level
+# is for each comes from Anthropic's published guidance, not from these runs.
+hi
+What does this repo do?
+Fix the typo in the README: "recieve" should be "receive".
+Rename getAccount to findAccount everywhere and run the tests.
+How are monthly fees worked out today? Just explain, don't change anything.
+Add a --json flag to the CLI's balance command that prints the same data as JSON.
+Add a CSV exporter for payouts next to the JSON one, with the same fields.
+Implement the monthly fees described in docs/monthly-fees.md.
+Add unit tests for src/fees.ts covering month ends, leap years and accounts opened mid-month.
+Sketch three ways we could support accounts in more than one currency. No code yet, I want to pick one first.
+A customer got debited twice for the same payout last week. Find out why and fix it.
+Make chargeMonthlyFees safe to run on two servers at the same time. Today the only guard is the ledger's duplicate key, and we're moving to a database that doesn't have one.
+Do a security review of the CLI and the exporters: can anyone see or change another account's money?
+I'm going offline for the evening. Change every amount from a number to a bigint without changing any output, and don't stop until the whole test suite passes.
+# Added 2026-10-05 to test that a user's own words about effort move the level, both ways.
+Think particularly hard, long and deep on this one, and use way more inference than usual: add a --json flag to the CLI's balance command that prints the same data as JSON.
+Quick one, don't overthink it: a customer got debited twice for the same payout last week. Find out why and fix it.

@@ -1,0 +1,509 @@
+{
+  "session:greeting": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "The session so far is only a greeting with no task stated, so the router should stay undecided."
+  },
+  "session:repo question before work": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "Asking what's in the repo is an orienting question before any task has been set, so the router should stay undecided."
+  },
+  "session:pull, then what does it do": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "So far there has only been setup (pulling code) and a question asked before any work, so no task has been stated yet and the router's rule makes undecided the right choice."
+  },
+  "session:pull latest": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "Pulling the latest code is setup and no task has been stated yet, so the router should stay undecided."
+  },
+  "session:install and run (housekeeping)": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "Installing dependencies and starting the dev server is setup, like pulling code, and no actual task has been stated yet, so the router should stay undecided."
+  },
+  "session:finance build after filler (the live miss)": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Building a multi-platform accounting integration is long, hard work with many hidden edge cases (auth, pagination, rate limits, currency and ledger normalization), so on Sonnet 5.5 it calls for high per Anthropic's advice, since medium risks stopping early or missing things and causing rework, while xhigh's extra review rounds aren't justified."
+  },
+  "session:ordinary feature": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding a dark mode toggle is routine, well-specified UI work that medium handles well on Sonnet 5.5, while low risks skipping verification of theme wiring and persistence, and high or xhigh would cost more for the same result."
+  },
+  "session:vague feature": {
+    "right": [
+      "undecided",
+      "low"
+    ],
+    "best": "undecided",
+    "why": "The user has only voiced a vague intent with no defined scope, so the next turn is a clarifying conversation rather than real work, and the level should stay undecided until a concrete task emerges (low is acceptable if a level must be picked for the cheap discussion)."
+  },
+  "session:mechanical rename": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Renaming a function across the repo is routine, well-specified work that medium handles well on Sonnet 5.5, while low risks skipping the check that finds missed call sites or wrongly changed near-matches like getUserById, and higher levels cost more for no gain."
+  },
+  "session:brownfield bug fix": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Fixing a coupon that expires mid-session in checkout means tracing cached totals, timing and revalidation through money-handling code the fix could break, so on Sonnet 5.5 it is the harder, edge-case-heavy debugging where medium is likely to miss something and cause rework."
+  },
+  "session:edge-case tests": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "medium",
+    "why": "Writing tests for named edge-case categories (leap years, DST, bad input) is well-specified agentic coding that medium handles well on Sonnet 5.5; high is acceptable because DST transitions hide subtle cases medium could miss, while low risks skipping the test run that verifies the work."
+  },
+  "session:storage engine concurrency": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "A lock-free ring buffer for a storage engine's write-ahead log is hard concurrency work with subtle hidden edge cases (memory ordering, wraparound, producer/consumer races, durability), so on Sonnet 5.5 medium is likely to miss some and cause rework, high is the advised level for harder tasks, and xhigh's 4-5x cost has no measured gain to justify it."
+  },
+  "session:autonomous end-to-end build": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Building a whole booking app end to end, unattended and with verification, is a long, hard agentic task. On Sonnet 5.5, low and medium tend to stop and check in mid-task, which the user explicitly forbade. High is Anthropic's advice for harder or longer tasks and should be enough, while xhigh's 4-5x cost buys extra review rounds the user didn't ask for."
+  },
+  "session:research on current tools": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is a well-specified web research and table task with no code to break, so Sonnet 5.5 at medium handles it well, while low risks reporting support claims without checking sources and high would add cost without a clear gain."
+  },
+  "session:autonomous vulnerability hunt": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Auditing and fixing an auth service is open-ended work with many hidden edge cases and live code that could break. It runs unattended all day, so low or medium risks missed vulnerabilities and stopping early to check in. High covers it without xhigh's 4–5x cost for gains on this task that haven't been measured."
+  },
+  "session:held out: morning + git status": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "A morning greeting plus a request to run git status is setup before any real task, so the router should stay undecided rather than commit to an effort level."
+  },
+  "session:held out: payout reconciliation webhook": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Reconciling Stripe payouts against an existing ledger on Sonnet 5.5 is a longer task with many hidden edge cases that medium is likely to miss, such as signature verification, duplicate and out-of-order events, failed or partial payouts, and currency mismatches, so high is worth its cost while xhigh's extra review rounds are not."
+  },
+  "session:held out: pagination": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding pagination to one endpoint is routine, well-specified agentic coding that medium handles well on Sonnet 5.5, while low risks skipping the check that existing callers of GET /users still work, and high or above would cost more for no gain."
+  },
+  "session:held out: bank statement importer, vague": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "A task has now been named (an importer for three banks' statements), so undecided no longer fits; this is routine work that medium handles on Sonnet 5.5 at the lowest cost, while low risks skipping checks on the parsing and high adds cost without a clear payoff."
+  },
+  "session:held out: \"b\" after a lettered question": {
+    "right": [
+      "low",
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding one status column to orders is small, well-specified work that medium handles well on Sonnet 5.5; low would likely manage it too, but it can skip checking that the migration actually ran, and on a database change that risks rework."
+  },
+  "session:scope narrowed by a later clarification": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "The task is now just fixing a typo in the login error message, a trivial and well-specified edit that low handles fine, so any higher level would only add cost and time."
+  },
+  "session:pay: README typo": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "A single-word typo fix in a README is trivial and well specified, so low does it fully at the lowest cost, and higher levels would only add cost and time."
+  },
+  "session:pay: what does this repo do": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "\"What does this repo do?\" is a question asked before any work, so no task has been stated yet and undecided is the only correct choice."
+  },
+  "session:AskUserQuestion answers refine the task": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Building a nightly sync against two external accounting APIs (Xero and QuickBooks) is a longer agentic task with many hidden edge cases. These include OAuth token refresh, pagination, rate limits, idempotent upserts and duplicates, incremental cursors, and partial failures. On Sonnet 5.5, medium is likely to miss some of these or stop to check in partway, causing rework, while xhigh's extra review rounds aren't needed."
+  },
+  "session:\"2, keep it simple\" after a numbered question": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Moving one backoff constant into config is a small, well-specified edit that low effort handles well, so medium would cost more for the same result."
+  },
+  "session:pay: rename and run tests": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "A rename plus a test run is routine, well-specified work that medium handles well on Sonnet 5.5, while low risks skipping the requested test run and reporting done anyway."
+  },
+  "session:pay: explain fees, no changes": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is a real read-only task: trace the fee calculation through the codebase and explain it accurately, which medium on Sonnet 5.5 handles well, while low risks skimming the code paths and higher levels add cost for no gain."
+  },
+  "session:pay: CSV exporter": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding a CSV exporter that mirrors an existing JSON one is routine, well-specified work that medium handles on Sonnet 5.5; low risks skipping verification of CSV details like escaping, and high or xhigh would cost more for no gain."
+  },
+  "session:pay: --json flag": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding a --json flag to an existing command is routine, well-specified coding that Sonnet 5.5 handles well at medium, while low risks reporting the change done without checking that the output matches and so causing rework."
+  },
+  "session:pay: date edge-case tests": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Writing unit tests for explicitly named date edge cases (month ends, leap years, mid-month openings) is well-specified agentic coding that Sonnet 5.5 handles well at medium. Low risks skipping the test run, and high adds cost without a clear payoff because the edge cases are stated rather than hidden."
+  },
+  "session:pay: fees from a spec": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Implementing a feature from a written spec in docs/monthly-fees.md is well-specified agentic coding, which medium on Sonnet 5.5 handles well, and nothing yet shows the hidden edge-case density that would justify high's 1.5–2.5x cost."
+  },
+  "session:pay: sketch designs, no code": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Sketching three multi-currency account designs means reading the existing account model and weighing traps like FX rate storage, rounding and reporting currency, which medium handles well on Sonnet 5.5 and low risks skimming, while high adds cost for a no-code sketch."
+  },
+  "session:pay: concurrency-safe billing": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Making billing idempotent across concurrent servers without a duplicate-key guard has hidden race and partial-failure edge cases that medium on Sonnet 5.5 would likely miss and that risk double-charging, so high is warranted, while xhigh's 4-5x cost adds review rounds the task doesn't clearly need."
+  },
+  "session:pay: double debit bug": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Tracing a duplicate payout debit on Sonnet 5.5 means investigating retries, races or idempotency gaps in live payment code, where the hidden edge cases and risk of breaking existing behavior are what medium is likely to miss, and xhigh's 4-5x cost isn't justified."
+  },
+  "session:pay: security review": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "A security review for cross-account access to money is a harder task with many hidden edge cases, such as authorization gaps, IDOR paths and exporter data leaks, that Sonnet 5.5 at medium is likely to miss, while xhigh's extra review rounds cost far more for little added gain."
+  },
+  "session:ask: think hard on a small task": {
+    "right": [
+      "xhigh"
+    ],
+    "best": "xhigh",
+    "why": "The task is a routine change, but the user explicitly asked to think particularly hard and long and to use way more inference than usual, and that wording points to the highest level on offer (xhigh)."
+  },
+  "session:ask: low effort on a spec": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "The user explicitly asked for low effort, and when the user names a level that level is right whatever the task."
+  },
+  "session:ask: quick one on a money bug": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "The user said \"quick one, don't overthink it,\" which maps to low, and the rule says the level matching the user's words is right even though the double-debit payout bug is a risky task."
+  },
+  "session:ask: xhigh on a typo": {
+    "right": [
+      "xhigh"
+    ],
+    "best": "xhigh",
+    "why": "The user explicitly asked to run at xhigh, so that level is right even though fixing a README typo would otherwise only need low."
+  },
+  "session:ask: medium on a security review": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "The user explicitly asked for medium effort, so medium is the right level regardless of the security review's difficulty."
+  },
+  "session:pay: unattended bigint migration": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Converting every amount to bigint across the codebase is a long, unattended refactor full of hidden traps: bigint cannot mix with number, JSON.stringify fails on it, division truncates, and Math and formatting calls break. On Sonnet 5.5, low and medium are likely to miss some of these or stop to check in while the user is offline, while xhigh's extra review rounds cost far more than this well-specified task needs."
+  },
+  "session:ask: max on a rename": {
+    "right": [
+      "xhigh"
+    ],
+    "best": "xhigh",
+    "why": "The user asked for max effort, which this session doesn't offer, so the nearest available level, xhigh, matches their words even though the rename itself is routine."
+  },
+  "subagent:summarise a given doc": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Reading one document and writing a 10-bullet summary that quotes its section headings is short, well-specified work with no code to break, so low does it well and is the cheapest level that does."
+  },
+  "subagent:web research, tabulate lender criteria": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Looking up three published criteria figures for four named lenders is a well-specified, bounded research task that medium handles reliably on Sonnet 5.5, while low risks unverified or misread figures and high or xhigh would add cost without improving accuracy."
+  },
+  "subagent:run the tests and report, no fixing": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Running one test command and reporting its failures without editing any code is simple, well-specified work that low handles fully, so any higher level only adds cost and time."
+  },
+  "subagent:list npm scripts across the monorepo": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Listing the scripts from every package.json into a table is simple, read-only and well specified, with no code to break and nothing that needs checking, so low does it well and anything higher only adds cost."
+  },
+  "subagent:Explore: where is the token refreshed": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "This is a read-only, well-specified search with no edits to verify, and on Sonnet 5.5 low can grep for the refresh logic and trace its hook and component callers well enough, so medium would cost more for the same report."
+  },
+  "subagent:extract action items from given text": {
+    "right": [
+      "low"
+    ],
+    "best": "low"
+  },
+  "subagent:add translation keys in the existing format": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding one well-specified key to two JSON files is trivial and well within Sonnet 5.5's ability at low, so medium or higher would only cost more for the same result."
+  },
+  "subagent:debug a failing test after a merge": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "medium",
+    "why": "The brief is well specified: one failing test, a known regression window in yesterday's merge, and a clear deliverable, which is routine debugging Sonnet 5.5 handles at medium; high is acceptable given currency-settlement edge cases and the risk of breaking existing ledger code, while low risks skipping the verification run and xhigh's extra self-review is unneeded cost."
+  },
+  "subagent:security review of a branch": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "A security review of OAuth callback and cookie changes is full of hidden edge cases, such as weak state validation, redirect-URI bypasses and token leaks. On Sonnet 5.5, medium is likely to miss some of them, and with no user in the loop its habit of checking in early is a further risk, while xhigh's 4–5x cost isn't justified for a bounded review."
+  },
+  "subagent:implement rate limiting from a spec, with tests": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "The spec is clear, but it is a multi-part task with hidden edge cases medium is likely to miss: an atomic Redis update to avoid race conditions, correct Retry-After values, and not breaking existing Express middleware. Low or medium may also stop to check in, which would stall this subagent since no user is there to answer, while xhigh's extra review rounds aren't worth 4–5 times the cost."
+  },
+  "subagent:Plan: design proposal for event-driven reconciliation": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "This is an open-ended design for financial settlement reconciliation, with hidden edge cases around a parallel run, late or duplicate events, and month-end close, which is the harder task where Sonnet 5.5's guidance calls for high; medium risks a shallower analysis and stopping early to check in with no user in the loop, while xhigh's extra review rounds aren't needed for a proposal."
+  },
+  "subagent:review a PR for correctness": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Hunting hidden edge cases in retry middleware (idempotency, timeouts, retry storms) is the kind of harder review where each effort step on Sonnet 5.5 pays off and medium would likely miss subtle bugs, but it's a bounded read-only review that doesn't justify xhigh's 4–5x cost."
+  },
+  "subagent:autonomous port with property tests": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Porting a payment state machine with identical behaviour is a long, autonomous task full of hidden edge cases (C# vs TypeScript differences in decimals, nulls and enums, plus iterating until the property tests pass), and low or medium risk stopping to check in with no user there to answer, while xhigh's 4–5x cost buys review rounds the fixture-driven loop already covers."
+  },
+  "subagent:vague: \"same for the invoices table\"": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "The brief only says to \"do the same\" for the invoices table, so the subagent has to work out the pattern from the repo first; at low or medium, Sonnet 5.5 tends to stop and ask a question it could answer itself, which would mean rework, while xhigh would add costly self-review this routine change doesn't need."
+  },
+  "session:cheap: bump a dependency": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Bumping zod within 3.x and checking the build is routine, well-specified work that medium handles fine. Low risks skipping the build check the user explicitly asked for, and high or xhigh would only add cost."
+  },
+  "session:cheap: add a log line": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding one debug log line that prints two existing values is trivial, well-specified work that low handles fully, so any higher level would cost more for the same result."
+  },
+  "session:cheap: commit message": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Reading a staged diff, writing a commit message and committing is a routine, well-specified task that low handles well, so medium would only add cost."
+  },
+  "session:cheap: fix a lint error": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Removing one unused import in a single file is trivial and well within Sonnet 5.5's ability, so low handles it well at the lowest cost, and medium would add cost for no gain."
+  },
+  "session:cheap: document a flag": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding one flag to a README usage section in the same style as the other flags is a small, well-specified doc edit that low does well on Sonnet 5.5, and it has no hidden edge cases or code that could break to justify paying for medium or above."
+  },
+  "session:cheap: explain an error": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Explaining this TypeError, that something passed to formatAmount at src/format.ts:12 is undefined, is a stated, simple task with nothing to verify, so low handles it as well as medium at lower cost, and undecided no longer fits."
+  },
+  "session:cheap: add a field following the pattern": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding an optional field by copying how description is done is routine, well-specified work that medium handles on Sonnet 5.5, while low may skip running the existing tests and higher levels only add cost."
+  },
+  "session:cheap: update snapshots": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Updating snapshots after an intentional format change and running the suite is routine, well-specified work that medium handles well on Sonnet 5.5, while low risks skipping the verification the user explicitly asked for."
+  },
+  "session:cheap: convert config": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Converting the JSON file and updating the loader is routine, well-specified work that medium handles on Sonnet 5.5, while low risks skipping the check that the updated loader still reads its settings, and high or xhigh would only add cost and time."
+  },
+  "session:cheap: change a default": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Changing one default value is a trivial, fully specified edit that low handles well on Sonnet 5.5 at about 0.8 times medium's cost, so medium or higher would cost more for the same result."
+  },
+  "session:cheap: delete dead code": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Removing the v1 exporter and its exclusive helpers is a well-specified cleanup that medium on Sonnet 5.5 handles reliably by grepping references and running the build. Low risks skipping that check and deleting something still shared, while high or xhigh would cost more for no real gain."
+  },
+  "session:cheap: small UI tweak": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Making a header bold and moving the currency code after the amount is a small, well-specified UI change that low effort on Sonnet 5.5 handles fine, so medium or higher would only add cost and time."
+  },
+  "session:cheap: follow-up, same again": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This repeats a well-specified pattern that medium handles reliably on Sonnet 5.5, while low risks skipping the test run that the previous change included."
+  },
+  "session:cheap: ordinary feature with tests": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding a command that lists recent payouts, plus a test, is routine and well specified, so medium on Sonnet 5.5 handles it well; low risks skipping the test run, and high or xhigh would only add cost."
+  },
+  "session:cheap: follow-up, run and fix the tests": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Running the tests and fixing breakage from a rename is routine, well-specified work that medium handles well on Sonnet 5.5, while low risks skipping the re-run after fixes and high would cost more for the same result."
+  },
+  "session:cheap: ordinary bug with a clear cause": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is a small, well-specified formatting fix plus a test, and medium handles that on Sonnet 5.5; low risks skipping the test run and missing cases like zero or negative amounts, and high or above would cost more for no gain."
+  }
+}

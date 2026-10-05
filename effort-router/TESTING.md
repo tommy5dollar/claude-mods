@@ -3,13 +3,14 @@
 ## Automated
 
 ```
-bun test                            # 87 tests. The 0.17 rule: settle moves to the median when the larger directional side
-                                    # clears the bar and stays otherwise, the last prompt of the window locks whatever runs
+bun test                            # 88 tests. The 0.18 rule: settle moves whenever the check names a level other than the
+                                    # one running (no bar), the prompt's frame, notes cut to the levels on offer, the
+                                    # reply format, the last prompt of the window locks whatever runs
                                     # (a move on it moves first), a manual assessment while locked moves the locked level
                                     # without counting, first sightings (earlier prompts count, a used-up window starts off),
                                     # lock, unlock, off and both ways on, levels offered up to your setting when it is above
-                                    # highestLevel, confidence against the level running; the footer (glyph, level, the
-                                    # circle, dim below 50%), the band's lines and its four slots with greyed ones and why,
+                                    # highestLevel; the footer (glyph, level, the circle, dim
+                                    # while off), the band's lines and its four slots with greyed ones and why,
                                     # the messages, /er grammar (explicit verbs, assess with a hint, anything else refused),
                                     # /er status, the state saved in the ledger and restored (old and malformed entries
                                     # ignored); the transcript (the prompt being assessed in whole, outside the cap), reply
@@ -36,6 +37,13 @@ claude plugin test .                # 60 tests in the engine's kit: the first pr
                                     # ends, carried on from a saved file, reported by week and repo
 "$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 59 under Desktop's engine (2.1.286, passing 2026-10-05)
 claude plugin validate . --strict
+bun eval/routing.ts                 # the routing gate, real model: every fixture (58 sessions, 14 subagent briefs) read 3
+                                    # times on Opus from medium, checked against eval/routing-approved.json. A prompt off
+                                    # its approved level on most runs is MOVED and needs Tommy's say-so before shipping, one
+                                    # run in three off is a wobble. --model sonnet|fable, --setting high (approvals hold
+                                    # from any start), --judge asks Opus at high with eval/routing-rubric.md, and the run
+                                    # prints its cost (about $0.01 a read on Opus, $0.05 on Fable). Run it after any change
+                                    # to the prompt, rules or notes. eval/routing-approve.ts rebuilds the approvals.
 bun run eval -- --runs 3            # opt-in, real model: 23 session fixtures and 14 subagent briefs, see below
                                     # (both sets as separate calls on --model, default opus, with its notes; the forks
                                     # the router makes can't be reproduced here)
