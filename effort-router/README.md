@@ -95,15 +95,15 @@ The footer sits beside the native model and effort pickers. It shows the router'
 
 | Footer | What it means |
 | --- | --- |
-| `🔓 medium ○` | Unlocked, nothing assessed yet. Your setting (medium) runs |
-| `🔓 high ◔` | Unlocked with one prompt assessed, which moved the level to high |
-| `🔓 high ◑` | Two or three assessed |
-| `🔓 high ◕` | Four assessed. The next prompt is the last one assessed |
-| `🔓 assessing…` | An assessment is running. The turn starts when it's done |
-| `🔒 high` | Locked. Every request on the main thread runs at high |
-| `⏸️ medium` | Off. Your own effort setting applies |
+| `🔓 MEDIUM ○` | Unlocked, nothing assessed yet. Your setting (medium) runs |
+| `🔓 HIGH ◔` | Unlocked with one prompt assessed, which moved the level to high |
+| `🔓 HIGH ◑` | Two or three assessed |
+| `🔓 HIGH ◕` | Four assessed. The next prompt is the last one assessed |
+| `🔓 ASSESSING…` | An assessment is running. The turn starts when it's done |
+| `🔒 HIGH` | Locked. Every request on the main thread runs at high |
+| `⏸️ MEDIUM` | Off. Your own effort setting applies |
 
-The circle never fills. When the window ends the padlock closes instead.
+The circle never fills. When the window ends the padlock closes instead. The level is in capitals, to tell it apart from the picker's own label, which shows your setting.
 
 The level word is dim while the last assessment was less than 50% sure the level running is right. Levels have no colours, because a scale from green to red would suggest that low effort is good.
 

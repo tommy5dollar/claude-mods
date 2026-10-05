@@ -1371,6 +1371,13 @@ export const GLYPH: Record<Status, string> = { unlocked: '🔓', locked: '🔒',
  * while the last assessment is less than 50% sure of the level running.
  */
 export function footerLabel(state: RouterState, view: View): { text: string; dim: boolean } {
+  // In capitals: the level running, as against the picker's "Medium" (your setting). Capitals also have no
+  // descenders, which the Desktop app's footer button cuts off ("high" lost the bottom of its g).
+  const label = footerWords(state, view)
+  return { ...label, text: label.text.toUpperCase() }
+}
+
+function footerWords(state: RouterState, view: View): { text: string; dim: boolean } {
   const setting = view.setting
   if (state.unsupported || state.status === 'off') return { text: `${GLYPH.off} ${setting ?? 'off'}`, dim: true }
   const glyph = GLYPH[state.status]

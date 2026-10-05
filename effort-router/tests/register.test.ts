@@ -278,7 +278,7 @@ describe('effort-router', () => {
       expect(world.sent).toEqual(['high'])
       expect(world.lines).toEqual(['Assessed, medium to high (bug fix in existing code).'])
       const footer = await mountFooter($)
-      expect(await footerOf(footer)).toMatchObject({ type: 'Button', shown: '🔓 high ◔', dim: false })
+      expect(await footerOf(footer)).toMatchObject({ type: 'Button', shown: '🔓 HIGH ◔', dim: false })
     })
 
     test('later prompts fork the conversation and are judged against the level running', async ($, on) => {
@@ -337,7 +337,7 @@ describe('effort-router', () => {
       await turn($, 'now refactor the whole module')
       expect(world.classifierCalls).toBe(2)
       expect(world.sent).toEqual(['high', 'high', 'high'])
-      expect((await footerOf(await mountFooter($))).shown).toBe('🔒 high')
+      expect((await footerOf(await mountFooter($))).shown).toBe('🔒 HIGH')
     })
 
     test('a move on the last prompt moves, then locks', { options: { promptsToAssess: 1 } }, async ($, on) => {
@@ -368,7 +368,7 @@ describe('effort-router', () => {
       await turn($, 'and the tokenizer', 'xhigh')
       expect(world.classifierCalls).toBe(2)
       expect(world.sent.at(-1)).toBe('xhigh')
-      expect(await footerOf(await mountFooter($))).toMatchObject({ shown: '⏸️ xhigh', dim: true })
+      expect(await footerOf(await mountFooter($))).toMatchObject({ shown: '⏸️ XHIGH', dim: true })
     })
 
     test('the picker change turns it off while locked too', { options: { promptsToAssess: 1 } }, async ($, on) => {
@@ -467,7 +467,7 @@ describe('effort-router', () => {
       await $.session.start({ ...STARTED, surface: 'desktop' })
       for (const surface of ['terminal', 'desktop'] as const) {
         const footer = await mountFooter($, surface)
-        expect(await footerOf(footer)).toMatchObject({ type: 'Button', shown: '🔓 medium ○' })
+        expect(await footerOf(footer)).toMatchObject({ type: 'Button', shown: '🔓 MEDIUM ○' })
         expect(await footer.find({ type: 'Select' })).toBeUndefined()
         await footer.unmount()
       }
@@ -561,14 +561,14 @@ describe('effort-router', () => {
         headline: 'Effort router: off. Medium (your effort setting).',
         buttons: ['Hide', 'Turn on, locked at high', 'Turn on, unlocked', 'Turn on and assess'],
       })
-      expect(await footerOf(footer)).toMatchObject({ shown: '⏸️ medium', dim: true })
+      expect(await footerOf(footer)).toMatchObject({ shown: '⏸️ MEDIUM', dim: true })
       await step($, 0)
       expect(world.sent.at(-1)).toBe('medium')
       await done($)
 
       await band.press({ key: 'on-locked' })
       expect(world.lines.at(-1)).toBe('On, locked at high.')
-      expect((await footerOf(footer)).shown).toBe('🔒 high')
+      expect((await footerOf(footer)).shown).toBe('🔒 HIGH')
       await step($, 0)
       expect(world.sent.at(-1)).toBe('high')
       await done($)
@@ -576,7 +576,7 @@ describe('effort-router', () => {
       await band.press({ key: 'off' })
       await band.press({ key: 'on-unlocked' })
       expect(world.lines.at(-1)).toBe('On, unlocked.')
-      expect((await footerOf(footer)).shown).toBe('🔓 medium ○') // a fresh window from your setting
+      expect((await footerOf(footer)).shown).toBe('🔓 MEDIUM ○') // a fresh window from your setting
       await step($, 0)
       expect(world.sent.at(-1)).toBe('medium')
     })
@@ -606,7 +606,7 @@ describe('effort-router', () => {
       world.reply = XHIGH
       expect(await route($, 'assess this is a security review now')).toBe('Assessed, high to xhigh (security review).')
       expect(world.forks[0]).toContain('this is a security review now')
-      expect((await footerOf(await mountFooter($))).shown).toBe('🔒 xhigh')
+      expect((await footerOf(await mountFooter($))).shown).toBe('🔒 XHIGH')
       await step($, 0)
       expect(world.sent.at(-1)).toBe('xhigh')
     })
@@ -704,7 +704,7 @@ describe('effort-router', () => {
       await $.session.start(STARTED)
       await submit($, 'fix the crash in the parser')
       expect(world.classifierCalls).toBe(0)
-      expect((await footerOf(await mountFooter($))).shown).toBe('⏸️ medium')
+      expect((await footerOf(await mountFooter($))).shown).toBe('⏸️ MEDIUM')
       expect(await route($, 'status')).toStartWith('Off on Haiku 4.5. It works with Fable 5.1, Opus 5.5 and Sonnet 5.5.')
       expect(await route($, 'on')).toBe("The router doesn't support Haiku 4.5, so your effort setting applies. It works with Fable 5.1, Opus 5.5 and Sonnet 5.5.")
     })
@@ -744,7 +744,7 @@ describe('effort-router', () => {
       const world = worldOf(on)
       world.messages = Array.from({ length: 3 }, (_, i) => ({ role: 'user' as const, text: `earlier prompt ${i}`, toolUses: [] }))
       await $.session.start(STARTED)
-      expect((await footerOf(await mountFooter($))).shown).toBe('🔓 medium ◑')
+      expect((await footerOf(await mountFooter($))).shown).toBe('🔓 MEDIUM ◑')
       await turn($, 'fix the crash in the parser')
       expect(world.classifierCalls).toBe(1)
       expect(await route($, 'status')).toContain('Assessed 4 of 5 prompts.')
@@ -780,7 +780,7 @@ describe('effort-router', () => {
         event: 'api_request',
         attributes: {
           effort: 'high', model: 'claude-sonnet-5-5',
-          'effort_router.version': '0.17.2', 'effort_router.status': 'unlocked', 'effort_router.setting': 'medium', 'effort_router.level': 'high',
+          'effort_router.version': '0.17.3', 'effort_router.status': 'unlocked', 'effort_router.setting': 'medium', 'effort_router.level': 'high',
         },
       })
       // Other records go out untouched.
@@ -796,7 +796,7 @@ describe('effort-router', () => {
       })
       await $.session.start(STARTED)
       const footer = await mountFooter($)
-      expect((await footerOf(footer)).shown).toBe('🔓 medium ○')
+      expect((await footerOf(footer)).shown).toBe('🔓 MEDIUM ○')
       // /resume: the process goes on under the resumed session, which was locked at low. No session.start fires.
       world.files['/home/t/.claude/effort-router/spend/session-2.json'] = JSON.stringify({
         version: 1, session: 'session-2', repo: 'scratch', rows: [], reads: [],
@@ -804,7 +804,7 @@ describe('effort-router', () => {
       })
       await $.session.end({ reason: 'resume', sessionId: 'session-1', resume: { id: 'session-1' } } as never)
       await world.clock.advance(1000)
-      expect((await footerOf(footer)).shown).toBe('🔒 low')
+      expect((await footerOf(footer)).shown).toBe('🔒 LOW')
     })
 
     test('the state is saved in the ledger at once, and a session carries on from it', async ($, on) => {
@@ -822,7 +822,7 @@ describe('effort-router', () => {
       await turn($, 'and the lexer')
       expect(world.classifierCalls).toBe(1)
       expect(world.sent.at(-1)).toBe('high')
-      expect((await footerOf(await mountFooter($))).shown).toBe('🔒 high')
+      expect((await footerOf(await mountFooter($))).shown).toBe('🔒 HIGH')
     })
   })
 

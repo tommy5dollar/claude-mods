@@ -2,6 +2,12 @@
 
 ## effort-router
 
+### 0.17.3 (2026-10-05)
+
+- **The footer shows the level in capitals** (`🔓 HIGH ◑`), which tells the level running apart from the picker's own
+  label (your setting). It also fixes the Desktop app cutting off the bottom of "high": the app's footer button clips
+  descenders, and capitals have none.
+
 ### 0.17.2 (2026-10-05)
 
 - **Resuming inside a running session** (`/resume` in the terminal, or `/clear`) now redraws the footer for the

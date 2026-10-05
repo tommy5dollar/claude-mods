@@ -1,6 +1,6 @@
 {
   "name": "effort-router",
-  "version": "0.17.2",
+  "version": "0.17.3",
   "description": "Picks the reasoning effort each task needs. Your session's own model assesses each of your first prompts, knowing what each level can do on that model, and moves the level only when it's confident. Then it locks. Subagents get their own level, chosen by the agent that starts them. The footer shows what it's doing, and /er report shows where your effort went.",
   "author": {
     "name": "Tommy Long"
