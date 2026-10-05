@@ -73,17 +73,17 @@ A greyed-out button stays in its slot. Pressing it says why it's greyed out. In 
 
 ## Messages in the conversation
 
-Each change adds one dim line to the conversation. These lines are for you and are never sent to the model. An assessment that stays put adds nothing.
+Each change adds one dim line to the conversation, labelled `effort-router` by Claude Code. These lines are for you and are never sent to the model. An assessment that stays put adds nothing.
 
 | What changed | Message |
 | --- | --- |
-| An assessment moved the level | Effort router: assessed, medium to high (bug fix touching three services). |
-| It locked after the last prompt | Effort router: locked at high. |
-| You pressed Lock | Effort router: you locked it at high. |
-| You pressed Unlock | Effort router: unlocked. Assessing again from your next prompt. |
-| You changed the effort picker | Effort router: you changed the effort to xhigh, so routing is off. |
-| You turned it off | Effort router: off. Your effort (medium) applies. |
-| You turned it on | Effort router: on, locked at high. Or: Effort router: on, unlocked. |
+| An assessment moved the level | Assessed, medium to high (bug fix touching three services). |
+| It locked after the last prompt | Locked at high. |
+| You pressed Lock | You locked it at high. |
+| You pressed Unlock | Unlocked. Assessing again from your next prompt. |
+| You changed the effort picker | You changed the effort to xhigh, so routing is off. |
+| You turned it off | Off. Your effort (medium) applies. |
+| You turned it on | On, locked at high. Or: On, unlocked. |
 
 ## Changing the level yourself
 

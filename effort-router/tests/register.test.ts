@@ -276,7 +276,7 @@ describe('effort-router', () => {
       expect(world.lines).toEqual([]) // nothing to judge against until a request shows your setting
       await step($, 0)
       expect(world.sent).toEqual(['high'])
-      expect(world.lines).toEqual(['Effort router: assessed, medium to high (bug fix in existing code).'])
+      expect(world.lines).toEqual(['Assessed, medium to high (bug fix in existing code).'])
       const footer = await mountFooter($)
       expect(await footerOf(footer)).toMatchObject({ type: 'Button', shown: '🔓 high ◔', dim: false })
     })
@@ -333,7 +333,7 @@ describe('effort-router', () => {
       world.forkable = true
       world.reply = LEANS
       await turn($, 'and the one in the lexer') // stays, then locks at high
-      expect(world.lines).toEqual(['Effort router: assessed, medium to high (bug fix in existing code).', 'Effort router: locked at high.'])
+      expect(world.lines).toEqual(['Assessed, medium to high (bug fix in existing code).', 'Locked at high.'])
       await turn($, 'now refactor the whole module')
       expect(world.classifierCalls).toBe(2)
       expect(world.sent).toEqual(['high', 'high', 'high'])
@@ -344,7 +344,7 @@ describe('effort-router', () => {
       const world = worldOf(on)
       await $.session.start(STARTED)
       await turn($, 'fix the crash in the parser')
-      expect(world.lines).toEqual(['Effort router: assessed, medium to high (bug fix in existing code).', 'Effort router: locked at high.'])
+      expect(world.lines).toEqual(['Assessed, medium to high (bug fix in existing code).', 'Locked at high.'])
       expect(world.sent).toEqual(['high'])
     })
 
@@ -364,7 +364,7 @@ describe('effort-router', () => {
       await step($, 0, undefined, 'xhigh') // you changed the picker to xhigh
       await done($)
       expect(world.sent).toEqual(['high', 'xhigh'])
-      expect(world.lines.at(-1)).toBe('Effort router: you changed the effort to xhigh, so routing is off.')
+      expect(world.lines.at(-1)).toBe('You changed the effort to xhigh, so routing is off.')
       await turn($, 'and the tokenizer', 'xhigh')
       expect(world.classifierCalls).toBe(2)
       expect(world.sent.at(-1)).toBe('xhigh')
@@ -377,7 +377,7 @@ describe('effort-router', () => {
       await turn($, 'fix the crash in the parser') // high, locked
       await turn($, 'smaller thing', 'low')
       expect(world.sent).toEqual(['high', 'low'])
-      expect(world.lines.at(-1)).toBe('Effort router: you changed the effort to low, so routing is off.')
+      expect(world.lines.at(-1)).toBe('You changed the effort to low, so routing is off.')
     })
 
     test('a prompt sent while a turn runs is not assessed', async ($, on) => {
@@ -447,7 +447,7 @@ describe('effort-router', () => {
       await route($, 'lock')
       world.messages = [{ role: 'user', text: 'and the lexer', toolUses: [] }]
       world.reply = XHIGH
-      expect(await route($, 'assess')).toBe('Effort router: assessed, high to xhigh (security review).')
+      expect(await route($, 'assess')).toBe('Assessed, high to xhigh (security review).')
       await settle($)
       const saved = JSON.parse(world.files[LEDGER] ?? '{}')
       const rows = (saved.verdicts as Record<string, unknown>[]).map(({ at: _, ...row }) => row)
@@ -516,7 +516,7 @@ describe('effort-router', () => {
       const band = await mountBand($)
       await er($)
       await band.press({ key: 'lock' })
-      expect(world.lines.at(-1)).toBe('Effort router: you locked it at high.')
+      expect(world.lines.at(-1)).toBe('You locked it at high.')
       expect(await bandOf(band)).toMatchObject({
         headline: 'Effort router: locked. High (locked by you after 1 prompt), 90% confidence.',
         buttons: ['Hide', 'Unlock', 'Turn off', 'Assess'],
@@ -525,7 +525,7 @@ describe('effort-router', () => {
       await turn($, 'and the lexer')
       expect(world.classifierCalls).toBe(1) // locked: not assessed
       await band.press({ key: 'unlock' })
-      expect(world.lines.at(-1)).toBe('Effort router: unlocked. Assessing again from your next prompt.')
+      expect(world.lines.at(-1)).toBe('Unlocked. Assessing again from your next prompt.')
       expect((await bandOf(band)).headline).toStartWith('Effort router: unlocked. High (chosen by the router)')
       expect((await bandOf(band)).headline).toEndWith('Locks after 5 more prompts.')
       await step($, 0)
@@ -542,7 +542,7 @@ describe('effort-router', () => {
       const band = await mountBand($)
       await er($)
       await band.press({ key: 'lock' })
-      expect(world.lines).toEqual(['Effort router: you locked it at medium.'])
+      expect(world.lines).toEqual(['You locked it at medium.'])
       await turn($, 'fix the crash in the parser')
       expect(world.classifierCalls).toBe(0)
       expect(world.sent).toEqual(['medium'])
@@ -556,7 +556,7 @@ describe('effort-router', () => {
       const footer = await mountFooter($)
       await er($)
       await band.press({ key: 'off' })
-      expect(world.lines.at(-1)).toBe('Effort router: off. Your effort (medium) applies.')
+      expect(world.lines.at(-1)).toBe('Off. Your effort (medium) applies.')
       expect(await bandOf(band)).toMatchObject({
         headline: 'Effort router: off. Medium (your effort setting).',
         buttons: ['Hide', 'Turn on, locked at high', 'Turn on, unlocked', 'Turn on and assess'],
@@ -567,7 +567,7 @@ describe('effort-router', () => {
       await done($)
 
       await band.press({ key: 'on-locked' })
-      expect(world.lines.at(-1)).toBe('Effort router: on, locked at high.')
+      expect(world.lines.at(-1)).toBe('On, locked at high.')
       expect((await footerOf(footer)).shown).toBe('🔒 high')
       await step($, 0)
       expect(world.sent.at(-1)).toBe('high')
@@ -575,7 +575,7 @@ describe('effort-router', () => {
 
       await band.press({ key: 'off' })
       await band.press({ key: 'on-unlocked' })
-      expect(world.lines.at(-1)).toBe('Effort router: on, unlocked.')
+      expect(world.lines.at(-1)).toBe('On, unlocked.')
       expect((await footerOf(footer)).shown).toBe('🔓 medium ○') // a fresh window from your setting
       await step($, 0)
       expect(world.sent.at(-1)).toBe('medium')
@@ -593,7 +593,7 @@ describe('effort-router', () => {
       await er($)
       await band.press({ key: 'on-assess' })
       await settle($)
-      expect(world.lines.slice(-2)).toEqual(['Effort router: on, unlocked.', 'Effort router: assessed, medium to high (bug fix in existing code).'])
+      expect(world.lines.slice(-2)).toEqual(['On, unlocked.', 'Assessed, medium to high (bug fix in existing code).'])
       expect((await bandOf(band)).headline).toEndWith('Locks after 4 more prompts.')
     })
 
@@ -604,7 +604,7 @@ describe('effort-router', () => {
       await route($, 'lock')
       world.forkable = true
       world.reply = XHIGH
-      expect(await route($, 'assess this is a security review now')).toBe('Effort router: assessed, high to xhigh (security review).')
+      expect(await route($, 'assess this is a security review now')).toBe('Assessed, high to xhigh (security review).')
       expect(world.forks[0]).toContain('this is a security review now')
       expect((await footerOf(await mountFooter($))).shown).toBe('🔒 xhigh')
       await step($, 0)
@@ -657,12 +657,12 @@ describe('effort-router', () => {
       expect(world.completes[0]?.prompt).toContain('this is a migration')
       await step($, 0)
       await done($)
-      expect(await route($, 'lock')).toBe('Effort router: you locked it at high.')
+      expect(await route($, 'lock')).toBe('You locked it at high.')
       expect(await route($, 'lock')).toBe('Already locked at high.')
-      expect(await route($, 'off')).toBe('Effort router: off. Your effort (medium) applies.')
+      expect(await route($, 'off')).toBe('Off. Your effort (medium) applies.')
       expect(await route($, 'off')).toBe('Already off.')
-      expect(await route($, 'on')).toBe('Effort router: on, unlocked.')
-      expect(world.lines).toEqual(['Effort router: assessed, medium to high (bug fix in existing code).']) // command replies print once, as the reply
+      expect(await route($, 'on')).toBe('On, unlocked.')
+      expect(world.lines).toEqual(['Assessed, medium to high (bug fix in existing code).']) // command replies print once, as the reply
     })
 
     test('lock while off turns on locked at the last level; unlock while off turns on unlocked', async ($, on) => {
@@ -670,9 +670,9 @@ describe('effort-router', () => {
       await $.session.start(STARTED)
       await turn($, 'fix the crash in the parser')
       await route($, 'off')
-      expect(await route($, 'lock')).toBe('Effort router: on, locked at high.')
+      expect(await route($, 'lock')).toBe('On, locked at high.')
       await route($, 'off')
-      expect(await route($, 'unlock')).toBe('Effort router: on, unlocked.')
+      expect(await route($, 'unlock')).toBe('On, unlocked.')
     })
 
     test('anything else is refused with the usage, never run as a hint', async ($, on) => {

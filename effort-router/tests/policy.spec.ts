@@ -865,14 +865,14 @@ describe('0.17: the band', () => {
 
 describe('0.17: messages, /er and saved state', () => {
   test('one dim line per change', () => {
-    expect(message.moved('medium', 'high', 'bug fix touching three services')).toBe('Effort router: assessed, medium to high (bug fix touching three services).')
-    expect(message.locked('high')).toBe('Effort router: locked at high.')
-    expect(message.lockedByYou('high')).toBe('Effort router: you locked it at high.')
-    expect(message.unlocked()).toBe('Effort router: unlocked. Assessing again from your next prompt.')
-    expect(message.picker('xhigh')).toBe('Effort router: you changed the effort to xhigh, so routing is off.')
-    expect(message.off('medium')).toBe('Effort router: off. Your effort (medium) applies.')
-    expect(message.onLocked('high')).toBe('Effort router: on, locked at high.')
-    expect(message.onUnlocked()).toBe('Effort router: on, unlocked.')
+    expect(message.moved('medium', 'high', 'bug fix touching three services')).toBe('Assessed, medium to high (bug fix touching three services).')
+    expect(message.locked('high')).toBe('Locked at high.')
+    expect(message.lockedByYou('high')).toBe('You locked it at high.')
+    expect(message.unlocked()).toBe('Unlocked. Assessing again from your next prompt.')
+    expect(message.picker('xhigh')).toBe('You changed the effort to xhigh, so routing is off.')
+    expect(message.off('medium')).toBe('Off. Your effort (medium) applies.')
+    expect(message.onLocked('high')).toBe('On, locked at high.')
+    expect(message.onUnlocked()).toBe('On, unlocked.')
   })
 
   test('/er: bare opens the band; explicit verbs; assess takes a hint; anything else is refused, not run as a hint', () => {

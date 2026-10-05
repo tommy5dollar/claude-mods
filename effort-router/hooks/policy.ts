@@ -1465,17 +1465,18 @@ export function bandActions(state: RouterState, view: View): BandAction[] {
 }
 
 // --- messages in the conversation (dim, never sent to the model) ----------------------
+// Claude Code labels each line with the plugin's name (terminal and Desktop, verified 2026-10-05), so no prefix here.
 
 export const message = {
   moved: (from: Level | undefined, to: Level, reason: string): string =>
-    `Effort router: assessed, ${from ? `${from} to ${to}` : to} (${reason}).`,
-  locked: (level: Level): string => `Effort router: locked at ${level}.`,
-  lockedByYou: (level: Level): string => `Effort router: you locked it at ${level}.`,
-  unlocked: (): string => 'Effort router: unlocked. Assessing again from your next prompt.',
-  picker: (level: string): string => `Effort router: you changed the effort to ${level}, so routing is off.`,
-  off: (setting?: Level): string => `Effort router: off.${setting ? ` Your effort (${setting}) applies.` : ' Your effort setting applies.'}`,
-  onLocked: (level: Level): string => `Effort router: on, locked at ${level}.`,
-  onUnlocked: (): string => 'Effort router: on, unlocked.',
+    `Assessed, ${from ? `${from} to ${to}` : to} (${reason}).`,
+  locked: (level: Level): string => `Locked at ${level}.`,
+  lockedByYou: (level: Level): string => `You locked it at ${level}.`,
+  unlocked: (): string => 'Unlocked. Assessing again from your next prompt.',
+  picker: (level: string): string => `You changed the effort to ${level}, so routing is off.`,
+  off: (setting?: Level): string => `Off.${setting ? ` Your effort (${setting}) applies.` : ' Your effort setting applies.'}`,
+  onLocked: (level: Level): string => `On, locked at ${level}.`,
+  onUnlocked: (): string => 'On, unlocked.',
 }
 
 // --- /er ----------------------------------------------------------------------------

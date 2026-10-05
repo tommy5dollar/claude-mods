@@ -286,10 +286,10 @@ Load the build with `claude --plugin-dir <path>/effort-router` (terminal) or in 
 1. Footer: in the terminal it reads `🔓 medium ○` before any prompt. Desktop loads mods only with a new session's first message (verified 2026-10-05), so there it appears after the first prompt, as `🔓 medium ◔`. Check the emoji line up with the text in the terminal (the fallback, if not, is the words `unlocked`, `locked`, `off`).
 2. Typeahead: typing `/eff` lists `/effort-router` beside `/effort`, and `/er` is listed as its short form.
 3. Band: pressing the footer, or `/er`, opens the band with nothing printed in the transcript. The buttons read `1 Hide  2 Lock at medium  3 Turn off  4 Assess`, Assess dim. Pressing `4` says `It assesses before your next prompt anyway.` In Desktop, Hide is the panel's close control.
-4. A move: type "the checkout total is wrong when a coupon expires mid-session, fix it". The footer reads `🔓 assessing…` briefly, then the transcript shows a dim `Effort router: assessed, medium to high (...)` and the footer `🔓 high ◔`. The step logs `effort medium -> high`. The Desktop picker still reads Medium.
-5. The lock: send four more prompts on the same task. The footer's circle advances, then `Effort router: locked at high.` and `🔒 high`. A sixth prompt logs no assessment.
+4. A move: type "the checkout total is wrong when a coupon expires mid-session, fix it". The footer reads `🔓 assessing…` briefly, then the transcript shows a dim `Assessed, medium to high (...)` and the footer `🔓 high ◔`. The step logs `effort medium -> high`. The Desktop picker still reads Medium.
+5. The lock: send four more prompts on the same task. The footer's circle advances, then `Locked at high.` and `🔒 high`. A sixth prompt logs no assessment.
 6. Assess while locked: `/er assess this is now a security review`. The reply names any move, and the footer stays `🔒`.
-7. Unlock: press `2 Unlock`. `Effort router: unlocked. Assessing again from your next prompt.` The footer reads `🔓 high ○` and the next prompt is assessed against high.
+7. Unlock: press `2 Unlock`. `Unlocked. Assessing again from your next prompt.` The footer reads `🔓 high ○` and the next prompt is assessed against high.
 8. The picker: change the effort picker to xhigh. The next request logs `xhigh -> xhigh`, the transcript says `you changed the effort to xhigh, so routing is off`, and the footer reads `⏸️ xhigh` (dim). In Desktop, check whether the app sends the new level on the next request (it did on 2.1.286, 2026-10-05).
 9. Off and on: press `2 Turn on, locked at high`, then `3 Turn off`, then `3 Turn on, unlocked`. Each adds its one line, and the footer follows.
 10. Resume: `claude --resume` the session. The footer comes back with the same status and level.
