@@ -3,7 +3,7 @@
 ## Automated
 
 ```
-bun test                            # 83 tests. The 0.17 rule: settle moves to the median when the larger directional side
+bun test                            # 87 tests. The 0.17 rule: settle moves to the median when the larger directional side
                                     # clears the bar and stays otherwise, the last prompt of the window locks whatever runs
                                     # (a move on it moves first), a manual assessment while locked moves the locked level
                                     # without counting, first sightings (earlier prompts count, a used-up window starts off),
