@@ -31,6 +31,7 @@ import {
   footerLabel,
   bandActions,
   bandHeadline,
+  sureOf,
   consentOf,
   effortQuestion,
   freshState,
@@ -476,8 +477,8 @@ describe('state', () => {
     expect(bandHeadline(OFF)).toBe('Effort router: off. Your effort setting applies.')
     expect(bandHeadline(DECIDING)).toBe('Effort router: undecided. Your effort setting applies until the task is clear.')
     expect(bandHeadline(DECIDING, { setting: 'low' })).toBe('Effort router: undecided. Your effort setting (low) applies until the task is clear.')
-    expect(bandHeadline(DECIDING, { setting: 'low', leaning: { level: 'high', reason: 'r', confidence: 0.62 } })).toBe(
-      'Effort router: undecided. Your effort setting (low) applies until the task is clear. The last check leaned high but was only 62% sure.',
+    expect(bandHeadline(DECIDING, { setting: 'low', leaning: { level: 'high', reason: 'r', confidence: 0.62, against: 'low' } })).toBe(
+      'Effort router: undecided. Your effort setting (low) applies until the task is clear. The last check leaned high but was only 62% sure low is too low.',
     )
     expect(bandHeadline(OFF, { setting: 'medium' })).toBe('Effort router: off. Your effort setting (medium) applies.')
     expect(bandHeadline({ ...DECIDING, gaveUp: true })).toBe('Effort router: stopped checking (no clear task yet). Your effort setting applies.')
@@ -494,17 +495,26 @@ describe('state', () => {
   test('a spread: the median level, and how sure the check is that the level in force is wrong in that direction', () => {
     // Torn between high and xhigh on medium: 90% sure medium is too low, so high.
     const torn = spreadOf({ low: 0.02, medium: 0.08, high: 0.5, xhigh: 0.4 }) as NonNullable<ReturnType<typeof spreadOf>>
-    expect(judgeSpread(torn, 'medium')).toEqual({ level: 'high', confidence: 0.9 })
+    expect(judgeSpread(torn, 'medium')).toEqual({ level: 'high', confidence: 0.9, against: 'medium' })
     // Leaning further up: xhigh.
-    expect(judgeSpread({ medium: 0.1, high: 0.3, xhigh: 0.6 }, 'medium')).toEqual({ level: 'xhigh', confidence: 0.9 })
+    expect(judgeSpread({ medium: 0.1, high: 0.3, xhigh: 0.6 }, 'medium')).toEqual({ level: 'xhigh', confidence: 0.9, against: 'medium' })
     // Mostly right where it is: stay, sure as far as neither side is likely.
-    expect(judgeSpread({ low: 0.15, medium: 0.7, high: 0.15 }, 'medium')).toEqual({ level: 'medium', confidence: 0.85 })
+    expect(judgeSpread({ low: 0.15, medium: 0.7, high: 0.15 }, 'medium')).toEqual({ level: 'medium', confidence: 0.85, against: 'medium' })
     // Down from a kept xhigh.
-    expect(judgeSpread({ low: 0.3, medium: 0.5, high: 0.2 }, 'xhigh')).toEqual({ level: 'medium', confidence: 1 })
+    expect(judgeSpread({ low: 0.3, medium: 0.5, high: 0.2 }, 'xhigh')).toEqual({ level: 'medium', confidence: 1, against: 'xhigh' })
     // Mass on max folds into the highest level offered.
-    expect(judgeSpread({ high: 0.3, max: 0.7 }, 'medium')).toEqual({ level: 'xhigh', confidence: 1 })
+    expect(judgeSpread({ high: 0.3, max: 0.7 }, 'medium')).toEqual({ level: 'xhigh', confidence: 1, against: 'medium' })
     // No level in force known: the median and its own probability.
     expect(judgeSpread(torn, undefined)).toEqual({ level: 'high', confidence: 0.5 })
+    // Seen live on the Mac (2026-10-05): the same spread is a sure move from low and below the bar from medium,
+    // so a check must say which level it was judged against.
+    const mac = { low: 0.03, medium: 0.37, high: 0.45, xhigh: 0.15 }
+    expect(judgeSpread(mac, 'low')).toEqual({ level: 'high', confidence: 0.97, against: 'low' })
+    expect(judgeSpread(mac, 'medium')).toEqual({ level: 'high', confidence: 0.6, against: 'medium' })
+    expect(sureOf({ level: 'high', confidence: 0.6, against: 'medium' })).toBe('60% sure medium is too low')
+    expect(sureOf({ level: 'medium', confidence: 0.8, against: 'medium' })).toBe('80% sure medium is right')
+    expect(sureOf({ level: 'low', confidence: 0.75, against: 'high' })).toBe('75% sure high is too high')
+    expect(sureOf({ level: 'high', confidence: 0.6 })).toBe('60% sure')
     // Percentages and odd keys normalise; nothing usable is undefined.
     expect(spreadOf({ High: 60, medium: 40, bogus: 5 })).toEqual({ high: 0.6, medium: 0.4 })
     expect(spreadOf({ high: 0 })).toBeUndefined()

@@ -470,7 +470,7 @@ export const classifierPrompt = (transcript: string, hint?: string, instructions
 
 export type Decision =
   | { decision: 'undecided' }
-  | { decision: 'lock'; level: Level; reason: string; why?: string; confidence?: number; spread?: Spread }
+  | { decision: 'lock'; level: Level; reason: string; why?: string; confidence?: number; spread?: Spread; against?: Level }
 
 /**
  * Reads the classifier's reply: the first `{...}` in it, so a reply fenced
@@ -576,7 +576,7 @@ export function spreadOf(value: unknown): Spread | undefined {
  * on the level it was sure was wrong. With no level in force known, the
  * confidence is the median level's own probability.
  */
-export function judgeSpread(spread: Spread, inForce: Level | undefined, offered: readonly Level[] = levelsUpTo()): { level: Level; confidence: number } {
+export function judgeSpread(spread: Spread, inForce: Level | undefined, offered: readonly Level[] = levelsUpTo()): { level: Level; confidence: number; against?: Level } {
   const mass = offered.map(() => 0)
   for (const level of LEVELS) {
     const p = spread[level]
@@ -597,7 +597,7 @@ export function judgeSpread(spread: Spread, inForce: Level | undefined, offered:
   const up = mass.slice(ref + 1).reduce((a, b) => a + b, 0)
   const down = mass.slice(0, ref).reduce((a, b) => a + b, 0)
   const confidence = at > ref ? up : at < ref ? down : 1 - Math.max(up, down)
-  return { level, confidence: Math.round(confidence * 1000) / 1000 }
+  return { level, confidence: Math.round(confidence * 1000) / 1000, against: offered[ref] as Level }
 }
 
 /** A spread as text, lowest level first, levels with 1% or more: `medium 10%, high 50%, xhigh 40%`. */
@@ -973,6 +973,8 @@ export type VerdictRow = {
   why?: string
   /** The check's probability for each level, when it gave one. */
   spread?: Spread
+  /** The level in force the spread was judged against. */
+  against?: Level
   outcome: string
   /** A first check that carried the session's instructions (CLAUDE.md, rules, memory), to learn whether they help. */
   withInstructions?: boolean
@@ -1033,12 +1035,17 @@ export function withVerdictRow(ledger: SpendLedger, row: VerdictRow): SpendLedge
  * Sets what came of a verdict (the answer to its question): the one checked at `at`, else the newest. A spread
  * judged later (at the first request) also sets the level and confidence it was judged to.
  */
-export function withVerdictOutcome(ledger: SpendLedger, outcome: string, at?: number, judged?: { level: Level; confidence?: number }): SpendLedger {
+export function withVerdictOutcome(ledger: SpendLedger, outcome: string, at?: number, judged?: { level: Level; confidence?: number; against?: Level }): SpendLedger {
   const verdicts = ledger.verdicts ?? []
   let index = at === undefined ? -1 : verdicts.findLastIndex(v => v.at === at)
   if (index < 0) index = verdicts.length - 1
   const row = verdicts[index]
-  const update = { outcome, ...(judged ? { level: judged.level } : {}), ...(judged?.confidence !== undefined ? { confidence: judged.confidence } : {}) }
+  const update = {
+    outcome,
+    ...(judged ? { level: judged.level } : {}),
+    ...(judged?.confidence !== undefined ? { confidence: judged.confidence } : {}),
+    ...(judged?.against ? { against: judged.against } : {}),
+  }
   return row ? { ...ledger, verdicts: verdicts.map((v, i) => (i === index ? { ...row, ...update } : v)) } : ledger
 }
 
@@ -1204,7 +1211,8 @@ export type Phase = 'undecided' | 'locked'
 /** A check's probability for each level, normalised to sum to 1. */
 export type Spread = Partial<Record<Level, number>>
 
-export type Proposal = { level: Level; reason: string; why?: string; confidence?: number; spread?: Spread; checkedAt?: number }
+/** `against`: the level in force the spread was judged against, which `confidence` is relative to. */
+export type Proposal = { level: Level; reason: string; why?: string; confidence?: number; spread?: Spread; against?: Level; checkedAt?: number }
 
 /** A question open about a verdict: use the router's level, or keep the picker's (unknown when no request has gone out yet). */
 export type Asking = Proposal & { picker?: Level }
@@ -1440,7 +1448,7 @@ export function routeReport(state: RouterState, decideWithin: number, inForce?: 
   } else if (state.pending) {
     lines.push(`Deciding. The last check suggested ${state.pending.level} (${state.pending.reason}). If that isn't your setting, you'll be asked before Claude carries on.`)
   } else if (leaning && !state.gaveUp) {
-    lines.push(`Deciding. The last check leaned ${leaning.level} but was only ${percent(leaning.confidence ?? 0)} sure, so it checks again after your next prompt. Until then ${setting} applies.`)
+    lines.push(`Deciding. The last check leaned ${leaning.level} but was only ${sureOf(leaning)}, so it checks again after your next prompt. Until then ${setting} applies.`)
   } else {
     lines.push(`Deciding. The router checks each prompt until the task is clear, and until then ${setting} applies.`)
   }
@@ -1459,7 +1467,7 @@ export function routeReport(state: RouterState, decideWithin: number, inForce?: 
     }
     lines.push(`Checks this session: ${diagnostics.calls}${diagnostics.checkModel ? `, on ${diagnostics.checkModel}` : ''}.`)
     if (verdict) {
-      const sure = verdict.decision.decision === 'lock' && verdict.decision.confidence !== undefined ? `, ${percent(verdict.decision.confidence)} sure` : ''
+      const sure = verdict.decision.decision === 'lock' && verdict.decision.confidence !== undefined ? `, ${sureOf(verdict.decision)}` : ''
       const spread = verdict.decision.decision === 'lock' && verdict.decision.spread ? ` Spread: ${spreadText(verdict.decision.spread)}` : ''
       const said = verdict.decision.decision === 'lock' ? `${verdict.decision.level}${sure} (${verdict.decision.reason}).${spread}` : 'no clear task yet.'
       const took = diagnostics.lastReadMs === undefined ? '' : `, took ${(diagnostics.lastReadMs / 1000).toFixed(1)}s`
@@ -1608,6 +1616,19 @@ export function noticeActions(allowOff = true, setting?: Level, from?: Level): B
   return actions
 }
 
+/**
+ * How sure a judged check was, in words: `60% sure medium is too low`, `80% sure
+ * medium is right`, or just `60% sure` when the level it was judged against is
+ * unknown.
+ */
+export function sureOf(proposal: Pick<Proposal, 'level' | 'confidence' | 'against'>): string {
+  const pct = percent(proposal.confidence ?? 0)
+  const { against, level } = proposal
+  if (!against) return `${pct} sure`
+  if (against === level) return `${pct} sure ${against} is right`
+  return `${pct} sure ${against} is too ${LEVELS.indexOf(level) > LEVELS.indexOf(against) ? 'low' : 'high'}`
+}
+
 /** A check that picked a level but wasn't sure enough to act on it. */
 export function leaningOf(decision: Decision | undefined, threshold: number): Proposal | undefined {
   return decision?.decision === 'lock' && decision.confidence !== undefined && !isConfident(decision, threshold) ? decision : undefined
@@ -1628,7 +1649,7 @@ export function bandHeadline(state: RouterState, context: { setting?: Level; lea
   if (state.phase === 'locked') return `Effort router: ${label} for this session (${state.reason ?? 'router'}).${state.why ? ` ${state.why}` : ''}`
   if (state.gaveUp) return `Effort router: stopped checking (no clear task yet). ${yours}.`
   const leaning = context.leaning
-  const leaned = leaning ? ` The last check leaned ${leaning.level} but was only ${percent(leaning.confidence ?? 0)} sure.` : ''
+  const leaned = leaning ? ` The last check leaned ${leaning.level} but was only ${sureOf(leaning)}.` : ''
   return `Effort router: undecided. ${yours} until the task is clear.${leaned}`
 }
 

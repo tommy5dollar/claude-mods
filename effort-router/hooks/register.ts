@@ -717,6 +717,9 @@ async function decideAtStep($: EngineInterface, id: string, session: Session, se
   const waiting = session.state.pending
   if (unjudged(waiting) && isLevel(picker)) {
     const judged = { ...waiting, ...judgeSpread(waiting.spread, picker, levelsFor(settings)) }
+    if (session.verdict?.decision.decision === 'lock' && session.verdict.at === waiting.checkedAt) {
+      session.verdict = { ...session.verdict, decision: { ...session.verdict.decision, level: judged.level, confidence: judged.confidence, against: judged.against } }
+    }
     const sure = isConfident(judged, settings.confidence)
     const consent = await consentFor($, settings)
     if (settings.showChecks) {
@@ -992,6 +995,7 @@ function recordVerdict($: EngineInterface, session: Session, check: Check, outco
         ...(proposal ? { reason: proposal.reason } : {}),
         ...(proposal?.why ? { why: proposal.why } : {}),
         ...(proposal?.spread ? { spread: proposal.spread } : {}),
+        ...(proposal?.against ? { against: proposal.against } : {}),
         outcome,
         ...(check.withInstructions !== undefined ? { withInstructions: check.withInstructions } : {}),
       }),
@@ -1000,7 +1004,7 @@ function recordVerdict($: EngineInterface, session: Session, check: Check, outco
 }
 
 /** What came of a verdict (its question's answer), found by when its check ran. */
-function recordOutcome($: EngineInterface, outcome: string, checkedAt: number | undefined, judged?: { level: Level; confidence?: number }): void {
+function recordOutcome($: EngineInterface, outcome: string, checkedAt: number | undefined, judged?: { level: Level; confidence?: number; against?: Level }): void {
   void recordSpend($, ledger => withVerdictOutcome(ledger, outcome, checkedAt, judged))
 }
 
@@ -1139,7 +1143,7 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
     case 'report':
       return spendReportFor($, id, session, command.period)
     case 'status':
-      return routeReport(view(session), settings.decideWithin, session.lastSent, {
+      return routeReport(view(session), settings.decideWithin, settingOf(session) ?? session.lastSent, {
         now: await $.clock.now().catch(() => Date.now()),
         calls: Math.max(session.calls, (await spendOf($, id, session)).ledger.reads.reduce((n, r) => n + r.calls, 0)), // the ledger survives a resume
         verdict: session.verdict,
