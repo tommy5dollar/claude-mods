@@ -256,6 +256,7 @@ Start a new session (or restart the Desktop app) after installing.
 - **Subagent levels are kept in memory.** After a restart, a subagent still running from before takes the main thread's level.
 - **The model isn't told its level.** Adding a note to the system prompt would break the prompt cache.
 - **The spend report starts at 0.9.0**, so sessions from before it aren't in it. A request with no reported usage isn't counted. Days are UTC.
+- **In the Desktop app a new session loads mods with its first message.** Until you send something there is no footer and `/er` isn't available. That first message is assessed like any other.
 - **The footer and band draw in the terminal and the Desktop app.** VS Code and `-p` run the router without them, and `/er` is the control there.
 
 ## Development

@@ -283,7 +283,7 @@ after the change, and every request since has run at xhigh (`perTurnEffort` in t
 
 Load the build with `claude --plugin-dir <path>/effort-router` (terminal) or in the Desktop Code tab, with the effort picker at Medium, in a fresh session in a scratch repo. With a debug log, `grep "effort-router: " <log>` shows each assessment and each step as `effort <arrived> -> <sent>`.
 
-1. Footer: before any prompt it reads `🔓 medium ○` beside the pickers. Check the emoji line up with the text in the terminal (the fallback, if not, is the words `unlocked`, `locked`, `off`).
+1. Footer: in the terminal it reads `🔓 medium ○` before any prompt. Desktop loads mods only with a new session's first message (verified 2026-10-05), so there it appears after the first prompt, as `🔓 medium ◔`. Check the emoji line up with the text in the terminal (the fallback, if not, is the words `unlocked`, `locked`, `off`).
 2. Typeahead: typing `/eff` lists `/effort-router` beside `/effort`, and `/er` is listed as its short form.
 3. Band: pressing the footer, or `/er`, opens the band with nothing printed in the transcript. The buttons read `1 Hide  2 Lock at medium  3 Turn off  4 Assess`, Assess dim. Pressing `4` says `It assesses before your next prompt anyway.` In Desktop, Hide is the panel's close control.
 4. A move: type "the checkout total is wrong when a coupon expires mid-session, fix it". The footer reads `🔓 assessing…` briefly, then the transcript shows a dim `Effort router: assessed, medium to high (...)` and the footer `🔓 high ◔`. The step logs `effort medium -> high`. The Desktop picker still reads Medium.
