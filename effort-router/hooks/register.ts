@@ -203,7 +203,7 @@ const FALLBACK_RULES =
 
 const HUMAN_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
 /** Sent with each telemetry record, so a collector can tell versions apart. Keep in step with plugin.json. */
-const VERSION = '0.17.1'
+const VERSION = '0.17.2'
 const COMMANDS = ['effort-router', 'er']
 
 function settingsOf(options: PluginOptions): Settings {
@@ -334,6 +334,23 @@ function viewOf(session: Session, settings: Settings): View {
     assessing: session.assessing,
     subagents: routed,
   }
+}
+
+/**
+ * Loads the session the process is in now and draws it: at start, and after a resume or /clear moves the process to
+ * another session.
+ */
+async function prime($: EngineInterface): Promise<void> {
+  const { session } = await sessionOf($)
+  await modelOf($, session)
+  // A guess at your setting until a request shows it, for drawing only. The settings file's effortLevel
+  // doesn't apply to Opus 5.5 (Claude Code's model-config docs), so it isn't used there.
+  if (session.picker === undefined && supportedModel(session.model)?.id !== 'claude-opus-5-5') {
+    const configured = (await $.settings.read().catch(() => ({}))) as { effortLevel?: unknown }
+    if (isLevel(configured.effortLevel)) session.picker = configured.effortLevel
+  }
+  await saveSpend($, session) // a first sighting's state
+  show($)
 }
 
 // --- showing, saving and saying ---------------------------------------------------------
@@ -1013,20 +1030,27 @@ export function register(on: On, options: PluginOptions): void {
           immediate: true,
         }).catch((error: unknown) => $.ui.log(`effort-router: /${name} not registered: ${String(error)}`, { to: 'debug' }))
       }
-      const { session } = await sessionOf($)
-      await modelOf($, session)
-      // A guess at your setting until a request shows it, for drawing only. The settings file's effortLevel
-      // doesn't apply to Opus 5.5 (Claude Code's model-config docs), so it isn't used there.
-      if (session.picker === undefined && supportedModel(session.model)?.id !== 'claude-opus-5-5') {
-        const configured = (await $.settings.read().catch(() => ({}))) as { effortLevel?: unknown }
-        if (isLevel(configured.effortLevel)) session.picker = configured.effortLevel
-      }
-      await saveSpend($, session) // a first sighting's state
-      show($)
+      await prime($)
     } catch (error) {
       $.ui.log(`effort-router: start failed: ${String(error)}`, { to: 'debug' })
     }
     return next(e)
+  })
+
+  // A resume or /clear inside a running process goes on under another session id, and no session.start fires for
+  // it. Without this the footer kept drawing the session that ended until something else redrew it.
+  on('session.end', async ($, e, next) => {
+    const result = await next(e)
+    if (e.reason === 'resume' || e.reason === 'clear') {
+      const again = () => void prime($).catch((error: unknown) => $.ui.log(`effort-router: resume failed: ${String(error)}`, { to: 'debug' }))
+      try {
+        $.clock.after(50, again)
+        $.clock.after(1000, again)
+      } catch {
+        // no timers: the next redraw picks the new session up
+      }
+    }
+    return result
   })
 
   for (const name of COMMANDS) {

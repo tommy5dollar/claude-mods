@@ -780,11 +780,31 @@ describe('effort-router', () => {
         event: 'api_request',
         attributes: {
           effort: 'high', model: 'claude-sonnet-5-5',
-          'effort_router.version': '0.17.1', 'effort_router.status': 'unlocked', 'effort_router.setting': 'medium', 'effort_router.level': 'high',
+          'effort_router.version': '0.17.2', 'effort_router.status': 'unlocked', 'effort_router.setting': 'medium', 'effort_router.level': 'high',
         },
       })
       // Other records go out untouched.
       expect(records[1]).toEqual({ event: 'user_prompt', attributes: { effort: 'high', model: 'claude-sonnet-5-5' } })
+    })
+
+    test('a resume inside a running process redraws the footer for the resumed session', async ($, on) => {
+      const world = worldOf(on, HIGH, {}, HOME)
+      // The engine's end step: the process goes on under the resumed session.
+      on('session.end', ($, e) => {
+        world.id = 'session-2'
+        return { sessionId: e.sessionId }
+      })
+      await $.session.start(STARTED)
+      const footer = await mountFooter($)
+      expect((await footerOf(footer)).shown).toBe('🔓 medium ○')
+      // /resume: the process goes on under the resumed session, which was locked at low. No session.start fires.
+      world.files['/home/t/.claude/effort-router/spend/session-2.json'] = JSON.stringify({
+        version: 1, session: 'session-2', repo: 'scratch', rows: [], reads: [],
+        state: { status: 'locked', level: 'low', assessed: 5, lockedBy: 'router', lockedAfter: 5 }, setting: 'medium',
+      })
+      await $.session.end({ reason: 'resume', sessionId: 'session-1', resume: { id: 'session-1' } } as never)
+      await world.clock.advance(1000)
+      expect((await footerOf(footer)).shown).toBe('🔒 low')
     })
 
     test('the state is saved in the ledger at once, and a session carries on from it', async ($, on) => {

@@ -2,6 +2,11 @@
 
 ## effort-router
 
+### 0.17.2 (2026-10-05)
+
+- **Resuming inside a running session** (`/resume` in the terminal, or `/clear`) now redraws the footer for the
+  session you moved to. Before, it kept showing the old one (often just the padlock and circle) until you clicked it.
+
 ### 0.17.1 (2026-10-05)
 
 - **Telemetry for organisations.** When Claude Code's OpenTelemetry is on, each `api_request` record (which already

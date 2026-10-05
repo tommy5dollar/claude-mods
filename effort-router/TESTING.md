@@ -15,7 +15,7 @@ bun test                            # 87 tests. The 0.17 rule: settle moves to t
                                     # ignored); the transcript (the prompt being assessed in whole, outside the cap), reply
                                     # parsing, the classifier frame, $defaults and settings rule layers (no enforce),
                                     # subagent reads, routing and reports, agent definitions, the spend ledger and report
-claude plugin test .                # 59 tests in the engine's kit: the first prompt assessed by a separate call with the
+claude plugin test .                # 60 tests in the engine's kit: the first prompt assessed by a separate call with the
                                     # instructions and judged at the first request; later prompts fork and are judged against
                                     # the level running; an unsure assessment stays; no clear task still counts; the lock
                                     # after the window; a move on the last prompt; the confidence option; a picker change

@@ -297,6 +297,9 @@ and a general-purpose subagent was `agent:builtin:general-purpose`. Check the va
 
 ## Known limits
 
+- **Claude Code's own "with medium effort" line shows your setting, not the routed level.** It's built from the
+  effort setting, not from the request. The request still goes out at the routed level: Claude Code's own telemetry
+  records it there (see [Telemetry](#telemetry-for-organisations)). Trust the footer.
 - **The Desktop app's effort picker never changes.** The app owns it and nothing a mod can call sets it. Requests still go out at the routed level, so trust the footer.
 - **The router doesn't run `/effort`**, because in the terminal that also saves the level as your default for new sessions.
 - **The first assessment can't share the prompt cache.** The engine offers no way to fork before the first response, and a separate call can't carry Claude Code's system prompt or tools. It pays for your instructions and the prompt once per session.
