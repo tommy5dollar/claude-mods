@@ -9,6 +9,10 @@ and cheapest, up or down. Then the level locks for the rest of the session. Each
 It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the terminal and in the Desktop app's Code tab. It requires
 Claude Code 2.1.286 or later.
 
+In the Desktop app, go to Customize, then Plugins, Add marketplace, Add from a repository, and enter
+`tommy5dollar/effort-router`. Then in a Code tab session, click **+** next to the prompt box, then Plugins, Add plugin,
+and install effort-router. In the terminal:
+
 ```
 claude plugin marketplace add tommy5dollar/effort-router
 claude plugin install effort-router@tommy5dollar
