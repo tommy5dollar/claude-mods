@@ -5,84 +5,85 @@ import { describe, expect, test } from 'bun:test'
 
 import {
   DEFAULT_TRIM,
+  GLYPH,
+  ROUTE_USAGE,
   SUPPORTED_NAMES,
-  confidenceOf,
-  conversationTokens,
-  forkPrompt,
-  clampLevel,
-  checkLine,
-  spreadText,
-  judgeSpread,
-  spreadOf,
-  levelsBetween,
-  levelsUpTo,
-  subagentForkPrompt,
-  isConfident,
-  modelName,
-  onModel,
-  supportedModel,
-  withVerdictOutcome,
-  withVerdictRow,
-  afterBudget,
   appliedLevel,
+  bandActions,
+  bandHeadline,
+  capLines,
+  certaintyOf,
+  clampLevel,
   classifierPrompt,
   classifierSystem,
   composeRules,
-  footerLabel,
-  bandActions,
-  bandHeadline,
-  sureOf,
-  consentOf,
-  effortQuestion,
-  freshState,
-  lockReason,
-  noticeActions,
-  noticeHeadline,
-  stepDecision,
-  lockedAt,
-  parseDecision,
-  parseRoute,
-  restored,
-  routeReport,
-  ruleLayers,
-  settingsRulesOf,
-  STARTER_RULES,
-  trimTranscript,
-  turnedOff,
-  turnedOn,
-  wantsRead,
-  withVerdict,
-  withQuestionAnswer,
-  capLines,
-  renderTranscript,
-  firstSighting,
-  humanPromptCount,
-  withSaved,
-  questionText,
-  ago,
-  SUBAGENT_CONTRACT,
-  agentFileDefinition,
+  confidenceNow,
+  confidenceOf,
+  dayOf,
   definitionEffort,
   definitionFor,
+  emptyLedger,
+  firstSighting,
+  footerLabel,
+  forkPrompt,
+  freshState,
   frontmatterOf,
-  settingsAgentDefinitions,
-  SUBAGENT_FRAME,
-  capBrief,
+  humanPromptCount,
+  isConfident,
+  judgeSpread,
+  lastAssessmentLine,
+  levelsUpTo,
+  lockedByYou,
+  message,
+  modelName,
+  offeredLevels,
+  onModel,
   parentLevel,
+  parseDecision,
+  parseLedger,
+  parseRoute,
   parseSubagentReply,
+  progressGlyph,
+  questionText,
+  renderTranscript,
+  restored,
+  routeReport,
   routesSubagents,
+  ruleLayers,
+  savedOf,
+  settingsAgentDefinitions,
+  settingsRulesOf,
+  settle,
+  spendReport,
+  spreadOf,
+  spreadText,
+  subagentForkPrompt,
+  subagentLine,
   subagentPrompt,
   subagentReport,
   subagentSystem,
-  type TranscriptMessage,
-  dayOf,
-  emptyLedger,
-  parseLedger,
-  spendReport,
+  supportedModel,
   tokens,
+  trimTranscript,
+  turnedOff,
+  turnedOnLocked,
+  turnedOnUnlocked,
+  unlocked,
+  wantsAssessment,
+  withQuestionAnswer,
   withRead,
   withSpend,
+  withVerdictOutcome,
+  withVerdictRow,
+  agentFileDefinition,
+  ago,
+  capBrief,
+  SUBAGENT_CONTRACT,
+  SUBAGENT_FRAME,
+  type RouterState,
   type SpendLedger,
+  type TranscriptMessage,
+  type View,
 } from '../hooks/policy'
 
 describe('trimTranscript', () => {
@@ -144,7 +145,7 @@ describe('the classifier input cap', () => {
     }
     messages.push({ role: 'assistant', text: 'Which one: 1. full rewrite or 2. minimal patch?' })
     const out = renderTranscript(messages, '2', { ...DEFAULT_TRIM, totalChars: 3000 })
-    expect(out.sentChars).toBeLessThanOrEqual(3000)
+    expect(out.sentChars).toBeLessThanOrEqual(3000 + 'USER: 2'.length + 1) // the prompt being assessed is outside the cap
     expect(out.fullChars).toBeGreaterThan(18_000)
     expect(out.omitted).toBeGreaterThan(0)
     const lines = out.text.split('\n')
@@ -162,6 +163,13 @@ describe('the classifier input cap', () => {
 
   test('the default cap is 24k characters', () => {
     expect(DEFAULT_TRIM.totalChars).toBe(24_000)
+  })
+
+  test('the prompt being assessed goes in whole, outside the cap: a long dictated brief matters most', () => {
+    const brief = 'Build the whole thing. '.repeat(2000) // 46k characters, past both the cap and the per-prompt cap
+    const out = renderTranscript([{ role: 'user', text: 'earlier' }], brief, DEFAULT_TRIM)
+    expect(out.text).toBe(`USER: earlier\nUSER: ${brief.trim()}`)
+    expect(trimTranscript([], brief)).toBe(`USER: ${brief.trim()}`)
   })
 })
 
@@ -258,12 +266,10 @@ describe('composeRules ($defaults layering)', () => {
     expect(composeRules([D, { source: 'user', text: '$defaults\nUSER' }, { source: 'project', text: 'P' }]).text).toBe('P')
   })
 
-  test('marker must be the whole line; CRLF ok; empty files and comment-only starter change nothing', () => {
+  test('marker must be the whole line; CRLF ok; empty files change nothing', () => {
     expect(composeRules([D, { source: 'user', text: 'see $defaults here' }]).text).toBe('see $defaults here')
     expect(composeRules([D, { source: 'user', text: 'A\r\n  $defaults  \r\nB' }]).text).toBe('A\nDEFAULTS\nB')
     expect(composeRules([D, { source: 'user', text: '   \n' }]).contributors).toHaveLength(1)
-    const starter = composeRules([D, { source: 'user', text: STARTER_RULES('user') }])
-    expect(starter.text).toBe('DEFAULTS')
   })
 
   test('the system prompt wraps the rules between the fixed frame and contract', () => {
@@ -271,35 +277,6 @@ describe('composeRules ($defaults layering)', () => {
     expect(system).toContain('<rules>\nMY RULES\n</rules>')
     expect(system).toContain('{"decision":"undecided"}')
   })
-})
-
-describe('parseRoute', () => {
-  const cases: [string, ReturnType<typeof parseRoute>][] = [
-    ['', { kind: 'suggest' }],
-    ['  ', { kind: 'suggest' }],
-    ['decide', { kind: 'suggest' }],
-    ['status', { kind: 'status' }],
-    ['OFF', { kind: 'off' }],
-    ['on', { kind: 'on' }],
-    ['this is a security review', { kind: 'suggest', hint: 'this is a security review' }],
-    ['keep it quick', { kind: 'suggest', hint: 'keep it quick' }],
-    ['off topic: just a quick question', { kind: 'suggest', hint: 'off topic: just a quick question' }],
-    ['rules', { kind: 'rules' }],
-    ['rules init', { kind: 'rules-init', scope: 'user' }],
-    ['rules init project', { kind: 'rules-init', scope: 'project' }],
-    ['rules critique', { kind: 'rules-critique' }],
-    ['rules are strict here', { kind: 'suggest', hint: 'rules are strict here' }],
-    // removed: reset and fix are now plain hints
-    ['reset', { kind: 'suggest', hint: 'reset' }],
-    ['report', { kind: 'report', period: 'week' }],
-    ['report session', { kind: 'report', period: 'session' }],
-    ['report MONTH', { kind: 'report', period: 'month' }],
-    ['report all', { kind: 'report', period: 'all' }],
-    ['report the bug in checkout', { kind: 'suggest', hint: 'report the bug in checkout' }],
-  ]
-  for (const [args, expected] of cases) {
-    test(`/route ${args}`, () => expect(parseRoute(args)).toEqual(expected))
-  }
 })
 
 describe('the classifier prompt', () => {
@@ -333,165 +310,7 @@ describe('the classifier prompt', () => {
   })
 })
 
-describe('state', () => {
-  const P_HIGH = { level: 'high' as const, reason: 'bug fix in existing code' }
-  const P_LOW = { level: 'low' as const, reason: 'minimal patch' }
-  const DECIDING = freshState()
-  const PENDING = withVerdict(DECIDING, P_HIGH)
-  const LOCKED = lockedAt(DECIDING, 'high', lockReason.router(P_HIGH))
-  const OFF = turnedOff(DECIDING)
-  const ASKING = { ...DECIDING, asking: { ...P_HIGH, picker: 'medium' as const } }
-
-  test('consent: ask and auto; the old names map onto them', () => {
-    expect(consentOf('ask')).toBe('ask')
-    expect(consentOf('auto')).toBe('auto')
-    expect(consentOf('confirm')).toBe('ask')
-    expect(consentOf('band')).toBe('ask')
-    expect(consentOf('apply')).toBe('auto')
-    expect(consentOf('none')).toBe('auto')
-    expect(consentOf('sometimes')).toBeUndefined()
-    expect(consentOf(undefined)).toBeUndefined()
-  })
-
-  test('a verdict waits for the next request; undecided clears it; locked or off is unchanged', () => {
-    expect(PENDING).toMatchObject({ mode: 'auto', phase: 'undecided', pending: P_HIGH })
-    expect(appliedLevel(PENDING)).toBeUndefined() // nothing applied until compared with the picker
-    expect(withVerdict(PENDING, P_LOW).pending).toEqual(P_LOW)
-    expect(withVerdict(PENDING, undefined).pending).toBeUndefined()
-    expect(withVerdict(DECIDING, undefined)).toBe(DECIDING)
-    expect(withVerdict(LOCKED, P_LOW)).toBe(LOCKED)
-    expect(withVerdict(OFF, P_LOW)).toBe(OFF)
-  })
-
-  test("the rule at a request: nothing waiting → nothing; the picker's level → agree; another level → ask", () => {
-    expect(stepDecision(DECIDING, 'medium')).toEqual({ kind: 'none' })
-    expect(stepDecision(PENDING, 'high')).toEqual({ kind: 'agree', proposal: P_HIGH })
-    expect(stepDecision(PENDING, 'medium')).toEqual({ kind: 'ask', asking: { ...P_HIGH, picker: 'medium' } })
-    expect(stepDecision(PENDING, undefined)).toEqual({ kind: 'none' }) // a model without effort: it keeps waiting
-    expect(stepDecision(PENDING, 32000)).toEqual({ kind: 'none' })
-    expect(stepDecision({ ...LOCKED, pending: P_LOW }, 'medium')).toEqual({ kind: 'none' })
-    expect(stepDecision({ ...OFF, pending: P_LOW }, 'medium')).toEqual({ kind: 'none' })
-  })
-
-  test('the question: one line with the reason, Use <level> / Keep <picker>; Not now when the picker is unknown', () => {
-    expect(effortQuestion(P_HIGH, 'medium')).toEqual({
-      text: 'Effort router: Bug fix in existing code. Use high effort instead of medium?',
-      options: ['Use high', 'Keep medium'],
-      between: [],
-      header: 'Effort',
-    })
-    expect(effortQuestion(P_LOW, undefined)).toEqual({ text: 'Effort router: Minimal patch. Use low effort?', options: ['Use low', 'Not now'], between: [], header: 'Effort' })
-  })
-
-  test('a lock stops reading and clears what was waiting; its reason says who chose', () => {
-    const locked = lockedAt({ ...PENDING, hint: 'h', asking: ASKING.asking }, 'medium', lockReason.kept({ ...P_HIGH, picker: 'medium' }))
-    expect(locked).toMatchObject({ mode: 'auto', phase: 'locked', level: 'medium' })
-    expect(locked.pending).toBeUndefined()
-    expect(locked.asking).toBeUndefined()
-    expect(locked.hint).toBeUndefined()
-    expect(locked.reason).toBe('your choice')
-    expect(lockReason.agreed(P_HIGH)).toBe('bug fix in existing code')
-    expect(lockReason.chosen(P_HIGH)).toBe('bug fix in existing code')
-    expect(wantsRead({ ...locked, prompts: 1 }, 6)).toBe(false)
-    expect(appliedLevel(LOCKED)).toBe('high')
-    expect(appliedLevel(OFF)).toBeUndefined()
-    expect(appliedLevel(ASKING)).toBeUndefined()
-  })
-
-  test('first sighting: earlier prompts count; past the budget the router is left off', () => {
-    expect(firstSighting(0, 6, true)).toEqual(freshState())
-    expect(firstSighting(4, 6, true)).toEqual({ ...freshState(), prompts: 4 })
-    expect(firstSighting(10, 6, true)).toMatchObject({ mode: 'picker', gaveUp: true, offReason: 'session started before the router' })
-    expect(footerLabel(firstSighting(10, 6, true)).text).toBe('off')
-    expect(firstSighting(10, 6, false)).toMatchObject({ mode: 'auto', phase: 'undecided', gaveUp: true })
-    expect(wantsRead({ ...firstSighting(10, 6, false), prompts: 11 }, 6)).toBe(false)
-    expect(
-      humanPromptCount([
-        { role: 'user', text: 'one' },
-        { role: 'assistant', text: 'ok' },
-        { role: 'user', text: '' }, // a tool result
-        { role: 'user', text: '<command-name>/effort</command-name>' },
-        { role: 'user', text: '[Request interrupted by user]' },
-        { role: 'user', text: 'two' },
-      ]),
-    ).toBe(2)
-  })
-
-  test('the decision budget; a waiting verdict is still asked before the router turns off', () => {
-    expect(wantsRead({ ...DECIDING, prompts: 1 }, 6)).toBe(true)
-    expect(wantsRead({ ...DECIDING, prompts: 6 }, 6)).toBe(true)
-    expect(wantsRead({ ...DECIDING, prompts: 7 }, 6)).toBe(false)
-    expect(wantsRead({ ...PENDING, prompts: 3 }, 6)).toBe(true)
-    expect(wantsRead({ ...OFF, prompts: 1 }, 6)).toBe(false)
-    expect(wantsRead({ ...DECIDING, prompts: 1, gaveUp: true }, 6)).toBe(false)
-
-    expect(afterBudget({ ...DECIDING, prompts: 5 }, 6, true)).toEqual({ ...DECIDING, prompts: 5 })
-    const off = afterBudget({ ...DECIDING, prompts: 6 }, 6, true)
-    expect(off).toMatchObject({ mode: 'picker', gaveUp: true, offReason: 'no clear task after 6 prompts' })
-    expect(footerLabel(off).text).toBe('no decision')
-    expect(bandHeadline(off)).toBe('Effort router: no decision (no clear task after 6 prompts). Your effort setting applies.')
-    const idle = afterBudget({ ...DECIDING, prompts: 6 }, 6, false)
-    expect(idle).toMatchObject({ mode: 'auto', phase: 'undecided', gaveUp: true })
-    expect(afterBudget(idle, 6, false)).toBe(idle) // settled: unchanged
-    expect(footerLabel(idle)).toEqual({ text: 'no decision', dim: true })
-
-    const waiting = afterBudget({ ...PENDING, prompts: 6 }, 6, true)
-    expect(waiting).toMatchObject({ mode: 'auto', pending: P_HIGH, gaveUp: true })
-    expect(wantsRead(waiting, 6)).toBe(false)
-    expect(afterBudget({ ...waiting, pending: undefined }, 6, true)).toMatchObject({ mode: 'picker' }) // dismissed: now it turns off
-    expect(afterBudget({ ...LOCKED, prompts: 9 }, 6, true)).toEqual({ ...LOCKED, prompts: 9 })
-  })
-
-  test('turn on and off clear what was waiting', () => {
-    expect(turnedOn({ ...OFF, prompts: 6, gaveUp: true, offReason: 'x' })).toMatchObject({ mode: 'auto', phase: 'undecided', prompts: 0, gaveUp: false, offReason: undefined })
-    expect(turnedOff(PENDING).pending).toBeUndefined()
-    expect(turnedOff(LOCKED)).toMatchObject({ mode: 'picker', level: undefined, offReason: undefined })
-  })
-
-  test('footer labels: undecided, high? only while asking, using high, no decision, off', () => {
-    expect(footerLabel(DECIDING)).toEqual({ text: 'undecided', dim: true })
-    expect(footerLabel(PENDING)).toEqual({ text: 'undecided', dim: true })
-    expect(footerLabel(OFF)).toEqual({ text: 'off', dim: true })
-    expect(footerLabel({ ...OFF, gaveUp: true, offReason: 'session started before the router' }).text).toBe('off') // not a give-up
-    expect(footerLabel(ASKING)).toEqual({ text: 'high?', color: 'yellow', dim: false })
-    expect(footerLabel({ ...LOCKED, asking: { ...P_LOW, picker: 'medium' } }).text).toBe('low?') // /route asking while locked
-    expect(footerLabel(LOCKED)).toEqual({ text: 'using high', color: 'yellow', dim: false })
-    expect(footerLabel(OFF)).toEqual({ text: 'off', dim: true })
-  })
-
-  test('the band: headline per state; Assess now or Reassess / Stop routing, or Start routing; the auto notice with Stop routing', () => {
-    const labels = (state: typeof DECIDING, allowOff = true, setting?: 'medium') => bandActions(state, allowOff, setting).map(a => a.label)
-    expect(labels(DECIDING, true, 'medium')).toEqual(['Assess now', 'Stop routing (back to medium)'])
-    expect(labels(LOCKED, true, 'medium')).toEqual(['Reassess now', 'Reassess with my next prompt', 'Stop routing (back to medium)'])
-    expect(labels(LOCKED)).toEqual(['Reassess now', 'Reassess with my next prompt', 'Stop routing'])
-    expect(labels(OFF)).toEqual(['Start routing'])
-    expect(labels(DECIDING, false)).toEqual(['Assess now'])
-    expect(labels(LOCKED, false)).toEqual(['Reassess now', 'Reassess with my next prompt'])
-    expect(parseRoute('next')).toEqual({ kind: 'next' })
-
-    expect(bandHeadline(LOCKED)).toBe('Effort router: using high for this session (bug fix in existing code).')
-    expect(bandHeadline({ ...LOCKED, why: 'A crash fix needs the code traced, but the scope is one function.' })).toBe(
-      'Effort router: using high for this session (bug fix in existing code). A crash fix needs the code traced, but the scope is one function.',
-    )
-    expect(bandHeadline(ASKING)).toBe('Effort router: high? Waiting for your answer.')
-    expect(bandHeadline(OFF)).toBe('Effort router: off. Your effort setting applies.')
-    expect(bandHeadline(DECIDING)).toBe('Effort router: undecided. Your effort setting applies until the task is clear.')
-    expect(bandHeadline(DECIDING, { setting: 'low' })).toBe('Effort router: undecided. Your effort setting (low) applies until the task is clear.')
-    expect(bandHeadline(DECIDING, { setting: 'low', leaning: { level: 'high', reason: 'r', confidence: 0.62, against: 'low' } })).toBe(
-      'Effort router: undecided. Your effort setting (low) applies until the task is clear. The last check leaned high but was only 62% sure low is too low.',
-    )
-    expect(bandHeadline(OFF, { setting: 'medium' })).toBe('Effort router: off. Your effort setting (medium) applies.')
-    expect(bandHeadline({ ...DECIDING, gaveUp: true })).toBe('Effort router: stopped checking (no clear task yet). Your effort setting applies.')
-
-    expect(noticeHeadline(P_HIGH)).toBe('Effort router: using high for this session (bug fix in existing code).')
-    expect(noticeHeadline({ ...P_HIGH, from: 'xhigh', why: 'Tracing the crash needs care.' })).toBe(
-      'Effort router: changed from xhigh to high for this session (bug fix in existing code). Tracing the crash needs care.',
-    )
-    expect(noticeActions(true, 'medium', 'medium').map(a => a.label)).toEqual(['OK', 'Stop routing (back to medium)']) // from your setting: no separate Go back
-    expect(noticeActions(true, 'medium', 'xhigh').map(a => a.label)).toEqual(['OK', 'Go back to xhigh', 'Stop routing (back to medium)'])
-    expect(noticeActions(false, 'medium', 'medium').map(a => a.label)).toEqual(['OK'])
-  })
-
+describe('spreads and replies', () => {
   test('a spread: the median level, and how sure the check is that the level in force is wrong in that direction', () => {
     // Torn between high and xhigh on medium: 90% sure medium is too low, so high.
     const torn = spreadOf({ low: 0.02, medium: 0.08, high: 0.5, xhigh: 0.4 }) as NonNullable<ReturnType<typeof spreadOf>>
@@ -511,10 +330,6 @@ describe('state', () => {
     const mac = { low: 0.03, medium: 0.37, high: 0.45, xhigh: 0.15 }
     expect(judgeSpread(mac, 'low')).toEqual({ level: 'high', confidence: 0.97, against: 'low' })
     expect(judgeSpread(mac, 'medium')).toEqual({ level: 'high', confidence: 0.6, against: 'medium' })
-    expect(sureOf({ level: 'high', confidence: 0.6, against: 'medium' })).toBe('60% sure medium is too low')
-    expect(sureOf({ level: 'medium', confidence: 0.8, against: 'medium' })).toBe('80% sure medium is right')
-    expect(sureOf({ level: 'low', confidence: 0.75, against: 'high' })).toBe('75% sure high is too high')
-    expect(sureOf({ level: 'high', confidence: 0.6 })).toBe('60% sure')
     // Percentages and odd keys normalise; nothing usable is undefined.
     expect(spreadOf({ High: 60, medium: 40, bogus: 5 })).toEqual({ high: 0.6, medium: 0.4 })
     expect(spreadOf({ high: 0 })).toBeUndefined()
@@ -524,18 +339,6 @@ describe('state', () => {
     const parsed = parseDecision('{"decision":"level","levels":{"medium":0.1,"high":0.5,"xhigh":0.4},"reason":"race condition fix"}')
     expect(parsed).toMatchObject({ decision: 'lock', level: 'high', reason: 'race condition fix', spread: { medium: 0.1, high: 0.5, xhigh: 0.4 } })
     expect(parsed.decision === 'lock' ? parsed.confidence : 'n/a').toBeUndefined() // judged later, against the level in force
-  })
-
-  test('the notice and the check line say how sure the check was that the old level was wrong', () => {
-    expect(noticeHeadline({ ...P_HIGH, from: 'medium', confidence: 0.9 })).toBe('Effort router: changed from medium to high for this session (bug fix in existing code, 90% sure medium was too low).')
-    const proposal = { level: 'high' as const, reason: 'bug fix', confidence: 0.9, spread: { medium: 0.1, high: 0.5, xhigh: 0.4 } }
-    expect(checkLine({ n: 2, of: 6, proposal, inForce: 'medium', threshold: 0.7, sure: true, consent: 'auto' })).toBe(
-      'Effort router: check 2 of 6: medium 10%, high 50%, xhigh 40%. 90% sure medium is too low, so moving to high.',
-    )
-    expect(checkLine({ n: 1, of: 6, proposal: { ...proposal, confidence: 0.6 }, inForce: 'medium', threshold: 0.7, sure: false, consent: 'auto' })).toBe(
-      'Effort router: check 1 of 6: medium 10%, high 50%, xhigh 40%. 60% sure medium is too low, below the 70% bar, so staying on medium.',
-    )
-    expect(checkLine({ n: 1, of: 6, inForce: 'medium', threshold: 0.7, sure: false, consent: 'auto' })).toBe('Effort router: check 1 of 6: no clear task yet, so staying on medium.')
   })
 
   test('a reply that stops before its last brace, or runs on after the object, still parses', () => {
@@ -551,72 +354,24 @@ describe('state', () => {
     })
     expect(classifierSystem('RULES')).toContain('"why":"<one or two sentences')
   })
-
-  test('reasons and status', () => {
-    expect(routeReport(afterBudget({ ...DECIDING, prompts: 6 }, 6, true), 6)).toStartWith('Off (no clear task after 6 prompts), so your effort setting applies. /route on turns it back on.')
-    expect(afterBudget({ ...DECIDING, prompts: 1 }, 1, true).offReason).toBe('no clear task after 1 prompt')
-    expect(afterBudget({ ...DECIDING, prompts: 6 }, 6, true, { level: 'high', reason: 'tax advice', confidence: 0.65 }).offReason).toBe(
-      'not sure enough after 6 prompts, last check high at 65%',
-    )
-    expect(routeReport(LOCKED, 6)).toStartWith('Using high for this session (bug fix in existing code). Subagents use it too.')
-    expect(routeReport(ASKING, 6)).toStartWith('high? Waiting for your answer: use high effort instead of medium (bug fix in existing code)?')
-    expect(routeReport(PENDING, 6, 'medium')).toStartWith("Deciding. The last check suggested high (bug fix in existing code). If that isn't your setting, you'll be asked before Claude carries on.")
-    expect(routeReport({ ...DECIDING, prompts: 2 }, 6, 'medium')).toContain('Prompts checked: 2 of up to 6.')
-    const report = routeReport({ ...DECIDING, prompts: 2 }, 6, 'medium', {
-      now: 100_000,
-      calls: 3,
-      consent: 'ask',
-      lastReadMs: 1240,
-      verdict: { at: 88_000, trigger: 'after a prompt', raw: '```json\n{"decision":"undecided"}\n```', decision: { decision: 'undecided' } },
-      error: { at: 100_000 - 5 * 60_000, text: 'Error: timeout' },
-      sent: { sentChars: 23_900, fullChars: 91_000, maxChars: 24_000, omitted: 210 },
-    })
-    expect(report).toContain("If that level isn't your setting, it asks you first (consent: ask).")
-    expect(report).toContain('Checks this session: 3.')
-    expect(report).toContain('Last check (after a prompt, 12s ago, took 1.2s): no clear task yet.')
-    expect(report).toContain('Last error (5m ago): Error: timeout')
-    expect(report).toContain("It read 23900 of the conversation's 91000 characters (limit 24000).")
-    expect(routeReport(DECIDING, 6, 'medium', { now: 0, calls: 1, sent: { sentChars: 80, fullChars: 80, maxChars: 24_000, omitted: 0 } })).not.toContain('It read')
-    expect(ago(0, 2 * 3600_000)).toBe('0s ago')
-    expect(ago(3 * 3600_000, 0)).toBe('3h ago')
-    expect(routeReport({ ...DECIDING, hint: 'keep it quick' }, 6)).toContain('Your hint: keep it quick')
-  })
-
-  test('saved state: a lock and off round-trip; a waiting verdict is not kept; old provisional and proposed come back deciding', () => {
-    expect(restored(withSaved(undefined, 's1', LOCKED, 1).s1)).toMatchObject({ mode: 'auto', phase: 'locked', level: 'high', reason: 'bug fix in existing code' })
-    const saved = restored(withSaved(undefined, 's2', ASKING, 1).s2)
-    expect(saved).toEqual(freshState())
-    const gaveUp = afterBudget({ ...DECIDING, prompts: 6 }, 6, true)
-    expect(restored(withSaved(undefined, 's3', gaveUp, 1).s3)).toMatchObject({ mode: 'picker', offReason: gaveUp.offReason })
-    expect(restored({ mode: 'auto', phase: 'provisional', level: 'high', reason: 'r', savedAt: 1 })).toEqual(freshState())
-    expect(restored({ mode: 'auto', phase: 'proposed', savedAt: 1 })).toEqual(freshState())
-    expect(restored({ mode: 'pinned', phase: 'locked', level: 'max', reason: 'you chose max' })).toMatchObject({ mode: 'auto', phase: 'locked', level: 'max' })
-    expect(restored({ mode: 'pinned', level: 'nope' })).toEqual(freshState())
-    let all: ReturnType<typeof withSaved> = {}
-    for (let i = 0; i < 105; i++) all = withSaved(all, `id${i}`, LOCKED, i)
-    expect(Object.keys(all)).toHaveLength(100)
-    expect(all.id0).toBeUndefined()
-  })
 })
 
 describe('settings-borne rules', () => {
-  test('reads pluginConfigs options under any marketplace key, then a top-level effortRouter object', () => {
-    expect(settingsRulesOf({ pluginConfigs: { 'effort-router@tommy-mods': { options: { rules: 'R', rulesMode: 'enforce', allowOff: false } } } }))
-      .toEqual({ rules: 'R', rulesMode: 'enforce', allowOff: false })
-    expect(settingsRulesOf({ effortRouter: { rules: 'TOP' } })).toEqual({ rules: 'TOP' })
-    expect(settingsRulesOf({ pluginConfigs: { 'other@x': { options: { rules: 'NO' } } } })).toEqual({})
-    expect(settingsRulesOf({ effortRouter: { rules: '  ', rulesMode: 'bogus', allowOff: 'no' } })).toEqual({})
-    expect(settingsRulesOf(undefined)).toEqual({})
+  test('reads rules from pluginConfigs options under any marketplace key, then a top-level effortRouter object', () => {
+    expect(settingsRulesOf({ pluginConfigs: { 'effort-router@tommy-mods': { options: { rules: 'R', rulesMode: 'enforce', allowOff: false } } } })).toBe('R')
+    expect(settingsRulesOf({ effortRouter: { rules: 'TOP' } })).toBe('TOP')
+    expect(settingsRulesOf({ pluginConfigs: { 'other@x': { options: { rules: 'NO' } } } })).toBeUndefined()
+    expect(settingsRulesOf({ effortRouter: { rules: '  ' } })).toBeUndefined()
+    expect(settingsRulesOf(undefined)).toBeUndefined()
   })
 
-  test('layer order and enforce', () => {
-    const base = { defaults: 'D', org: { rules: '$defaults\nO' }, userFile: { path: 'u.md', text: '$defaults\nU' }, projectSettings: '$defaults\nP' }
-    expect(composeRules(ruleLayers(base).layers).text).toBe('D\nO\nU\nP')
-    const enforced = ruleLayers({ ...base, org: { rules: '$defaults\nO', rulesMode: 'enforce' as const } })
-    expect(enforced.enforced).toBe(true)
-    expect(composeRules(enforced.layers).text).toBe('D\nO')
-    expect(ruleLayers({ defaults: 'D', userFile: { path: 'u.md', text: 'FILE' }, userSettings: 'SETTING' }).layers.map(l => l.text)).toEqual(['D', 'FILE'])
-    expect(ruleLayers({ defaults: 'D', userFile: { path: 'u.md', text: undefined }, userSettings: 'SETTING' }).layers.map(l => l.text)).toEqual(['D', 'SETTING'])
+  test('layer order: defaults, the organisation, you, the project. Nothing is enforced', () => {
+    const base = { defaults: 'D', org: '$defaults\nO', userFile: { path: 'u.md', text: '$defaults\nU' }, projectSettings: '$defaults\nP' }
+    expect(composeRules(ruleLayers(base)).text).toBe('D\nO\nU\nP')
+    expect(composeRules(ruleLayers({ ...base, userFile: { path: 'u.md', text: 'MINE ONLY' } })).text).toBe('MINE ONLY\nP') // a user can replace the organisation's
+    expect(ruleLayers(base)[1]?.source).toBe('managed settings')
+    expect(ruleLayers({ defaults: 'D', userFile: { path: 'u.md', text: 'FILE' }, userSettings: 'SETTING' }).map(l => l.text)).toEqual(['D', 'FILE'])
+    expect(ruleLayers({ defaults: 'D', userFile: { path: 'u.md', text: undefined }, userSettings: 'SETTING' }).map(l => l.text)).toEqual(['D', 'SETTING'])
   })
 })
 
@@ -686,7 +441,7 @@ describe('subagent reads', () => {
 
   test("the parent's level: the parent subagent's routed level, else the main level in use, else none", () => {
     const agents = new Map([['agent-1', { level: 'xhigh' as const, reason: 'security audit', subagentType: 'general-purpose', description: 'audit' }]])
-    const provisional = lockedAt(freshState(), 'high', 'router: bug fix')
+    const provisional = lockedByYou(freshState(), 'high')
     expect(parentLevel(provisional, agents)).toBe('high')
     expect(parentLevel(provisional, agents, 'agent-1')).toBe('xhigh')
     expect(parentLevel(provisional, agents, 'agent-unknown')).toBe('high') // it ran at the main level
@@ -694,17 +449,16 @@ describe('subagent reads', () => {
     expect(parentLevel(freshState(), agents, 'agent-1')).toBe('xhigh')
   })
 
-  test('routed unless the person turned the router off', () => {
+  test('routed unless you turned the router off', () => {
     expect(routesSubagents(freshState())).toBe(true)
-    expect(routesSubagents(firstSighting(10, 6, true))).toBe(true) // existing session: off, but by the router
-    expect(routesSubagents(afterBudget({ ...freshState(), prompts: 6 }, 6, true))).toBe(true) // no clear task: off, by the router
-    expect(routesSubagents(turnedOff(lockedAt(freshState(), 'high', 'router: r')))).toBe(false) // /route off, Revert, Turn off
-    expect(routesSubagents(turnedOn(turnedOff(freshState())))).toBe(true)
-    expect(routesSubagents(restored({ mode: 'picker' }))).toBe(false)
-    expect(routesSubagents(restored({ mode: 'picker', offReason: 'session started before the router' }))).toBe(true)
+    expect(routesSubagents(firstSighting(10, 5))).toBe(true) // started before the router: off, but not by you
+    expect(routesSubagents(turnedOff(freshState(), 'you'))).toBe(false)
+    expect(routesSubagents(turnedOff(freshState(), 'picker'))).toBe(false)
+    expect(routesSubagents(turnedOnUnlocked(turnedOff(freshState(), 'you')))).toBe(true)
+    expect(routesSubagents(lockedByYou(freshState(), 'high'))).toBe(true)
   })
 
-  test('/route status lists routed subagents, newest first, at most 10', () => {
+  test('/er status lists routed subagents, newest first, at most 10', () => {
     const agents = Array.from({ length: 12 }, (_, i) => ({ level: 'low' as const, reason: `reason ${i}`, subagentType: 'Explore', description: `task ${i}` }))
     const lines = subagentReport({ routing: 'on', agents })
     expect(lines[0]).toBe('Subagents: each gets its own level from its task.')
@@ -715,16 +469,8 @@ describe('subagent reads', () => {
     expect(subagentReport({ routing: 'setting', agents: [] })).toEqual(['Subagents: not routed (routeSubagents is off), so they use the session level.'])
     expect(subagentReport({ routing: 'user-off', agents: [] })[0]).toContain('they use your effort setting')
 
-    const locked = lockedAt(freshState(), 'high', 'router: bug fix')
-    expect(routeReport(locked, 6, 'high', { now: 0, calls: 1, subagents: { routing: 'on', agents: [] } }))
-      .toStartWith('Using high for this session (router: bug fix). Subagents get their own level.')
-    expect(routeReport(locked, 6)).toContain('Subagents use it too.')
   })
 
-  test("the organisation's routeSubagents is read from settings", () => {
-    expect(settingsRulesOf({ pluginConfigs: { 'effort-router@tommy-mods': { options: { routeSubagents: false } } } })).toEqual({ routeSubagents: false })
-    expect(settingsRulesOf({ effortRouter: { routeSubagents: 'no' } })).toEqual({})
-  })
 })
 
 describe('agent definitions that set their own effort', () => {
@@ -783,7 +529,7 @@ describe('agent definitions that set their own effort', () => {
       ['a', { level: 'low' as const, reason: 'r', subagentType: 't', description: 'd', byDefinition: true }],
       ['b', { level: 32000, reason: 'r', subagentType: 't', description: 'd', byDefinition: true }],
     ])
-    const provisional = lockedAt(freshState(), 'high', 'router: bug fix')
+    const provisional = lockedByYou(freshState(), 'high')
     expect(parentLevel(provisional, agents, 'a')).toBe('low')
     expect(parentLevel(provisional, agents, 'b')).toBe('high')
   })
@@ -856,7 +602,7 @@ describe('the spend ledger', () => {
       '  subagents, medium → low: 10 requests, 2.0k output tokens (avg 200, vs 1.0k for those left at medium)',
       '  main conversation, medium → high: 2 requests, 6.0k output tokens (avg 3.0k, vs 1.0k for those left at medium)',
       'Set by agent definitions: 1 request (low 1).',
-      "The router's own checks: 1, using 50 output and 4.0k input tokens.",
+      "The router's own assessments: 1, using 50 output and 4.0k input tokens.",
       'By repo (output tokens): mods 12k, employment 2.0k.',
       'No "saved" figure: the router lowers easy tasks and raises hard ones, so these averages can\'t show what a changed request would have cost.',
     ])
@@ -897,21 +643,15 @@ describe('0.10: confidence, models, size, verdicts', () => {
     expect(SUPPORTED_NAMES).toBe('Fable 5.1, Opus 5.5 and Sonnet 5.5')
   })
 
-  test('on an unsupported model the router stands aside: no level, no checks, off in the footer and band', () => {
-    const locked = lockedAt(freshState(), 'high', 'bug fix')
+  test('on an unsupported model the router stands aside: no level, no assessments, off in the footer and band', () => {
+    const locked: RouterState = { status: 'locked', level: 'high', assessed: 5, lockedBy: 'router' }
     const away = onModel(locked, 'claude-haiku-4-5-20251001')
     expect(onModel(locked, 'claude-opus-5-5')).toBe(locked)
     expect(appliedLevel(away)).toBeUndefined()
-    expect(wantsRead(onModel(freshState(), 'claude-opus-4-8'), 6)).toBe(false)
-    expect(footerLabel(away).text).toBe('off')
-    expect(bandHeadline(away)).toBe('Effort router: off on Haiku 4.5. It works with Fable 5.1, Opus 5.5 and Sonnet 5.5.')
-    expect(bandActions(away)).toEqual([])
-  })
-
-  test('first sighting: a conversation longer than the limit is left alone, whatever its prompt count', () => {
-    expect(firstSighting(1, 6, true, { tokens: 30_000, limit: 20_000 })).toMatchObject({ mode: 'picker', offReason: 'session started before the router' })
-    expect(firstSighting(1, 6, true, { tokens: 5_000, limit: 20_000 })).toMatchObject({ mode: 'auto', prompts: 1 })
-    expect(conversationTokens([{ role: 'user', text: 'x'.repeat(400) }, { role: 'assistant', text: '', toolUses: [{ tool: 'Read', input: { p: 'a' }, text: 'y'.repeat(380) }] }])).toBe(197) // (400 + 380 + 9) / 4
+    expect(wantsAssessment(onModel(freshState(), 'claude-opus-4-8'), 5)).toBe(false)
+    expect(footerLabel(away, VIEW).text).toBe('⏸️ medium')
+    expect(bandHeadline(away, VIEW)).toBe('Effort router: off on Haiku 4.5. It works with Fable 5.1, Opus 5.5 and Sonnet 5.5.')
+    expect(bandActions(away, VIEW).map(a => a.label)).toEqual(['Hide'])
   })
 
   test("the fork's message: the job, the rules, the model's notes, the last reply and the new message", () => {
@@ -926,18 +666,9 @@ describe('0.10: confidence, models, size, verdicts', () => {
     expect(forkPrompt({ rules: 'RULES', answered: '"Which platforms?"="Xero"' })).toContain('You asked the user questions, and they have just answered:\n<answers>\n"Which platforms?"="Xero"\n</answers>')
   })
 
-  test('levels: held to the highest level (xhigh unless set); the prompts offer no more; a jump of two offers the middle', () => {
+  test('levels: held to the highest level (xhigh unless set); the prompts offer no more', () => {
     expect(levelsUpTo()).toEqual(['low', 'medium', 'high', 'xhigh'])
     expect(levelsUpTo('max')).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
-    expect(levelsBetween('xhigh', 'medium')).toEqual(['high'])
-    expect(levelsBetween('low', 'xhigh')).toEqual(['medium', 'high']) // nearest the proposal first
-    expect(levelsBetween('xhigh', 'low')).toEqual(['high', 'medium'])
-    expect(levelsBetween('high', 'medium')).toEqual([])
-    expect(levelsBetween('high', undefined)).toEqual([])
-    expect(effortQuestion({ level: 'xhigh', reason: 'tricky migration' }, 'medium')).toEqual({ text: 'Effort router: Tricky migration. Use xhigh effort instead of medium?', options: ['Use xhigh', 'Use high', 'Keep medium'], between: ['high'], header: 'Effort' })
-    expect(effortQuestion({ level: 'high', reason: 'bug fix' }, 'medium').options).toEqual(['Use high', 'Keep medium'])
-    expect(effortQuestion({ level: 'low', reason: 'typo' }, 'xhigh').options).toEqual(['Use low', 'Use medium', 'Use high', 'Keep xhigh'])
-    expect(effortQuestion({ level: 'max', reason: 'x' }, 'low').options).toEqual(['Use max', 'Use xhigh', 'Use high', 'Keep low']) // four at most
     expect(clampLevel('max', ['low', 'medium', 'high'])).toBe('high')
     expect(clampLevel('low', ['medium', 'high', 'xhigh'])).toBe('medium')
     expect(clampLevel('medium', ['low', 'medium', 'high'])).toBe('medium')
@@ -951,17 +682,6 @@ describe('0.10: confidence, models, size, verdicts', () => {
   test('the separate check carries the instructions first when given', () => {
     expect(classifierPrompt('USER: hi', undefined, 'Use bun.')).toStartWith("The session's instructions (CLAUDE.md files, rules and memory), as its model sees them:\n<instructions>\nUse bun.\n</instructions>")
     expect(classifierPrompt('USER: hi')).toStartWith('Transcript so far')
-  })
-
-  test('status: a check below the bar says it leaned, and the bar is stated', () => {
-    const report = routeReport(freshState(), 6, 'medium', {
-      now: 10_000, calls: 1, consent: 'ask', threshold: 0.8, checkModel: "your session's model (Opus 5.5)",
-      verdict: { at: 5_000, trigger: 'after a prompt', raw: '', decision: { decision: 'lock', level: 'high', reason: 'bug fix', confidence: 0.6 } },
-    })
-    expect(report).toStartWith('Deciding. The last check leaned high but was only 60% sure, so it checks again after your next prompt.')
-    expect(report).toContain("It acts once a check is at least 80% sure. If that level isn't your setting, it asks you first (consent: ask).")
-    expect(report).toContain("Checks this session: 1, on your session's model (Opus 5.5).")
-    expect(report).toContain('Last check (after a prompt, 5s ago): high, 60% sure (bug fix).')
   })
 
   test('ledger: reads by kind, verdicts with their outcome, both survive a save; the report splits checks by kind', () => {
@@ -982,7 +702,223 @@ describe('0.10: confidence, models, size, verdicts', () => {
     expect(back).toEqual(ledger)
     ledger = withSpend(ledger, { day: '2026-10-04', caller: 'main', from: 'medium', to: 'high', usage })
     expect(spendReport([ledger], 'session', { today: '2026-10-04', session: 's1' })).toContain(
-      "The router's own checks: 4 (1 of a first prompt, 2 of a conversation, 1 for subagents), using 20 output and 400 input tokens.",
+      "The router's own assessments: 4 (1 of a first prompt, 2 of a conversation, 1 for subagents), using 20 output and 400 input tokens.",
     )
   })
 })
+
+const VIEW: View = { setting: 'medium', limit: 5, threshold: 0.7, offered: levelsUpTo() }
+const at = (state: Partial<RouterState>): RouterState => ({ ...freshState(), ...state })
+
+describe('0.17: assess the first prompts, move when sure, then lock', () => {
+  const sure = (level: 'low' | 'medium' | 'high' | 'xhigh', confidence: number) => ({ level, reason: 'bug fix', confidence, against: 'medium' as const })
+
+  test('a sure assessment moves to the median and stays unlocked; an unsure one stays', () => {
+    const moved = settle(freshState(), sure('high', 0.9), { threshold: 0.7, limit: 5, running: 'medium', counted: true })
+    expect(moved.state).toMatchObject({ status: 'unlocked', level: 'high', lastLevel: 'high', assessed: 1 })
+    expect(moved.moved).toEqual({ from: 'medium', to: 'high' })
+    expect(moved.outcome).toBe('moved to high')
+    expect(moved.locked).toBeUndefined() // a move never locks
+    const stayed = settle(freshState(), sure('high', 0.6), { threshold: 0.7, limit: 5, running: 'medium', counted: true })
+    expect(stayed.state).toMatchObject({ status: 'unlocked', assessed: 1 })
+    expect(stayed.state.level).toBeUndefined()
+    expect(stayed.outcome).toBe('stayed')
+    expect(settle(freshState(), undefined, { threshold: 0.7, limit: 5, running: 'medium', counted: true }).outcome).toBe('no clear task')
+  })
+
+  test('the last prompt of the window locks whatever is running; a move on it moves first', () => {
+    const last = settle(at({ assessed: 4, level: 'high' }), sure('high', 0.5), { threshold: 0.7, limit: 5, running: 'high', counted: true })
+    expect(last.state).toMatchObject({ status: 'locked', level: 'high', lockedBy: 'router', lockedAfter: 5 })
+    expect(last.locked).toBe('high')
+    const moveThenLock = settle(at({ assessed: 4 }), sure('xhigh', 0.95), { threshold: 0.7, limit: 5, running: 'medium', counted: true })
+    expect(moveThenLock.moved).toEqual({ from: 'medium', to: 'xhigh' })
+    expect(moveThenLock.locked).toBe('xhigh')
+    // Your setting runs: the lock takes it.
+    expect(settle(at({ assessed: 4 }), undefined, { threshold: 0.7, limit: 5, running: 'medium', counted: true }).state).toMatchObject({ status: 'locked', level: 'medium' })
+    // No level known yet: nothing to lock until a request shows it.
+    expect(settle(at({ assessed: 4 }), undefined, { threshold: 0.7, limit: 5, counted: true }).state.status).toBe('unlocked')
+  })
+
+  test('a manual assessment while locked moves the locked level and stays locked, without counting', () => {
+    const locked = at({ status: 'locked', level: 'medium', assessed: 5, lockedBy: 'router' })
+    const done = settle(locked, sure('high', 0.9), { threshold: 0.7, limit: 5, running: 'medium', counted: false })
+    expect(done.state).toMatchObject({ status: 'locked', level: 'high', assessed: 5 })
+    expect(done.moved).toEqual({ from: 'medium', to: 'high' })
+    expect(done.locked).toBeUndefined()
+  })
+
+  test('wanting an assessment: unlocked and within the window only', () => {
+    expect(wantsAssessment(freshState(), 5)).toBe(true)
+    expect(wantsAssessment(at({ assessed: 5 }), 5)).toBe(false)
+    expect(wantsAssessment(at({ status: 'locked', level: 'high' }), 5)).toBe(false)
+    expect(wantsAssessment(turnedOff(freshState(), 'you'), 5)).toBe(false)
+  })
+
+  test('a first sighting: earlier prompts count; with the window used up it starts off, as started before the router', () => {
+    expect(firstSighting(0, 5)).toEqual(freshState())
+    expect(firstSighting(3, 5)).toMatchObject({ status: 'unlocked', assessed: 3 })
+    expect(firstSighting(5, 5)).toEqual({ status: 'off', assessed: 0, offReason: 'mid-flow' })
+  })
+
+  test('lock, unlock, off and the two ways on; only a label that names a level changes it', () => {
+    const moved = at({ level: 'high', lastLevel: 'high', assessed: 2 })
+    expect(lockedByYou(moved, 'high')).toMatchObject({ status: 'locked', level: 'high', lockedBy: 'you', lockedAfter: 2 })
+    const open = unlocked(at({ status: 'locked', level: 'low', assessed: 5, lockedBy: 'router', lockedAfter: 5 }))
+    expect(open).toMatchObject({ status: 'unlocked', level: 'low', assessed: 0 }) // the locked level keeps running
+    expect(appliedLevel(open)).toBe('low')
+    const off = turnedOff(moved, 'you')
+    expect(off).toEqual({ status: 'off', assessed: 2, offReason: 'you', lastLevel: 'high' })
+    expect(appliedLevel(off)).toBeUndefined()
+    expect(turnedOnUnlocked(off)).toEqual({ status: 'unlocked', assessed: 0, lastLevel: 'high' })
+    expect(appliedLevel(turnedOnUnlocked(off))).toBeUndefined() // your setting runs
+    expect(turnedOnLocked(off)).toMatchObject({ status: 'locked', level: 'high' })
+    const never = turnedOff(freshState(), 'picker')
+    expect(turnedOnLocked(never)).toBe(never) // no level of its own: unchanged
+  })
+
+  test('levels offered: up to highestLevel, or up to your own setting when it is higher (a session at max)', () => {
+    expect(offeredLevels('xhigh')).toEqual(['low', 'medium', 'high', 'xhigh'])
+    expect(offeredLevels('xhigh', 'max')).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
+    expect(offeredLevels('high', 'medium')).toEqual(['low', 'medium', 'high'])
+    // Offered max, a spread leaning to max keeps max instead of always reading as too high.
+    expect(judgeSpread({ high: 0.1, xhigh: 0.9 }, 'max', offeredLevels('xhigh', 'max'))).toEqual({ level: 'xhigh', confidence: 1, against: 'max' })
+    expect(judgeSpread({ high: 0.05, xhigh: 0.15, max: 0.8 }, 'max', offeredLevels('xhigh', 'max'))).toMatchObject({ level: 'max', against: 'max' })
+  })
+
+  test('confidence now: one minus the larger side, against the level running', () => {
+    const spread = { low: 0.05, medium: 0.55, high: 0.35, xhigh: 0.05 }
+    expect(certaintyOf(spread, 'medium')).toBe(0.6)
+    expect(certaintyOf(spread, 'high')).toBe(0.4)
+    expect(confidenceNow(freshState(), { ...VIEW, last: { at: 1, spread, level: 'medium', against: 'medium', outcome: 'stayed' } })).toBe(0.6)
+    expect(confidenceNow(freshState(), VIEW)).toBeUndefined()
+  })
+})
+
+describe('0.17: the footer', () => {
+  const spread = { low: 0.05, medium: 0.55, high: 0.35, xhigh: 0.05 }
+  const last = { at: 1, spread, level: 'medium' as const, against: 'medium' as const, outcome: 'stayed' }
+
+  test('the status glyph, the level running, and the window as a circle that never fills', () => {
+    expect(footerLabel(freshState(), VIEW)).toEqual({ text: '🔓 medium ○', dim: false })
+    expect(footerLabel(at({ assessed: 1 }), VIEW).text).toBe('🔓 medium ◔')
+    expect(footerLabel(at({ assessed: 2 }), VIEW).text).toBe('🔓 medium ◑')
+    expect(footerLabel(at({ assessed: 3 }), VIEW).text).toBe('🔓 medium ◑')
+    expect(footerLabel(at({ assessed: 4, level: 'high' }), VIEW).text).toBe('🔓 high ◕')
+    expect(footerLabel(at({ status: 'locked', level: 'high', assessed: 5 }), VIEW)).toEqual({ text: '🔒 high', dim: false })
+    expect(footerLabel(turnedOff(freshState(), 'you'), VIEW)).toEqual({ text: '⏸️ medium', dim: true })
+    expect(footerLabel(freshState(), { ...VIEW, setting: undefined }).text).toBe('🔓 ○')
+    expect(footerLabel(freshState(), { ...VIEW, assessing: true }).text).toBe('🔓 assessing…')
+    expect([0, 1, 2, 3, 4].map(n => progressGlyph(n, 5))).toEqual(['○', '◔', '◑', '◑', '◕'])
+    expect(GLYPH).toEqual({ unlocked: '🔓', locked: '🔒', off: '⏸️' })
+  })
+
+  test('the word is dim while the last assessment is less than 50% sure of the level running', () => {
+    expect(footerLabel(freshState(), { ...VIEW, last }).dim).toBe(false) // 60% sure of medium
+    expect(footerLabel(at({ level: 'high' }), { ...VIEW, last }).dim).toBe(true) // 40% sure of high
+    expect(footerLabel(at({ status: 'locked', level: 'high' }), { ...VIEW, last }).dim).toBe(false) // locked: settled
+  })
+})
+
+describe('0.17: the band', () => {
+  const stayedSpread = { low: 0.05, medium: 0.55, high: 0.35, xhigh: 0.05 }
+  const stayed = { at: 1, spread: stayedSpread, level: 'medium' as const, against: 'medium' as const, reason: 'notes summary', outcome: 'stayed' }
+  const movedSpread = { medium: 0.1, high: 0.5, xhigh: 0.4 }
+  const moved = { at: 1, spread: movedSpread, level: 'high' as const, against: 'medium' as const, reason: 'bug fix touching three services', why: 'A crash fix needs the code traced.', outcome: 'moved to high' }
+
+  test('line 1 is the footer in words: status, the level and where it came from, confidence, what changes next', () => {
+    expect(bandHeadline(at({ assessed: 2 }), { ...VIEW, last: stayed })).toBe('Effort router: unlocked. Medium (your effort setting), 60% confidence. Locks after 3 more prompts.')
+    expect(bandHeadline(at({ assessed: 4, level: 'high' }), { ...VIEW, last: moved })).toBe('Effort router: unlocked. High (chosen by the router), 60% confidence. Locks after 1 more prompt.')
+    expect(bandHeadline(at({ status: 'locked', level: 'high', lockedBy: 'router', lockedAfter: 5 }), { ...VIEW, last: moved })).toBe('Effort router: locked. High (chosen by the router after 5 prompts), 60% confidence.')
+    expect(bandHeadline(lockedByYou(at({ assessed: 2 }), 'medium'), VIEW)).toBe('Effort router: locked. Medium (locked by you after 2 prompts).')
+    expect(bandHeadline(turnedOff(freshState(), 'picker'), { ...VIEW, setting: 'xhigh' })).toBe('Effort router: off. Xhigh (your effort setting). You changed the effort picker.')
+    expect(bandHeadline(firstSighting(9, 5), VIEW)).toBe('Effort router: off. Medium (your effort setting). This session started before the router.')
+    expect(bandHeadline(turnedOff(freshState(), 'you'), VIEW)).toBe('Effort router: off. Medium (your effort setting).')
+    expect(bandHeadline(freshState(), { ...VIEW, setting: undefined })).toBe('Effort router: unlocked. Your effort setting applies. Locks after 5 more prompts.')
+  })
+
+  test('line 2 is the last assessment: its spread, its larger side against the level it was judged against, what it did', () => {
+    expect(lastAssessmentLine(stayed, 0.7, levelsUpTo(), false)).toBe(
+      'Last assessment: low 5%, medium 55%, high 35%, xhigh 5% (notes summary). 40% sure medium is too low, so it stayed. It moves at 70%.',
+    )
+    expect(lastAssessmentLine(moved, 0.7, levelsUpTo(), false)).toBe(
+      'Last assessment: medium 10%, high 50%, xhigh 40% (bug fix touching three services). 90% sure medium was too low, so it moved to high.',
+    )
+    expect(lastAssessmentLine(moved, 0.7, levelsUpTo(), true)).toEndWith('so it moved to high. A crash fix needs the code traced.') // the why, when locked
+    expect(lastAssessmentLine({ at: 1, spread: { low: 0.8, medium: 0.2 }, level: 'low', against: 'high', outcome: 'moved to low' }, 0.7, levelsUpTo(), false)).toContain('100% sure high was too high, so it moved to low.')
+    expect(lastAssessmentLine({ at: 1, outcome: 'no clear task' }, 0.7, levelsUpTo(), false)).toBe('Last assessment: no clear task yet, so it stayed.')
+    expect(lastAssessmentLine(undefined, 0.7, levelsUpTo(), false)).toBeUndefined()
+    expect(subagentLine(4)).toBe('Subagents get their own level: 4 routed this session.')
+    expect(subagentLine(0)).toBeUndefined()
+  })
+
+  test('four fixed slots: Hide, the lock, on and off, Assess. Greyed slots stay in place and say why', () => {
+    const labels = (state: RouterState, view: View = VIEW) => bandActions(state, view).map(a => (a.disabled ? `(${a.label})` : a.label))
+    expect(labels(freshState())).toEqual(['Hide', 'Lock at medium', 'Turn off', '(Assess)'])
+    expect(labels(at({ level: 'high' }))).toEqual(['Hide', 'Lock at high', 'Turn off', '(Assess)'])
+    expect(labels(at({ status: 'locked', level: 'high' }))).toEqual(['Hide', 'Unlock', 'Turn off', 'Assess'])
+    expect(labels(turnedOff(at({ level: 'high' }), 'you'))).toEqual(['Hide', 'Turn on, locked at high', 'Turn on, unlocked', 'Turn on and assess'])
+    expect(labels(turnedOff(freshState(), 'picker'))).toEqual(['Hide', '(Turn on, locked)', 'Turn on, unlocked', 'Turn on and assess'])
+    expect(labels(freshState(), { ...VIEW, setting: undefined })).toEqual(['Hide', '(Lock)', 'Turn off', '(Assess)'])
+    expect(bandActions(freshState(), VIEW)[3]?.disabled).toBe('It assesses before your next prompt anyway.')
+  })
+})
+
+describe('0.17: messages, /er and saved state', () => {
+  test('one dim line per change', () => {
+    expect(message.moved('medium', 'high', 'bug fix touching three services')).toBe('Effort router: assessed, medium to high (bug fix touching three services).')
+    expect(message.locked('high')).toBe('Effort router: locked at high.')
+    expect(message.lockedByYou('high')).toBe('Effort router: you locked it at high.')
+    expect(message.unlocked()).toBe('Effort router: unlocked. Assessing again from your next prompt.')
+    expect(message.picker('xhigh')).toBe('Effort router: you changed the effort to xhigh, so routing is off.')
+    expect(message.off('medium')).toBe('Effort router: off. Your effort (medium) applies.')
+    expect(message.onLocked('high')).toBe('Effort router: on, locked at high.')
+    expect(message.onUnlocked()).toBe('Effort router: on, unlocked.')
+  })
+
+  test('/er: bare opens the band; explicit verbs; assess takes a hint; anything else is refused, not run as a hint', () => {
+    expect(parseRoute('')).toEqual({ kind: 'band' })
+    for (const verb of ['lock', 'unlock', 'on', 'off', 'status', 'rules'] as const) expect(parseRoute(` ${verb.toUpperCase()} `)).toEqual({ kind: verb })
+    expect(parseRoute('assess')).toEqual({ kind: 'assess' })
+    expect(parseRoute('assess this is a Security review now')).toEqual({ kind: 'assess', hint: 'this is a Security review now' })
+    expect(parseRoute('report')).toEqual({ kind: 'report', period: 'week' })
+    expect(parseRoute('report month')).toEqual({ kind: 'report', period: 'month' })
+    expect(parseRoute('report forever')).toEqual({ kind: 'unknown', text: 'report forever' })
+    expect(parseRoute('stauts')).toEqual({ kind: 'unknown', text: 'stauts' })
+    expect(parseRoute('lock now')).toEqual({ kind: 'unknown', text: 'lock now' })
+    expect(ROUTE_USAGE).toContain('/er is short for /effort-router')
+  })
+
+  test('/er status: the band lines, then the troubleshooting details', () => {
+    const last = { at: 5_000, spread: { medium: 0.6, high: 0.4 }, level: 'medium' as const, against: 'medium' as const, outcome: 'stayed' }
+    const report = routeReport(at({ assessed: 2, hint: 'security review' }), { ...VIEW, last }, {
+      now: 10_000, calls: 2, verdict: { at: 5_000, trigger: 'after a prompt', raw: '{"decision":"level"}', kind: 'fork' }, lastReadMs: 1500,
+      subagents: { routing: 'on', agents: [] },
+    })
+    expect(report).toStartWith('Effort router: unlocked. Medium (your effort setting), 60% confidence. Locks after 3 more prompts.\nLast assessment: medium 60%, high 40%.')
+    expect(report).toContain('Assessed 2 of 5 prompts.')
+    expect(report).toContain('Your hint for the next assessment: security review')
+    expect(report).toContain('Assessments this session: 2. It moves at 70%.')
+    expect(report).toContain('Last reply (after a prompt, a fork of the conversation, 5s ago, took 1.5s, judged against medium): {"decision":"level"}')
+    expect(report).toContain('Subagents: each gets its own level from its task.')
+  })
+
+  test('the state is saved in the ledger and comes back; anything malformed is ignored', () => {
+    const states: RouterState[] = [
+      freshState(),
+      at({ assessed: 3, level: 'high', lastLevel: 'high', hint: 'h' }),
+      at({ status: 'locked', level: 'high', assessed: 5, lockedBy: 'router', lockedAfter: 5, lastLevel: 'high' }),
+      turnedOff(at({ level: 'low' }), 'picker'),
+      firstSighting(7, 5),
+    ]
+    for (const state of states) expect(restored(savedOf(state))).toEqual(state)
+    expect(savedOf({ ...freshState(), pending: { level: 'high', reason: 'r' }, unsupported: 'Haiku 4.5' })).toEqual({ status: 'unlocked', assessed: 0 })
+    expect(restored(undefined)).toBeUndefined()
+    expect(restored({ mode: 'auto', phase: 'locked', level: 'high' })).toBeUndefined() // a pre-0.17 store entry
+    expect(restored({ status: 'locked' })).toEqual({ status: 'unlocked', assessed: 0 }) // locked with no level can't be
+    let ledger = emptyLedger('s1', 'repo')
+    ledger = { ...ledger, state: savedOf(states[2] as RouterState) }
+    expect(parseLedger(JSON.stringify(ledger))?.state).toEqual(savedOf(states[2] as RouterState))
+    expect(parseLedger(JSON.stringify({ ...ledger, state: { status: 'bogus' } }))?.state).toBeUndefined()
+  })
+})
+

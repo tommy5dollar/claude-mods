@@ -1,7 +1,7 @@
 {
   "name": "effort-router",
-  "version": "0.16.5",
-  "description": "Picks the reasoning effort each task needs. Your session's own model judges the task, knowing what each level can do on that model, and the router only acts once it's confident. When it disagrees with your effort setting it switches and says so once, or asks first if you set consent to ask. Subagents get their own level, chosen by the agent that starts them. /route report shows where your effort went.",
+  "version": "0.17.0",
+  "description": "Picks the reasoning effort each task needs. Your session's own model assesses each of your first prompts, knowing what each level can do on that model, and moves the level only when it's confident. Then it locks. Subagents get their own level, chosen by the agent that starts them. The footer shows what it's doing, and /er report shows where your effort went.",
   "author": {
     "name": "Tommy Long"
   },
@@ -9,63 +9,24 @@
   "homepage": "https://github.com/tommy5dollar/claude-mods/tree/main/effort-router",
   "repository": "https://github.com/tommy5dollar/claude-mods",
   "userConfig": {
-    "consent": {
-      "type": "string",
-      "title": "When the router disagrees with your effort setting",
-      "description": "\"auto\" (default): switch without asking, and show the band once with a button to stop routing. \"ask\": pause and ask which level to use.",
-      "required": false,
-      "default": "auto",
-      "options": [
-        "ask",
-        "auto"
-      ]
-    },
-    "classifyTimeoutMs": {
+    "promptsToAssess": {
       "type": "number",
-      "title": "Check timeout (ms)",
-      "description": "How long a prompt waits for the router's check (usually 2-5 seconds) before running at your setting.",
+      "title": "Prompts to assess",
+      "description": "How many of a session's first prompts the router assesses before it locks the level. Unlock in the band starts a fresh set.",
       "required": false,
-      "default": 15000
-    },
-    "classifierMaxChars": {
-      "type": "number",
-      "title": "Check size (characters)",
-      "description": "The most conversation text one check reads. Your first prompt and the latest messages are always included.",
-      "required": false,
-      "default": 24000
-    },
-    "decideWithin": {
-      "type": "number",
-      "title": "Prompts to check",
-      "description": "How many prompts the router checks before it gives up on a session with no clear task. /route checks again at any time.",
-      "required": false,
-      "default": 6
-    },
-    "classifierModel": {
-      "type": "string",
-      "title": "Check model",
-      "description": "\"session\" (default): your session's own model judges the task, reading the conversation as it sees it. Or name another supported model (opus, sonnet or fable) for checks that read a shortened copy.",
-      "required": false,
-      "default": "session"
+      "default": 5
     },
     "confidence": {
       "type": "number",
-      "title": "How sure a check must be",
-      "description": "From 0 to 1. The router only changes the effort when a check is at least this sure. Otherwise it checks again after your next prompt.",
+      "title": "How sure it must be to move",
+      "description": "From 0 to 1. The router changes the level only when an assessment is at least this sure the current level is wrong. Otherwise it stays.",
       "required": false,
       "default": 0.7
-    },
-    "showChecks": {
-      "type": "boolean",
-      "title": "Show each check",
-      "description": "Print a line after each automatic check: the probability it gave each level, how sure it was, and what the router did. Off by default; useful while tuning.",
-      "required": false,
-      "default": false
     },
     "highestLevel": {
       "type": "string",
       "title": "Highest level",
-      "description": "The highest effort the router picks. xhigh (default): max rarely does better than xhigh on the current models and can overthink. Choose max to allow it.",
+      "description": "The highest effort the router picks. xhigh (default): max rarely does better than xhigh on the current models and can overthink. Choose max to allow it. If your own effort setting is higher, the router can pick up to it.",
       "required": false,
       "default": "xhigh",
       "options": [
@@ -75,27 +36,6 @@
         "max"
       ]
     },
-    "skipAboveTokens": {
-      "type": "number",
-      "title": "Leave longer sessions alone (tokens)",
-      "description": "A session that already holds more conversation than this when the router first sees it keeps your effort setting.",
-      "required": false,
-      "default": 20000
-    },
-    "firstCheckInstructions": {
-      "type": "boolean",
-      "title": "Send your instructions with the first check",
-      "description": "The first prompt's check also reads your CLAUDE.md files, rules and memory. Off: it reads only the prompt, which is cheaper.",
-      "required": false,
-      "default": true
-    },
-    "rules": {
-      "type": "string",
-      "title": "Routing rules",
-      "description": "Your own routing rules in plain words. Keep a line that is exactly $defaults to build on the built-in rules, or leave it out to replace them. A ~/.claude/effort-router.md file overrides this.",
-      "required": false,
-      "default": ""
-    },
     "routeSubagents": {
       "type": "boolean",
       "title": "Route subagents",
@@ -103,16 +43,12 @@
       "required": false,
       "default": true
     },
-    "footerControl": {
+    "rules": {
       "type": "string",
-      "title": "Footer",
-      "description": "\"button\" (default): the router's state in the footer opens its controls. \"label\": plain text, and /route is the control.",
+      "title": "Routing rules",
+      "description": "Your own routing rules in plain words. Keep a line that is exactly $defaults to build on the built-in rules, or leave it out to replace them. A ~/.claude/effort-router.md file overrides this. In managed settings, this is how an organisation adds its rules for everyone.",
       "required": false,
-      "default": "button",
-      "options": [
-        "button",
-        "label"
-      ]
+      "default": ""
     }
   }
 }

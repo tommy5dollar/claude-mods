@@ -1,6 +1,6 @@
 /**
  * The pure half of effort-router: the levels, the classifier prompt, the
- * transcript trimming, parsing the classifier's reply, the /route grammar and
+ * transcript trimming, parsing the classifier's reply, the /er grammar and
  * the text the mod shows. No `$`, no engine: `bun test` runs it directly.
  *
  * Policy source: Anthropic, "Using Claude Code: Spending your effort",
@@ -124,7 +124,7 @@ export function forkPrompt(input: { rules: string; model?: ModelNotes; current?:
 export const DEFAULTS_MARKER = '$defaults'
 
 export type RuleLayer = {
-  /** Where it came from, for `/route rules` (a path or `defaults`). */
+  /** Where it came from, for `/er rules` (a path or `defaults`). */
   source: string
   /** The file's text; undefined when the file is absent or unreadable. */
   text: string | undefined
@@ -170,37 +170,6 @@ export function composeRules(layers: readonly RuleLayer[]): ComposedRules {
 
   return { text, contributors }
 }
-
-/** What `/route rules init` writes: the defaults kept, an example commented out. */
-export const STARTER_RULES = (scope: 'user' | 'project'): string => `${DEFAULTS_MARKER}
-
-<!--
-effort-router rules (${scope}). The line "${DEFAULTS_MARKER}" above pulls in the rules beneath this
-file (the shipped defaults${scope === 'project' ? ', then your personal file' : ''}). Text after it is added on top, and
-later rules win. Delete the "${DEFAULTS_MARKER}" line to replace the rules beneath entirely.
-Edits apply at the next classification, no reload needed. Run /route rules to see the result.
-
-Example (move it out of this comment to use it):
-
-${scope === 'project'
-  ? '- This is a payments codebase. Never pick below high: money movement needs verification.'
-  : '- I usually give a detailed spec up front, so ordinary feature work is low, not medium.'}
--->
-`
-
-/** The prompt for `/route rules critique`. */
-export const critiquePrompt = (defaults: string, composed: ComposedRules): string =>
-  `Below are the shipped default rules for a classifier that picks a Claude Code session's reasoning effort (low, medium, high, xhigh, max), guided by notes on what each level can do on the session's model, and the effective rules after the user's customisation (${composed.contributors.map(c => `${c.source}: ${c.how}`).join('; ')}).
-
-Critique the user's customisation in at most 8 short bullet points: rules that are ambiguous, contradict each other or the defaults, would push most sessions to one level, or that tie kinds of task to levels without regard to the model (level names mean different things on different models). Suggest concrete rewordings. If nothing was customised, say so in one line.
-
-<defaults>
-${defaults.trim()}
-</defaults>
-
-<effective>
-${composed.text}
-</effective>`
 
 // --- transcript trimming ---------------------------------------------------------
 
@@ -270,7 +239,7 @@ export type TrimLimits = {
   assistantChars: number
   /** Cap for the last assistant message, often the question a short reply answers. */
   lastAssistantChars: number
-  /** Cap on the whole rendered transcript (`classifierMaxChars`): the first prompt and the newest lines are kept, human lines before assistant text. */
+  /** Cap on the rendered conversation before the prompt being assessed: the first prompt and the newest lines are kept, human lines before assistant text. */
   totalChars: number
 }
 
@@ -308,12 +277,16 @@ export function trimTranscript(
   current?: string,
   limits: TrimLimits = DEFAULT_TRIM,
 ): string {
+  return renderTranscript(messages, current, limits).text
+}
+
+/** The conversation's lines as the classifier reads them, without the prompt being submitted. */
+function transcriptLines(messages: readonly TranscriptMessage[], limits: TrimLimits): string[] {
   const lines: string[] = []
   let lastAssistant = -1
   messages.forEach((message, index) => {
     if (message.role === 'assistant' && (message.text ?? '').trim() !== '') lastAssistant = index
   })
-
   for (const [index, message] of messages.entries()) {
     const text = (message.text ?? '').trim()
     if (message.role === 'user') {
@@ -333,21 +306,22 @@ export function trimTranscript(
       }
     }
   }
-
-  const now = (current ?? '').trim()
-  if (now !== '' && !COMMAND_MESSAGE.test(now)) lines.push(`USER: ${cut(now, limits.userChars)}`)
-
-  return capLines(lines, limits.totalChars).text
+  return lines
 }
 
-/** What a capped transcript kept, for `/route status`. */
+/** What a capped transcript kept, for `/er status`. */
 export type CapStats = { text: string; fullChars: number; sentChars: number; omitted: number }
 
 /** The transcript as `trimTranscript` renders it, with what the cap dropped. */
 export function renderTranscript(messages: readonly TranscriptMessage[], current?: string, limits: TrimLimits = DEFAULT_TRIM): CapStats {
-  const uncapped = trimTranscript(messages, current, { ...limits, totalChars: Number.MAX_SAFE_INTEGER })
-  const capped = capLines(uncapped === '' ? [] : uncapped.split('\n'), limits.totalChars)
-  return { ...capped, fullChars: uncapped.length }
+  const lines = transcriptLines(messages, limits)
+  const now = (current ?? '').trim()
+  // The prompt being assessed goes in whole, outside the cap: a long dictated brief is the prompt that matters most.
+  const currentLine = now !== '' && !COMMAND_MESSAGE.test(now) ? `USER: ${now}` : undefined
+  const capped = capLines(lines, limits.totalChars)
+  const text = [capped.text, currentLine].filter(part => part !== undefined && part !== '').join('\n')
+  const fullChars = [...lines, ...(currentLine ? [currentLine] : [])].join('\n').length
+  return { text, sentChars: text.length, omitted: capped.omitted, fullChars }
 }
 
 const isHumanLine = (line: string): boolean => line.startsWith('USER') || line.startsWith('ASSISTANT asked:')
@@ -423,37 +397,9 @@ export function humanPromptCount(messages: readonly TranscriptMessage[]): number
 }
 
 /**
- * Roughly how many tokens the conversation holds: its messages, tool calls
- * and tool results, at four characters a token. Not the system prompt or the
- * tool definitions, which every session carries.
- */
-export function conversationTokens(messages: readonly TranscriptMessage[]): number {
-  let chars = 0
-  for (const message of messages) {
-    chars += (message.text ?? '').length
-    for (const use of message.toolUses ?? []) chars += (use.text ?? '').length + JSON.stringify(use.input ?? '').length
-  }
-  return Math.round(chars / 4)
-}
-
-/**
- * The state for a session the router first sees with prompts already in it:
- * those prompts count toward the budget. A session already past the budget,
- * or already longer than `size.limit` tokens, is left alone (off; idle
- * deciding when the organisation keeps the router on).
- */
-export function firstSighting(prior: number, decideWithin: number, allowOff: boolean, size?: { tokens: number; limit: number }): RouterState {
-  const state = { ...freshState(), prompts: prior }
-  const tooLong = size !== undefined && size.limit > 0 && size.tokens > size.limit
-  if (prior < decideWithin && !tooLong) return state
-  const offReason = 'session started before the router'
-  return allowOff ? { ...state, mode: 'picker', gaveUp: true, offReason } : { ...state, gaveUp: true, offReason }
-}
-
-/**
  * The user message sent to the classifier. The session's instructions
  * (CLAUDE.md files, rules, memory) come first when known; a manual
- * `/route <hint>` adds the hint after the transcript.
+ * `/er assess <hint>` adds the hint after the transcript.
  */
 /** The line that tells a check which level the session is on now, which its spread is judged against. */
 const inForceLine = (inForce: Level | undefined): string => (inForce ? `\n\nThe session is at ${inForce} effort now.` : '')
@@ -580,7 +526,10 @@ export function judgeSpread(spread: Spread, inForce: Level | undefined, offered:
   const mass = offered.map(() => 0)
   for (const level of LEVELS) {
     const p = spread[level]
-    if (p !== undefined) mass[offered.indexOf(clampLevel(level, offered))] += p
+    if (p !== undefined) {
+      const at = offered.indexOf(clampLevel(level, offered))
+      mass[at] = (mass[at] ?? 0) + p
+    }
   }
   let cumulative = 0
   let at = offered.length - 1
@@ -599,12 +548,6 @@ export function judgeSpread(spread: Spread, inForce: Level | undefined, offered:
   const confidence = at > ref ? up : at < ref ? down : 1 - Math.max(up, down)
   return { level, confidence: Math.round(confidence * 1000) / 1000, against: offered[ref] as Level }
 }
-
-/** A spread as text, lowest level first, levels with 1% or more: `medium 10%, high 50%, xhigh 40%`. */
-export const spreadText = (spread: Spread): string =>
-  LEVELS.filter(level => (spread[level] ?? 0) >= 0.005)
-    .map(level => `${level} ${Math.round((spread[level] as number) * 100)}%`)
-    .join(', ')
 
 /** A confidence from 0 to 1. A percentage (1 to 100) is read as one; anything else is undefined. */
 export function confidenceOf(value: unknown): number | undefined {
@@ -827,13 +770,12 @@ export function definitionFor(subagentType: string, definitions: readonly AgentD
 }
 
 /**
- * Whether subagents are routed in this state. They are unless the person
- * turned the router off themselves (`/route off`, Revert, Turn off), which
- * clears `offReason`. When the router turned itself off (an existing session,
- * a spent budget) `offReason` says so, and subagents are still routed: each
- * brief is a new, whole task.
+ * Whether subagents are routed in this state. They are unless you turned the
+ * router off (Turn off, `/er off`, or changing the effort picker). A session
+ * that started before the router still routes them: each brief is a new,
+ * whole task.
  */
-export const routesSubagents = (state: RouterState): boolean => state.mode === 'auto' || state.offReason !== undefined
+export const routesSubagents = (state: RouterState): boolean => state.status !== 'off' || state.offReason === 'mid-flow'
 
 /**
  * The level a spawn inherits, for a fork or when its read fails: the parent
@@ -846,15 +788,14 @@ export function parentLevel(state: RouterState, agents: ReadonlyMap<string, Rout
   return isLevel(parent) ? parent : appliedLevel(state)
 }
 
-/** Why subagents are or are not routed, for `/route status`. */
-export type SubagentStatus = { routing: 'on' | 'setting' | 'org' | 'user-off'; agents: readonly RoutedAgent[] }
+/** Why subagents are or are not routed, for `/er status`. */
+export type SubagentStatus = { routing: 'on' | 'setting' | 'user-off'; agents: readonly RoutedAgent[] }
 
-/** `/route status`'s subagent lines: whether they are routed, then the newest `shown`, newest first. */
+/** `/er status`'s subagent lines: whether they are routed, then the newest `shown`, newest first. */
 export function subagentReport(status: SubagentStatus, shown = 10): string[] {
   const why = {
     on: 'each gets its own level from its task',
     setting: 'not routed (routeSubagents is off), so they use the session level',
-    org: 'not routed (turned off by your organisation), so they use the session level',
     'user-off': 'not routed while the router is off, so they use your effort setting',
   }[status.routing]
   const lines = [`Subagents: ${why}.`]
@@ -868,56 +809,10 @@ export function subagentReport(status: SubagentStatus, shown = 10): string[] {
   return lines
 }
 
-// --- /route grammar -------------------------------------------------------------
-
-export type RouteCommand =
-  | { kind: 'suggest'; hint?: string }
-  | { kind: 'status' }
-  | { kind: 'off' }
-  | { kind: 'on' }
-  | { kind: 'next' }
-  | { kind: 'rules' }
-  | { kind: 'rules-init'; scope: 'user' | 'project' }
-  | { kind: 'rules-critique' }
-  | { kind: 'report'; period: SpendPeriod }
-
-export const ROUTE_USAGE =
-  '/route checks now (add a hint if you like). /route next checks again with your next prompt. Also: /route status, report [session|week|month|all], off, on, rules [init|critique].'
-
-/**
- * `/route` arguments. Bare `/route` runs the router now; any other text that
- * is not a subcommand is a hint for that run. `decide` is a hidden alias of
- * bare `/route`. Setting a level by hand is the effort picker's job.
- */
-export function parseRoute(args: string): RouteCommand {
-  const text = args.trim()
-  const words = text.toLowerCase().split(/\s+/).filter(Boolean)
-  const [verb, arg, extra, more] = words
-  if (words.length === 0) return { kind: 'suggest' }
-  if (words.length === 1) {
-    if (verb === 'status') return { kind: 'status' }
-    if (verb === 'off') return { kind: 'off' }
-    if (verb === 'on') return { kind: 'on' }
-    if (verb === 'next') return { kind: 'next' }
-    if (verb === 'decide') return { kind: 'suggest' }
-    if (verb === 'rules') return { kind: 'rules' }
-  }
-  if (verb === 'report' && extra === undefined && (arg === undefined || isSpendPeriod(arg))) {
-    return { kind: 'report', period: arg ?? 'week' }
-  }
-  if (verb === 'rules') {
-    if (arg === 'critique' && extra === undefined) return { kind: 'rules-critique' }
-    if (arg === 'init' && more === undefined && (extra === undefined || extra === 'user' || extra === 'project')) {
-      return { kind: 'rules-init', scope: extra ?? 'user' }
-    }
-  }
-  return { kind: 'suggest', hint: text }
-}
-
 // --- the spend ledger -------------------------------------------------------------
 
 /**
- * What the router records about each model request, so `/route report` can
+ * What the router records about each model request, so `/er report` can
  * say where the effort went: the level the request arrived at (the picker's,
  * or the level a subagent would have inherited), the level it went out at,
  * and what it cost as the API reported it. Requests are summed into rows per
@@ -955,11 +850,10 @@ export const isCheckKind = (value: unknown): value is CheckKind =>
 export type ReadRow = { day: string; kind?: CheckKind; calls: number; output: number; input: number }
 
 /**
- * One check of the session and what came of it, kept to calibrate confidence
- * later: the level and confidence it gave, and `outcome`: `acted`, `below
- * the bar`, `undecided`, `kept going` (a manual check), or what happened at
- * the question (`asked: use`, `asked: keep`, `asked: no answer`, `same as
- * the setting`).
+ * One assessment and what came of it, kept to calibrate confidence later: the
+ * spread, the level it was judged against, and `outcome` (`stayed`, `moved to
+ * high`, `no clear task`, `judged at the first request`; older ledgers hold
+ * the ask-era outcomes too).
  */
 export type VerdictRow = {
   at: number
@@ -978,12 +872,15 @@ export type VerdictRow = {
   outcome: string
   /** A first check that carried the session's instructions (CLAUDE.md, rules, memory), to learn whether they help. */
   withInstructions?: boolean
+  /** Asked for by you (the band's Assess, `/er assess`), not counted toward the window. */
+  manual?: true
 }
 
 /** Verdicts kept per session. */
 export const MAX_VERDICTS = 200
 
-export type SpendLedger = { version: 1; session: string; repo: string; rows: SpendRow[]; reads: ReadRow[]; verdicts?: VerdictRow[] }
+/** One session's ledger: its requests, the router's reads, its assessments and, since 0.17, its state. */
+export type SpendLedger = { version: 1; session: string; repo: string; rows: SpendRow[]; reads: ReadRow[]; verdicts?: VerdictRow[]; state?: SavedState }
 
 /** A request's usage, in the API's spelling. */
 export type SpendUsage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
@@ -1081,9 +978,11 @@ export function parseLedger(text: string): SpendLedger | undefined {
       (r.level === undefined || isLevel(r.level)) && (r.confidence === undefined || isCount(r.confidence)) && typeof r.outcome === 'string' &&
       (r.withInstructions === undefined || typeof r.withInstructions === 'boolean'),
   )
+  const state = restored(value.state)
   return {
     version: 1, session: value.session, repo: typeof value.repo === 'string' ? value.repo : 'unknown', rows, reads,
     ...(verdicts.length > 0 ? { verdicts } : {}),
+    ...(state ? { state: savedOf(state) } : {}),
   }
 }
 
@@ -1111,7 +1010,7 @@ const byLevelOrder = (a: string, b: string): number => {
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
 
 /**
- * `/route report`: where the effort went over a period, measured. Requests and
+ * `/er report`: where the effort went over a period, measured. Requests and
  * output tokens per level; the requests the router moved off the level they
  * arrived at, with the average size of requests left at that level beside
  * them; agent definitions' own levels; the router's own reads; and, beyond
@@ -1182,7 +1081,7 @@ export function spendReport(ledgers: readonly SpendLedger[], period: SpendPeriod
       [count(['subagent']), 'for subagents'],
     ].filter(([n]) => (n as number) > 0).map(([n, what]) => `${n} ${what}`)
     const by = split.length > 1 ? ` (${split.join(', ')})` : ''
-    lines.push(`The router's own checks: ${r.calls}${by}, using ${tokens(r.output)} output and ${tokens(r.input)} input tokens.`)
+    lines.push(`The router's own assessments: ${r.calls}${by}, using ${tokens(r.output)} output and ${tokens(r.input)} input tokens.`)
   }
 
   if (period !== 'session') {
@@ -1203,222 +1102,196 @@ export function spendReport(ledgers: readonly SpendLedger[], period: SpendPeriod
 
 // --- state and what the mod shows -------------------------------------------------
 
-export type Mode = 'auto' | 'picker'
-
-export type Phase = 'undecided' | 'locked'
-
-/** A check's level. `checkedAt` (when the check ran, never saved) ties the answer to its question back to the check's verdict row. */
 /** A check's probability for each level, normalised to sum to 1. */
 export type Spread = Partial<Record<Level, number>>
 
-/** `against`: the level in force the spread was judged against, which `confidence` is relative to. */
+/**
+ * An assessment's level. `against`: the level in force the spread was judged
+ * against, which `confidence` is relative to. `checkedAt` (when it ran, never
+ * saved) ties a later judgement back to its ledger row.
+ */
 export type Proposal = { level: Level; reason: string; why?: string; confidence?: number; spread?: Spread; against?: Level; checkedAt?: number }
 
-/** A question open about a verdict: use the router's level, or keep the picker's (unknown when no request has gone out yet). */
-export type Asking = Proposal & { picker?: Level }
+/**
+ * The router's three statuses, as the footer's glyph shows them: `unlocked`
+ * (it may still move the level, assessing each of the first prompts),
+ * `locked` (the level holds), `off` (your effort setting applies).
+ */
+export type Status = 'unlocked' | 'locked' | 'off'
 
-const insteadOf = (asking: Asking): string => (asking.picker ? ` instead of ${asking.picker}` : '')
+/** Why the router is off: you turned it off, you changed the effort picker, or the session started before the router. */
+export type OffReason = 'you' | 'picker' | 'mid-flow'
 
 /**
  * Everything the router remembers about one session.
  *
- * `auto` + `undecided` is deciding: requests go out at the picker's level.
- * `auto` + `locked` is decided: every main-thread request runs at `level` and
- * no more reads happen. `picker` is off.
- *
- * With consent `ask` a read's level is not applied: it waits in `pending` for
- * the next main-thread request, which is the only place the picker's level can
- * be seen. There it is compared: the same level locks, a different one asks
- * (`asking` while the question is open).
+ * `level` is the router's own level: after a move while unlocked, or the
+ * locked level. Undefined while unlocked means your effort setting runs.
+ * Only an assessment moves it, or a button whose label names a level.
  */
 export type RouterState = {
-  mode: Mode
-  phase: Phase
-  /** The locked level. */
+  status: Status
   level?: Level
-  /** Why it is locked, in words for status (`router: bug fix in existing code`). */
-  reason?: string
-  /** Why the check chose this level, in a sentence or two, when it said. */
-  why?: string
-  /** A read's verdict waiting for the next main-thread request (consent `ask`). Not persisted. */
-  pending?: Proposal
-  /** The question open about a verdict. Not persisted. */
-  asking?: Asking
-  /** A manual run's hint, kept for later automatic reads until a level is locked. */
+  /** Prompts assessed in this window (an earlier session's prompts count on a first sighting). */
+  assessed: number
+  /** Who locked it: the router after the last prompt of the window, or you. */
+  lockedBy?: 'router' | 'you'
+  /** Prompts assessed when it locked, for the band. */
+  lockedAfter?: number
+  offReason?: OffReason
+  /** The router's last level of its own, for `Turn on, locked at <level>`. */
+  lastLevel?: Level
+  /** A hint from `/er assess <hint>` while unlocked, used by the next prompt's assessment. */
   hint?: string
-  /** Human prompts counted against the decision budget since the router was (re)started. */
-  prompts: number
-  /** The budget ran out with nothing locked: no automatic reads. */
-  gaveUp?: boolean
-  /** Why the router is off, when it turned itself off (cleared when the person turns it off). */
-  offReason?: string
+  /**
+   * A first assessment made before any request showed the level in force: its
+   * spread is judged at the next main-thread request. Never saved.
+   */
+  pending?: Proposal
   /** Shown only, never saved: the session's model, which the router does not support, so it stands aside. */
   unsupported?: string
 }
 
-export const freshState = (): RouterState => ({ mode: 'auto', phase: 'undecided', prompts: 0 })
+export const freshState = (): RouterState => ({ status: 'unlocked', assessed: 0 })
 
-/** `ask`: a level that differs from the picker's is asked about. `auto`: the router's level is locked without a question. */
-export type Consent = 'ask' | 'auto'
-
-/**
- * A consent value. 0.8 has two: `ask` and `auto`. The older names map onto
- * them: `apply` and `none` (applied without a question) → `auto`; `confirm`
- * and `band` (waited for the person) → `ask`. Anything else is undefined.
- */
-export function consentOf(value: unknown): Consent | undefined {
-  if (value === 'ask' || value === 'confirm' || value === 'band') return 'ask'
-  if (value === 'auto' || value === 'apply' || value === 'none') return 'auto'
-  return undefined
-}
-
-/** The state as it applies on a model: on one the router does not support, it stands aside (`unsupported`) without forgetting its state. */
+/** The state as it applies on a model: on one the router does not support, it stands aside without forgetting its state. */
 export function onModel(state: RouterState, model: string | undefined): RouterState {
   return model === undefined || supportedModel(model) ? state : { ...state, unsupported: modelName(model) }
 }
 
-/** The level `turn.step` applies to the main thread, or undefined to leave the request alone. */
+/** The level `turn.step` applies to the main thread, or undefined to leave the request at your effort setting. */
 export function appliedLevel(state: RouterState): Level | undefined {
-  return state.mode === 'auto' && state.phase === 'locked' && !state.unsupported ? state.level : undefined
+  return state.status !== 'off' && !state.unsupported ? state.level : undefined
 }
 
-/** Whether an automatic read should follow this human prompt. */
-export function wantsRead(state: RouterState, decideWithin: number): boolean {
-  return state.mode === 'auto' && state.phase !== 'locked' && !state.gaveUp && !state.unsupported && state.prompts <= decideWithin
-}
-
-/**
- * After an automatic read (and after a question is settled): once the budget
- * is spent with nothing locked, stop reading. A verdict still waiting for its
- * question keeps the router on until it is settled; otherwise the router turns
- * off (or, when the organisation keeps it on, idles as deciding). The reason
- * names the last check when it picked a level below the bar ("not sure enough
- * after 6 prompts, last check high at 65%"), so a clear task the checks were
- * unsure about doesn't read as no task at all.
- */
-export function afterBudget(state: RouterState, decideWithin: number, allowOff: boolean, last?: Proposal): RouterState {
-  if (state.mode !== 'auto' || state.phase === 'locked' || state.prompts < decideWithin) return state
-  if (state.pending || state.asking) return state.gaveUp ? state : { ...state, gaveUp: true }
-  const after = `after ${decideWithin} prompt${decideWithin === 1 ? '' : 's'}`
-  const sure = last?.confidence === undefined ? '' : ` at ${Math.round(last.confidence * 100)}%`
-  const offReason = last ? `not sure enough ${after}, last check ${last.level}${sure}` : `no clear task ${after}`
-  if (state.gaveUp && state.offReason === offReason) return state
-  return allowOff
-    ? { ...state, mode: 'picker', gaveUp: true, offReason, hint: undefined }
-    : { ...state, gaveUp: true, offReason, hint: undefined }
-}
-
-/** A read's verdict while deciding (consent `ask`): kept for the next request to compare, or cleared when undecided. Locked or off: unchanged. */
-export function withVerdict(state: RouterState, proposal: Proposal | undefined): RouterState {
-  if (state.mode !== 'auto' || state.phase === 'locked') return state
-  return proposal ? { ...state, pending: proposal } : state.pending ? { ...state, pending: undefined } : state
+/** Whether a human prompt should be assessed now. */
+export function wantsAssessment(state: RouterState, limit: number): boolean {
+  return state.status === 'unlocked' && !state.unsupported && state.assessed < limit
 }
 
 /**
- * What a main-thread request does with a waiting verdict, given the picker's
- * level (`e.effort` as the request came in): nothing to do; the same level
- * (lock it, no question); or a different level (ask). A picker level that is
- * not a named level (a number, or a model without effort) leaves the verdict
- * waiting.
+ * The state for a session the router first sees with prompts already in it.
+ * Those prompts count toward the window; with the window already used up, the
+ * session started before the router and it is left off.
  */
-export type StepDecision = { kind: 'none' } | { kind: 'agree'; proposal: Proposal } | { kind: 'ask'; asking: Asking & { picker: Level } }
-
-export function stepDecision(state: RouterState, picker: unknown): StepDecision {
-  const pending = state.pending
-  if (state.mode !== 'auto' || state.phase === 'locked' || !pending || !isLevel(picker)) return { kind: 'none' }
-  return pending.level === picker ? { kind: 'agree', proposal: pending } : { kind: 'ask', asking: { ...pending, picker } }
-}
-
-/** Locks a level, for the stated reason: decided, so reading stops. */
-export const lockedAt = (state: RouterState, level: Level, reason: string, why?: string): RouterState => ({
-  ...state,
-  mode: 'auto',
-  phase: 'locked',
-  level,
-  reason,
-  why,
-  pending: undefined,
-  asking: undefined,
-  hint: undefined,
-  offReason: undefined,
-})
-
-/** The reasons a lock is shown with: the read's own reason, or the person's choice. */
-export const lockReason = {
-  /** The router's level, applied without a question (consent auto). */
-  router: (proposal: Proposal): string => proposal.reason,
-  /** The router's level, chosen by the person (Use). */
-  chosen: (proposal: Proposal): string => proposal.reason,
-  /** The router agreed with the picker. */
-  agreed: (proposal: Proposal): string => proposal.reason,
-  /** The person kept the picker's level over the router's. */
-  kept: (_asking: Asking & { picker: Level }): string => 'your choice',
+export function firstSighting(prior: number, limit: number): RouterState {
+  if (prior < limit) return { ...freshState(), assessed: prior }
+  return { status: 'off', assessed: 0, offReason: 'mid-flow' }
 }
 
 /**
- * The levels between a proposal and the current one, nearest the proposal
- * first: medium to xhigh gives high, xhigh to low gives medium and high
- * (offered as medium, then high). Empty when they are next to each other or
- * the current level is unknown.
+ * The levels an assessment is offered: low up to `highestLevel`, or up to your
+ * own setting when that is higher (a session at max would otherwise always
+ * read max as too high, since the assessment could never vote for it).
  */
-export function levelsBetween(proposal: Level, current: Level | undefined): Level[] {
-  if (current === undefined) return []
-  const towards = rank(proposal) > rank(current) ? -1 : 1
-  const between: Level[] = []
-  for (let i = rank(proposal) + towards; i !== rank(current); i += towards) between.push(LEVELS[i] as Level)
-  return between
+export function offeredLevels(highest: Level, setting?: Level): readonly Level[] {
+  return levelsUpTo(setting && rank(setting) > rank(highest) ? setting : highest)
 }
 
 /**
- * The question asked when the router's level differs from the current one:
- * one line with the reason, `Use <level>`, then `Use <level>` for each level in
- * between, nearest the router's first, and `Keep <current>` (or `Not now` when
- * the current level is unknown). Tommy, 2026-10-04, on a card that offered
- * only xhigh or medium: the levels in between are the natural compromise. The
- * card holds four options, so at most two levels in between are offered.
+ * How sure the last assessment was that `level` is right: one minus the
+ * larger share of the spread on either side of it. The footer's word strength
+ * and the band's confidence.
  */
-export function effortQuestion(proposal: Proposal, current: Level | undefined): { text: string; options: string[]; between: Level[]; header: string } {
-  const reason = proposal.reason.charAt(0).toUpperCase() + proposal.reason.slice(1)
-  if (!current) return { text: `Effort router: ${reason}. Use ${proposal.level} effort?`, options: [`Use ${proposal.level}`, 'Not now'], between: [], header: 'Effort' }
-  const between = levelsBetween(proposal.level, current).slice(0, 2)
-  return {
-    text: `Effort router: ${reason}. Use ${proposal.level} effort instead of ${current}?`,
-    options: [`Use ${proposal.level}`, ...between.map(level => `Use ${level}`), `Keep ${current}`],
-    between,
-    header: 'Effort',
+export function certaintyOf(spread: Spread, level: Level, offered: readonly Level[] = levelsUpTo()): number {
+  const mass = offered.map(() => 0)
+  for (const l of LEVELS) {
+    const p = spread[l]
+    if (p !== undefined) {
+      const at = offered.indexOf(clampLevel(l, offered))
+      mass[at] = (mass[at] ?? 0) + p
+    }
   }
+  const ref = offered.indexOf(clampLevel(level, offered))
+  const up = mass.slice(ref + 1).reduce((a, b) => a + b, 0)
+  const down = mass.slice(0, ref).reduce((a, b) => a + b, 0)
+  return Math.round((1 - Math.max(up, down)) * 1000) / 1000
 }
 
-/** Off: the picker is in charge. */
-export const turnedOff = (state: RouterState): RouterState => ({
-  ...state, mode: 'picker', phase: 'undecided', level: undefined, reason: undefined, pending: undefined, asking: undefined, hint: undefined, offReason: undefined,
+/** What one assessment did, for the messages and the ledger. */
+export type Settled = { state: RouterState; moved?: { from?: Level; to: Level }; locked?: Level; outcome: string }
+
+/**
+ * Applies a judged assessment. It moves to the spread's median when it is at
+ * least `threshold` sure the level running is wrong in that direction;
+ * otherwise it stays. Counted assessments use up the window, and the last one
+ * locks whatever is running. A manual assessment while locked moves the locked
+ * level and stays locked. `running` is the level in force (the router's own,
+ * else your setting); undefined when no request has shown it yet.
+ */
+export function settle(
+  state: RouterState,
+  judged: Proposal | undefined,
+  options: { threshold: number; limit: number; running?: Level; counted: boolean },
+): Settled {
+  let next: RouterState = { ...state, pending: undefined, hint: undefined }
+  if (options.counted) next.assessed = Math.min(options.limit, state.assessed + 1)
+  let moved: Settled['moved']
+  let outcome = judged ? 'stayed' : 'no clear task'
+  if (judged && options.running !== undefined && judged.level !== options.running && isConfident(judged, options.threshold)) {
+    moved = { from: options.running, to: judged.level }
+    next = { ...next, level: judged.level, lastLevel: judged.level }
+    outcome = `moved to ${judged.level}`
+  }
+  let locked: Level | undefined
+  const running = next.level ?? options.running
+  if (next.status === 'unlocked' && next.assessed >= options.limit && running !== undefined) {
+    next = { ...next, status: 'locked', level: running, lockedBy: 'router', lockedAfter: next.assessed }
+    locked = running
+  }
+  return { state: next, ...(moved ? { moved } : {}), ...(locked ? { locked } : {}), outcome }
+}
+
+/** Locks the level running now, by you. */
+export const lockedByYou = (state: RouterState, level: Level): RouterState => ({
+  ...state, status: 'locked', level, lockedBy: 'you', lockedAfter: state.assessed, offReason: undefined, pending: undefined, hint: undefined,
 })
 
-/** On: deciding again over the whole conversation, with a fresh prompt budget. */
-export const turnedOn = (state: RouterState): RouterState => ({
-  ...state, mode: 'auto', phase: 'undecided', level: undefined, reason: undefined, why: undefined, pending: undefined, asking: undefined, hint: undefined, prompts: 0, gaveUp: false, offReason: undefined,
+/** Unlocks: a fresh window from the level running now (the locked level keeps running until an assessment moves it). */
+export const unlocked = (state: RouterState): RouterState => ({
+  ...state, status: 'unlocked', assessed: 0, lockedBy: undefined, lockedAfter: undefined, offReason: undefined, pending: undefined,
 })
 
-/** What the router knows about its own reads, for `/route status`. */
+/** Off: your effort setting applies. The router's own level is remembered for `Turn on, locked`. */
+export const turnedOff = (state: RouterState, why: OffReason): RouterState => ({
+  status: 'off', assessed: state.assessed, offReason: why, lastLevel: state.level ?? state.lastLevel,
+})
+
+/** On and unlocked: a fresh window from your effort setting. */
+export const turnedOnUnlocked = (state: RouterState): RouterState => ({ status: 'unlocked', assessed: 0, ...(state.lastLevel ? { lastLevel: state.lastLevel } : {}) })
+
+/** On and locked at the router's last level. Unchanged when it never had one. */
+export const turnedOnLocked = (state: RouterState): RouterState =>
+  state.lastLevel ? { status: 'locked', level: state.lastLevel, lastLevel: state.lastLevel, assessed: 0, lockedBy: 'you' } : state
+
+// --- what the router knows about its own assessments ---------------------------------
+
+/** The last assessment, as the band and `/er status` show it (from the ledger, so it survives a resume). */
+export type LastAssessment = {
+  at: number
+  spread?: Spread
+  level?: Level
+  against?: Level
+  reason?: string
+  why?: string
+  outcome: string
+}
+
+/** What the router knows about its own reads, for `/er status`. */
 export type ReadDiagnostics = {
   /** Now, in ms since the epoch. */
   now: number
-  /** Classifier calls this session, automatic and manual. */
+  /** Assessments this session, automatic and manual. */
   calls: number
-  verdict?: { at: number; trigger: string; raw: string; decision: Decision; kind?: CheckKind }
+  /** The last assessment's raw reply, how it was made and what prompted it. */
+  verdict?: { at: number; trigger: string; raw: string; kind?: CheckKind }
   error?: { at: number; text: string }
-  /** The consent mode in force. */
-  consent?: string
   /** How long the last read took, in ms. */
   lastReadMs?: number
-  /** The last read's transcript: characters sent, characters before the cap, the cap, lines dropped. */
+  /** The last separate call's transcript: characters sent, characters before the cap, the cap, lines dropped. */
   sent?: { sentChars: number; fullChars: number; maxChars: number; omitted: number }
   /** Whether subagents are routed, and the ones that were. */
   subagents?: SubagentStatus
-  /** How sure a check must be before the router acts, 0 to 1. */
-  threshold?: number
-  /** Which model runs the checks, in words (`your session's model (Opus 5.5)`, `haiku`). */
-  checkModel?: string
 }
 
 /** `12s ago`, `4m ago`, `2h ago`. */
@@ -1429,52 +1302,240 @@ export function ago(now: number, at: number): string {
   return `${Math.floor(seconds / 3600)}h ago`
 }
 
-/** What `/route status` prints. `inForce` is the level the last main-conversation request went out with. */
-export function routeReport(state: RouterState, decideWithin: number, inForce?: string | number, diagnostics?: ReadDiagnostics): string {
-  const setting = inForce === undefined ? 'your effort setting' : `your effort setting (${inForce})`
-  const lines: string[] = []
-  const routed = diagnostics?.subagents?.routing === 'on'
-  const verdict = diagnostics?.verdict
-  const threshold = diagnostics?.threshold ?? 0
-  const leaning = verdict?.decision.decision === 'lock' && !isConfident(verdict.decision, threshold) ? verdict.decision : undefined
-  if (state.unsupported) {
-    lines.push(`Off on ${state.unsupported}, so ${setting} applies. The router works with ${SUPPORTED_NAMES}.`)
-  } else if (state.asking) {
-    lines.push(`${state.asking.level}? Waiting for your answer: use ${state.asking.level} effort${insteadOf(state.asking)} (${state.asking.reason})?`)
-  } else if (state.mode === 'picker') {
-    lines.push(`Off${state.offReason ? ` (${state.offReason})` : ''}, so ${setting} applies. /route on turns it back on.`)
-  } else if (state.phase === 'locked') {
-    lines.push(`Using ${state.level} for this session (${state.reason ?? 'router'}).${state.why ? ` ${state.why}` : ''}${routed ? ' Subagents get their own level.' : ' Subagents use it too.'}`)
-  } else if (state.pending) {
-    lines.push(`Deciding. The last check suggested ${state.pending.level} (${state.pending.reason}). If that isn't your setting, you'll be asked before Claude carries on.`)
-  } else if (leaning && !state.gaveUp) {
-    lines.push(`Deciding. The last check leaned ${leaning.level} but was only ${sureOf(leaning)}, so it checks again after your next prompt. Until then ${setting} applies.`)
-  } else {
-    lines.push(`Deciding. The router checks each prompt until the task is clear, and until then ${setting} applies.`)
+/** `Medium`. */
+const capital = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)
+
+/** What the band and status need beyond the state. */
+export type View = {
+  /** Your effort setting, once a request has shown it. */
+  setting?: Level
+  last?: LastAssessment
+  /** The window: prompts to assess before locking. */
+  limit: number
+  /** The move bar, 0 to 1. */
+  threshold: number
+  offered: readonly Level[]
+  /** An assessment is running now. */
+  assessing?: boolean
+  /** Subagents routed this session (memory only). */
+  subagents?: number
+}
+
+/** The level running now: the router's own, else your setting (undefined until a request shows it). */
+export const runningLevel = (state: RouterState, setting?: Level): Level | undefined =>
+  state.status === 'off' || state.unsupported ? setting : state.level ?? setting
+
+/** How sure the last assessment is that the level running now is right; undefined without a spread. */
+export function confidenceNow(state: RouterState, view: View): number | undefined {
+  const running = runningLevel(state, view.setting)
+  if (!view.last?.spread || !running) return undefined
+  return certaintyOf(view.last.spread, running, view.offered)
+}
+
+/** `○ ◔ ◑ ◕`: the share of the window assessed. It never fills: at the end the padlock closes instead. */
+export function progressGlyph(assessed: number, limit: number): string {
+  const share = limit <= 0 ? 0 : assessed / limit
+  if (share <= 0) return '○'
+  if (share < 0.35) return '◔'
+  if (share < 0.7) return '◑'
+  return '◕'
+}
+
+export const GLYPH: Record<Status, string> = { unlocked: '🔓', locked: '🔒', off: '⏸️' }
+
+/**
+ * The footer, beside the native effort picker: the status glyph, the level
+ * running, and while unlocked how much of the window is used. The word is dim
+ * while the last assessment is less than 50% sure of the level running.
+ */
+export function footerLabel(state: RouterState, view: View): { text: string; dim: boolean } {
+  const setting = view.setting
+  if (state.unsupported || state.status === 'off') return { text: `${GLYPH.off} ${setting ?? 'off'}`, dim: true }
+  const glyph = GLYPH[state.status]
+  if (view.assessing) return { text: `${glyph} assessing…`, dim: false }
+  const running = runningLevel(state, setting)
+  const sure = confidenceNow(state, view)
+  const dim = state.status === 'unlocked' && sure !== undefined && sure < 0.5
+  if (state.status === 'locked') return { text: `${glyph} ${running ?? ''}`.trim(), dim: false }
+  return { text: `${glyph}${running ? ` ${running}` : ''} ${progressGlyph(state.assessed, view.limit)}`, dim }
+}
+
+const morePrompts = (n: number): string => `${n} more prompt${n === 1 ? '' : 's'}`
+
+/**
+ * The band's first line: the footer in words, in the same order. Status,
+ * the level running and where it came from, confidence, what changes next.
+ */
+export function bandHeadline(state: RouterState, view: View): string {
+  if (state.unsupported) return `Effort router: off on ${state.unsupported}. It works with ${SUPPORTED_NAMES}.`
+  const setting = view.setting
+  if (state.status === 'off') {
+    const level = setting ? `${capital(setting)} (your effort setting)` : 'Your effort setting applies'
+    const why = state.offReason === 'picker' ? ' You changed the effort picker.' : state.offReason === 'mid-flow' ? ' This session started before the router.' : ''
+    return `Effort router: off. ${level}.${why}`
   }
-  if (state.mode === 'auto' && state.phase !== 'locked' && !state.unsupported) {
-    lines.push(state.gaveUp
-      ? `Stopped checking (${state.offReason ?? `no clear task after ${decideWithin} prompt${decideWithin === 1 ? '' : 's'}`}). /route checks now.`
-      : `Prompts checked: ${Math.min(state.prompts, decideWithin)} of up to ${decideWithin}.`)
+  const running = runningLevel(state, setting)
+  const sure = confidenceNow(state, view)
+  const confidence = sure === undefined ? '' : `, ${percent(sure)} confidence`
+  if (state.status === 'locked') {
+    const after = state.lockedAfter ? ` after ${state.lockedAfter} prompt${state.lockedAfter === 1 ? '' : 's'}` : ''
+    const who = state.lockedBy === 'you' ? `locked by you${after}` : `chosen by the router${after}`
+    return `Effort router: locked. ${capital(running ?? 'your level')} (${who})${confidence}.`
   }
-  if (state.hint) lines.push(`Your hint: ${state.hint}`)
+  const source = state.level ? 'chosen by the router' : 'your effort setting'
+  const level = running ? `${capital(running)} (${source})${confidence}.` : 'Your effort setting applies.'
+  const left = Math.max(0, view.limit - state.assessed)
+  return `Effort router: unlocked. ${level} Locks after ${morePrompts(left)}.`
+}
+
+/** `low 5%, medium 55%, high 35%, xhigh 5%`: levels with 1% or more. */
+export const spreadText = (spread: Spread): string =>
+  LEVELS.filter(level => (spread[level] ?? 0) >= 0.005)
+    .map(level => `${level} ${Math.round((spread[level] as number) * 100)}%`)
+    .join(', ')
+
+/**
+ * The band's second line: the last assessment's spread, its larger side
+ * against the level it was judged against, and what it did. `60% sure medium
+ * is too low, so it stayed. It moves at 70%.`
+ */
+export function lastAssessmentLine(last: LastAssessment | undefined, threshold: number, offered: readonly Level[], locked: boolean): string | undefined {
+  if (!last) return undefined
+  if (!last.spread || !last.level) return `Last assessment: no clear task yet, so it stayed.`
+  const reason = last.reason ? ` (${last.reason})` : ''
+  const parts = [`Last assessment: ${spreadText(last.spread)}${reason}.`]
+  if (last.against) {
+    const mass = (above: boolean) =>
+      offered.filter(l => (above ? rank(l) > rank(last.against as Level) : rank(l) < rank(last.against as Level)))
+        .reduce((n, l) => n + (last.spread?.[l] ?? 0), 0)
+    const up = mass(true)
+    const down = mass(false)
+    const side = up >= down ? { share: up, way: 'low' } : { share: down, way: 'high' }
+    const moved = last.outcome.startsWith('moved')
+    const did = moved ? `so it moved to ${last.level}` : 'so it stayed'
+    parts.push(`${percent(side.share)} sure ${last.against} ${moved ? 'was' : 'is'} too ${side.way}, ${did}.${moved ? '' : ` It moves at ${percent(threshold)}.`}`)
+  }
+  if (locked && last.why) parts.push(last.why)
+  return parts.join(' ')
+}
+
+/** The band's third line, when subagents were routed. */
+export const subagentLine = (count: number | undefined): string | undefined =>
+  count ? `Subagents get their own level: ${count} routed this session.` : undefined
+
+/**
+ * One slot of the band. `disabled` slots are drawn dim and say why when
+ * pressed, so no slot moves between statuses.
+ */
+export type BandAction = {
+  value: 'hide' | 'lock' | 'unlock' | 'off' | 'on-locked' | 'on-unlocked' | 'assess' | 'on-assess'
+  label: string
+  disabled?: string
+}
+
+/**
+ * The band's four slots, a gradient from doing nothing to taking action: 1
+ * Hide, 2 the lock, 3 on and off, 4 assess. Tommy, 2026-10-05.
+ */
+export function bandActions(state: RouterState, view: View): BandAction[] {
+  const hide: BandAction = { value: 'hide', label: 'Hide' }
+  if (state.unsupported) return [hide]
+  const running = runningLevel(state, view.setting)
+  if (state.status === 'off') {
+    return [
+      hide,
+      state.lastLevel
+        ? { value: 'on-locked', label: `Turn on, locked at ${state.lastLevel}` }
+        : { value: 'on-locked', label: 'Turn on, locked', disabled: 'The router has no level of its own to lock at yet.' },
+      { value: 'on-unlocked', label: 'Turn on, unlocked' },
+      { value: 'on-assess', label: 'Turn on and assess' },
+    ]
+  }
+  const lock: BandAction =
+    state.status === 'locked'
+      ? { value: 'unlock', label: 'Unlock' }
+      : running
+        ? { value: 'lock', label: `Lock at ${running}` }
+        : { value: 'lock', label: 'Lock', disabled: 'Nothing to lock yet: the level shows with the first request.' }
+  const assess: BandAction =
+    state.status === 'locked'
+      ? { value: 'assess', label: 'Assess' }
+      : { value: 'assess', label: 'Assess', disabled: 'It assesses before your next prompt anyway.' }
+  return [hide, lock, { value: 'off', label: 'Turn off' }, assess]
+}
+
+// --- messages in the conversation (dim, never sent to the model) ----------------------
+
+export const message = {
+  moved: (from: Level | undefined, to: Level, reason: string): string =>
+    `Effort router: assessed, ${from ? `${from} to ${to}` : to} (${reason}).`,
+  locked: (level: Level): string => `Effort router: locked at ${level}.`,
+  lockedByYou: (level: Level): string => `Effort router: you locked it at ${level}.`,
+  unlocked: (): string => 'Effort router: unlocked. Assessing again from your next prompt.',
+  picker: (level: string): string => `Effort router: you changed the effort to ${level}, so routing is off.`,
+  off: (setting?: Level): string => `Effort router: off.${setting ? ` Your effort (${setting}) applies.` : ' Your effort setting applies.'}`,
+  onLocked: (level: Level): string => `Effort router: on, locked at ${level}.`,
+  onUnlocked: (): string => 'Effort router: on, unlocked.',
+}
+
+// --- /er ----------------------------------------------------------------------------
+
+export type RouteCommand =
+  | { kind: 'band' }
+  | { kind: 'lock' }
+  | { kind: 'unlock' }
+  | { kind: 'on' }
+  | { kind: 'off' }
+  | { kind: 'assess'; hint?: string }
+  | { kind: 'report'; period: SpendPeriod }
+  | { kind: 'status' }
+  | { kind: 'rules' }
+  | { kind: 'unknown'; text: string }
+
+export const ROUTE_USAGE =
+  '/er opens the band. Also: /er lock, unlock, on, off, assess [hint], report [session|week|month|all], status, rules. /er is short for /effort-router.'
+
+/**
+ * `/er` arguments. Bare `/er` opens the band. Explicit verbs, not toggles, so
+ * a repeat is harmless. Anything else is refused rather than run as a hint.
+ */
+export function parseRoute(args: string): RouteCommand {
+  const text = args.trim()
+  const words = text.split(/\s+/).filter(Boolean)
+  const verb = words[0]?.toLowerCase()
+  const rest = text.slice(words[0]?.length ?? 0).trim()
+  if (!verb) return { kind: 'band' }
+  if (verb === 'assess') return rest ? { kind: 'assess', hint: rest } : { kind: 'assess' }
+  if (words.length === 1 && (verb === 'lock' || verb === 'unlock' || verb === 'on' || verb === 'off' || verb === 'status' || verb === 'rules')) return { kind: verb }
+  if (verb === 'report' && words.length <= 2) {
+    const period = words[1]?.toLowerCase()
+    if (period === undefined) return { kind: 'report', period: 'week' }
+    if (isSpendPeriod(period)) return { kind: 'report', period }
+  }
+  return { kind: 'unknown', text }
+}
+
+/**
+ * What `/er status` prints: the band's lines, then the troubleshooting
+ * details: the last assessment's full reply and how it was made, the last
+ * error, how much a separate call read, and the routed subagents.
+ */
+export function routeReport(state: RouterState, view: View, diagnostics?: ReadDiagnostics): string {
+  const lines = [bandHeadline(state, view)]
+  const last = lastAssessmentLine(view.last, view.threshold, view.offered, state.status === 'locked')
+  if (last) lines.push(last)
+  if (state.status === 'unlocked') lines.push(`Assessed ${Math.min(state.assessed, view.limit)} of ${view.limit} prompts.`)
+  if (state.hint) lines.push(`Your hint for the next assessment: ${state.hint}`)
   if (diagnostics) {
-    if (diagnostics.consent) {
-      const bar = threshold > 0 ? `It acts once a check is at least ${percent(threshold)} sure. ` : ''
-      lines.push(diagnostics.consent === 'auto'
-        ? `${bar}If that level isn't your setting, it switches without asking (consent: auto).`
-        : `${bar}If that level isn't your setting, it asks you first (consent: ask).`)
-    }
-    lines.push(`Checks this session: ${diagnostics.calls}${diagnostics.checkModel ? `, on ${diagnostics.checkModel}` : ''}.`)
+    lines.push(`Assessments this session: ${diagnostics.calls}. It moves at ${percent(view.threshold)}.`)
+    const verdict = diagnostics.verdict
     if (verdict) {
-      const sure = verdict.decision.decision === 'lock' && verdict.decision.confidence !== undefined ? `, ${sureOf(verdict.decision)}` : ''
-      const spread = verdict.decision.decision === 'lock' && verdict.decision.spread ? ` Spread: ${spreadText(verdict.decision.spread)}` : ''
-      const said = verdict.decision.decision === 'lock' ? `${verdict.decision.level}${sure} (${verdict.decision.reason}).${spread}` : 'no clear task yet.'
       const took = diagnostics.lastReadMs === undefined ? '' : `, took ${(diagnostics.lastReadMs / 1000).toFixed(1)}s`
-      lines.push(`Last check (${verdict.trigger}, ${ago(diagnostics.now, verdict.at)}${took}): ${said}`)
+      const how = verdict.kind === 'fork' ? 'a fork of the conversation' : verdict.kind === 'first' ? 'a separate call' : verdict.kind ?? 'an assessment'
+      lines.push(`Last reply (${verdict.trigger}, ${how}, ${ago(diagnostics.now, verdict.at)}${took}${view.last?.against ? `, judged against ${view.last.against}` : ''}): ${cut(verdict.raw.replace(/\s+/g, ' ').trim(), 600)}`)
     }
     const sent = diagnostics.sent
-    if (sent && sent.omitted > 0) lines.push(`It read ${sent.sentChars} of the conversation's ${sent.fullChars} characters (limit ${sent.maxChars}).`)
+    if (sent && sent.omitted > 0) lines.push(`The separate call read ${sent.sentChars} of the conversation's ${sent.fullChars} characters (limit ${sent.maxChars}).`)
     if (diagnostics.error) lines.push(`Last error (${ago(diagnostics.now, diagnostics.error.at)}): ${cut(diagnostics.error.text, 200)}`)
     if (diagnostics.subagents) lines.push(...subagentReport(diagnostics.subagents))
   }
@@ -1482,244 +1543,66 @@ export function routeReport(state: RouterState, decideWithin: number, inForce?: 
   return lines.join('\n')
 }
 
-/** A colour per level for the band (Ink theme keys / named colours). */
-export const LEVEL_COLOR: Record<Level, string> = {
-  low: 'green',
-  medium: 'cyan',
-  high: 'yellow',
-  xhigh: 'magenta',
-  max: 'red',
-}
+// --- saved state (in the session's ledger) ---------------------------------------------
 
-// --- persistence ------------------------------------------------------------------
+/** What a session's ledger keeps of its state, so a resume finds it. */
+export type SavedState = Pick<RouterState, 'status' | 'level' | 'assessed' | 'lockedBy' | 'lockedAfter' | 'offReason' | 'lastLevel' | 'hint'>
 
-/** What `$.store` keeps per session id so a resume finds its lock. */
-export type SavedState = Pick<RouterState, 'mode' | 'phase' | 'level' | 'reason' | 'offReason'> & { savedAt: number }
-
-export const MAX_SAVED_SESSIONS = 100
-
-/** Adds/replaces one session's saved state, keeping the newest `MAX_SAVED_SESSIONS`. A waiting verdict or open question is not kept. */
-export function withSaved(
-  all: Record<string, SavedState> | undefined,
-  sessionId: string,
-  state: RouterState,
-  now: number,
-): Record<string, SavedState> {
-  const next: Record<string, SavedState> = { ...(all ?? {}) }
-  delete next[sessionId]
-  const saved: SavedState = { mode: state.mode, phase: state.phase === 'locked' ? 'locked' : 'undecided', savedAt: now }
-  if (state.level !== undefined) saved.level = state.level
-  if (state.reason !== undefined) saved.reason = state.reason
-  if (state.offReason !== undefined) saved.offReason = state.offReason
-  next[sessionId] = saved
-  const ids = Object.keys(next).sort((a, b) => (next[a]?.savedAt ?? 0) - (next[b]?.savedAt ?? 0))
-  while (ids.length > MAX_SAVED_SESSIONS) delete next[ids.shift() as string]
-  return next
-}
-
-/**
- * Rebuilds state from a saved entry; anything malformed starts fresh. A
- * 0.1–0.3 `pinned` entry comes back locked; a 0.6–0.7 provisional or proposed
- * one comes back deciding.
- */
-export function restored(saved: unknown): RouterState {
-  const state = freshState()
-  if (typeof saved !== 'object' || saved === null) return state
-  const record = saved as Record<string, unknown>
-  const mode = record.mode
-  if (mode === 'picker') return typeof record.offReason === 'string' ? { ...state, mode, offReason: record.offReason } : { ...state, mode }
-  const locked = (mode === 'auto' && record.phase === 'locked') || mode === 'pinned'
-  if (locked && isLevel(record.level)) {
-    return { ...state, phase: 'locked', level: record.level, reason: typeof record.reason === 'string' ? record.reason : 'restored' }
+export function savedOf(state: RouterState): SavedState {
+  const { status, level, assessed, lockedBy, lockedAfter, offReason, lastLevel, hint } = state
+  return {
+    status, assessed,
+    ...(level ? { level } : {}), ...(lockedBy ? { lockedBy } : {}), ...(lockedAfter ? { lockedAfter } : {}),
+    ...(offReason ? { offReason } : {}), ...(lastLevel ? { lastLevel } : {}), ...(hint ? { hint } : {}),
   }
+}
+
+/** Rebuilds state from a ledger's saved state; undefined when there is none, or it is malformed. */
+export function restored(saved: unknown): RouterState | undefined {
+  if (typeof saved !== 'object' || saved === null) return undefined
+  const r = saved as Record<string, unknown>
+  if (r.status !== 'unlocked' && r.status !== 'locked' && r.status !== 'off') return undefined
+  const state: RouterState = { status: r.status, assessed: isCount(r.assessed) ? r.assessed : 0 }
+  if (isLevel(r.level)) state.level = r.level
+  if (r.lockedBy === 'router' || r.lockedBy === 'you') state.lockedBy = r.lockedBy
+  if (isCount(r.lockedAfter)) state.lockedAfter = r.lockedAfter
+  if (r.offReason === 'you' || r.offReason === 'picker' || r.offReason === 'mid-flow') state.offReason = r.offReason
+  if (isLevel(r.lastLevel)) state.lastLevel = r.lastLevel
+  if (typeof r.hint === 'string' && r.hint.trim() !== '') state.hint = r.hint
+  if (state.status === 'locked' && !state.level) return { ...state, status: 'unlocked' }
   return state
 }
 
-/**
- * The compact state the footer shows beside the native effort picker (which
- * shows the level in use): `deciding`, `high?` while the question is open,
- * `using high` once decided, or `off`. `dim` where nothing is decided or asked.
- */
-export function footerLabel(state: RouterState): { text: string; color?: string; dim: boolean } {
-  if (state.asking) return { text: `${state.asking.level}?`, color: LEVEL_COLOR[state.asking.level], dim: false }
-  if (state.unsupported) return { text: 'off', dim: true }
-  if (ranOut(state)) return { text: 'no decision', dim: true }
-  if (state.mode === 'picker') return { text: 'off', dim: true }
-  if (state.phase === 'locked' && state.level) return { text: `using ${state.level}`, color: LEVEL_COLOR[state.level], dim: false }
-  return { text: 'undecided', dim: true }
-}
+// --- rules from settings (organisation, user, project) ----------------------------------
 
 /**
- * Whether the router stopped because its prompts ran out with nothing
- * decided, as opposed to being turned off. Its footer reads `no decision`, not
- * `off`, which read as if someone had switched it off.
+ * Reads effort-router's `rules` out of one settings source (a parsed
+ * settings.json): `pluginConfigs[<name> | <name>@<marketplace>].options.rules`,
+ * then a top-level `effortRouter.rules`. Managed (policy) settings are how an
+ * organisation pushes its preferences; they layer under everyone else's.
  */
-export const ranOut = (state: RouterState): boolean => state.gaveUp === true && /^(no clear task|not sure enough) after /.test(state.offReason ?? '')
-
-export type BandAction = {
-  /**
-   * What the action does: `suggest` (bare `/route`), `off` or `on`; from the
-   * auto notice, `ok` (hide it), `previous` (back to the level before the
-   * change) or `revert` (off).
-   */
-  value: 'suggest' | 'next' | 'off' | 'on' | 'revert' | 'ok' | 'previous'
-  label: string
-}
-
-/** The band consent `auto` opens by itself once, after locking a level other than the picker's. */
-export type Notice = Proposal & { from?: Level }
-
-export function noticeHeadline(notice: Notice): string {
-  const moved = notice.from !== undefined && notice.from !== notice.level
-  const what = moved ? `changed from ${notice.from} to ${notice.level}` : `using ${notice.level}`
-  // How sure the check was that the old level was wrong, in the direction it moved.
-  const sure =
-    moved && notice.confidence !== undefined && notice.from
-      ? `, ${Math.round(notice.confidence * 100)}% sure ${notice.from} was too ${rank(notice.level) > rank(notice.from) ? 'low' : 'high'}`
-      : ''
-  return `Effort router: ${what} for this session (${notice.reason}${sure}).${notice.why ? ` ${notice.why}` : ''}`
-}
-
-/**
- * The line the `showChecks` option prints after each automatic check: what
- * it said, and what the router did with it.
- */
-export function checkLine(input: { n: number; of: number; proposal?: Proposal; inForce?: Level; threshold: number; sure: boolean; consent: 'ask' | 'auto' }): string {
-  const head = `Effort router: check ${input.n} of ${input.of}:`
-  const on = input.inForce ? ` on ${input.inForce}` : ' on your setting'
-  const { proposal } = input
-  if (!proposal) return `${head} no clear task yet, so staying${on}.`
-  const spread = proposal.spread ? `${spreadText(proposal.spread)}. ` : `${proposal.level}. `
-  const pct = proposal.confidence === undefined ? undefined : Math.round(proposal.confidence * 100)
-  const moving = input.inForce !== undefined && proposal.level !== input.inForce
-  const direction = moving && input.inForce ? ` ${input.inForce} is too ${rank(proposal.level) > rank(input.inForce) ? 'low' : 'high'}` : ` ${proposal.level} is right`
-  const sureText = pct === undefined ? '' : `${pct}% sure${direction}`
-  if (!input.sure) return `${head} ${spread}${sureText}${sureText ? ', ' : ''}below the ${Math.round(input.threshold * 100)}% bar, so staying${on}.`
-  if (!moving) return `${head} ${spread}${sureText}, so keeping ${proposal.level}.`
-  return `${head} ${spread}${sureText}, so ${input.consent === 'auto' ? 'moving to' : 'asking about'} ${proposal.level}.`
-}
-
-/** `Stop routing (back to medium)`: the router off, the user's effort setting back. */
-const stopLabel = (setting: Level | undefined): string => `Stop routing${setting ? ` (back to ${setting})` : ''}`
-
-/**
- * The notice's actions: `OK` first (it hides the band, and the change stands),
- * then `Go back to <from>` when the level before the change wasn't the user's
- * setting, then stop routing (left out when the organisation keeps the router
- * on). Tommy, 2026-10-04: the first option after an automatic change should
- * acknowledge it, not undo it.
- */
-export function noticeActions(allowOff = true, setting?: Level, from?: Level): BandAction[] {
-  const actions: BandAction[] = [{ value: 'ok', label: 'OK' }]
-  if (from && from !== setting) actions.push({ value: 'previous', label: `Go back to ${from}` })
-  if (allowOff) actions.push({ value: 'revert', label: stopLabel(setting) })
-  return actions
-}
-
-/**
- * How sure a judged check was, in words: `60% sure medium is too low`, `80% sure
- * medium is right`, or just `60% sure` when the level it was judged against is
- * unknown.
- */
-export function sureOf(proposal: Pick<Proposal, 'level' | 'confidence' | 'against'>): string {
-  const pct = percent(proposal.confidence ?? 0)
-  const { against, level } = proposal
-  if (!against) return `${pct} sure`
-  if (against === level) return `${pct} sure ${against} is right`
-  return `${pct} sure ${against} is too ${LEVELS.indexOf(level) > LEVELS.indexOf(against) ? 'low' : 'high'}`
-}
-
-/** A check that picked a level but wasn't sure enough to act on it. */
-export function leaningOf(decision: Decision | undefined, threshold: number): Proposal | undefined {
-  return decision?.decision === 'lock' && decision.confidence !== undefined && !isConfident(decision, threshold) ? decision : undefined
-}
-
-/**
- * The router's band above the prompt, which the footer button opens: one line
- * about the state, naming the user's setting when it applies and, while
- * deciding, what the last check leaned towards when it fell below the bar.
- */
-export function bandHeadline(state: RouterState, context: { setting?: Level; leaning?: Proposal } = {}): string {
-  const label = footerLabel(state).text
-  const yours = `Your effort setting${context.setting ? ` (${context.setting})` : ''} applies`
-  if (state.unsupported) return `Effort router: off on ${state.unsupported}. It works with ${SUPPORTED_NAMES}.`
-  if (state.asking) return `Effort router: ${label} Waiting for your answer.`
-  if (ranOut(state)) return `Effort router: no decision (${state.offReason}). ${yours}.`
-  if (state.mode === 'picker') return `Effort router: off${state.offReason ? ` (${state.offReason})` : ''}. ${yours}.`
-  if (state.phase === 'locked') return `Effort router: ${label} for this session (${state.reason ?? 'router'}).${state.why ? ` ${state.why}` : ''}`
-  if (state.gaveUp) return `Effort router: stopped checking (no clear task yet). ${yours}.`
-  const leaning = context.leaning
-  const leaned = leaning ? ` The last check leaned ${leaning.level} but was only ${sureOf(leaning)}.` : ''
-  return `Effort router: undecided. ${yours} until the task is clear.${leaned}`
-}
-
-/**
- * The band's buttons for a state (then `Hide`, which the caller adds): off →
- * `Start routing`; deciding → `Assess now`; decided → `Reassess now` and
- * `Reassess with my next prompt` (back to deciding, so the steer the user is
- * about to type is what gets judged: Tommy, 2026-10-04, "as soon as I realise
- * I'm on the wrong setting, I want to steer it off somewhere else"); and,
- * while routing, `Stop routing (back to <setting>)`. Tommy, 2026-10-04: "Check now"
- * read as deterministic and free, and "Turn off" didn't say what it turned
- * off. `allowOff: false` (an organisation's setting) leaves out Stop routing.
- */
-export function bandActions(state: RouterState, allowOff = true, setting?: Level): BandAction[] {
-  if (state.unsupported) return []
-  if (state.mode === 'picker') return [{ value: 'on', label: 'Start routing' }]
-  const assess: BandAction[] =
-    state.phase === 'locked'
-      ? [{ value: 'suggest', label: 'Reassess now' }, { value: 'next', label: 'Reassess with my next prompt' }]
-      : [{ value: 'suggest', label: 'Assess now' }]
-  return allowOff ? [...assess, { value: 'off', label: stopLabel(setting) }] : assess
-}
-
-// --- settings-borne rules (org / user / project) --------------------------------------
-
-export type SettingsRules = {
-  /** The layer's rules text, when that settings source sets one. */
-  rules?: string
-  /** Org only: `enforce` makes the org layer final. */
-  rulesMode?: 'extend' | 'enforce'
-  /** Org only: false stops users turning the router off, so the org's routing always applies. */
-  allowOff?: boolean
-  /** Org only: false turns subagent routing off for everyone. */
-  routeSubagents?: boolean
-}
-
-/**
- * Reads effort-router's settings out of one settings source (a parsed
- * settings.json). Looks in `pluginConfigs[<name> | <name>@<marketplace>].options`
- * first, then a top-level `effortRouter` object. Anything malformed is ignored.
- */
-export function settingsRulesOf(source: unknown, pluginName = 'effort-router'): SettingsRules {
-  const out: SettingsRules = {}
-  if (typeof source !== 'object' || source === null) return out
+export function settingsRulesOf(source: unknown, pluginName = 'effort-router'): string | undefined {
+  if (typeof source !== 'object' || source === null) return undefined
   const record = source as Record<string, unknown>
   const candidates: unknown[] = []
   const configs = record.pluginConfigs
   if (typeof configs === 'object' && configs !== null) {
     for (const [key, value] of Object.entries(configs as Record<string, unknown>)) {
-      if (key === pluginName || key.startsWith(`${pluginName}@`)) {
-        candidates.push((value as Record<string, unknown> | null)?.options)
-      }
+      if (key === pluginName || key.startsWith(`${pluginName}@`)) candidates.push((value as Record<string, unknown> | null)?.options)
     }
   }
   candidates.push(record.effortRouter)
   for (const candidate of candidates) {
-    if (typeof candidate !== 'object' || candidate === null) continue
-    const c = candidate as Record<string, unknown>
-    if (out.rules === undefined && typeof c.rules === 'string' && c.rules.trim() !== '') out.rules = c.rules
-    if (out.rulesMode === undefined && (c.rulesMode === 'extend' || c.rulesMode === 'enforce')) out.rulesMode = c.rulesMode
-    if (out.allowOff === undefined && typeof c.allowOff === 'boolean') out.allowOff = c.allowOff
-    if (out.routeSubagents === undefined && typeof c.routeSubagents === 'boolean') out.routeSubagents = c.routeSubagents
+    const rules = (candidate as Record<string, unknown> | null | undefined)?.rules
+    if (typeof rules === 'string' && rules.trim() !== '') return rules
   }
-  return out
+  return undefined
 }
 
 export type RuleSources = {
   defaults: string
-  org?: SettingsRules
-  /** The org layer's label, e.g. `policy settings`. */
+  org?: string
+  /** The org layer's label, e.g. `managed settings`. */
   orgSource?: string
   userFile?: { path: string; text: string | undefined }
   userSettings?: string
@@ -1727,24 +1610,18 @@ export type RuleSources = {
   projectSettings?: string
 }
 
-/**
- * Builds the layer stack: shipped defaults → org (policy settings) → user
- * (file, else user settings option) → project (file, else project settings
- * option). Under org `enforce`, the stack stops at the org layer.
- */
-export function ruleLayers(sources: RuleSources): { layers: RuleLayer[]; enforced: boolean } {
+/** The layer stack: shipped defaults, organisation, user (file, else setting), project (file, else setting). */
+export function ruleLayers(sources: RuleSources): RuleLayer[] {
   const layers: RuleLayer[] = [{ source: 'built-in defaults', text: sources.defaults }]
-  if (sources.org?.rules !== undefined) layers.push({ source: sources.orgSource ?? 'policy settings', text: sources.org.rules })
-  const enforced = sources.org?.rulesMode === 'enforce'
-  if (enforced) return { layers, enforced }
+  if (sources.org !== undefined) layers.push({ source: sources.orgSource ?? 'managed settings', text: sources.org })
   const pick = (file: RuleSources['userFile'], setting: string | undefined, settingLabel: string): RuleLayer | undefined => {
     if (file?.text !== undefined) return { source: file.path, text: file.text }
     if (setting !== undefined) return { source: settingLabel, text: setting }
     return undefined
   }
-  const user = pick(sources.userFile, sources.userSettings, 'user settings (pluginConfigs option)')
-  const project = pick(sources.projectFile, sources.projectSettings, 'project settings (pluginConfigs option)')
+  const user = pick(sources.userFile, sources.userSettings, 'user settings (rules option)')
+  const project = pick(sources.projectFile, sources.projectSettings, 'project settings (rules option)')
   if (user) layers.push(user)
   if (project) layers.push(project)
-  return { layers, enforced }
+  return layers
 }
