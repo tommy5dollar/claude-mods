@@ -1302,7 +1302,8 @@ function footerWords(state: RouterState, view: View): { text: string; dim: boole
   const glyph = GLYPH[state.status]
   const running = runningLevel(state, setting)
   // While a check runs, the level stays and an ellipsis takes the progress circle's place.
-  if (view.assessing) return { text: `${glyph}${running ? ` ${running}` : ''} …`, dim: false }
+  // Before any level is known (a new session, ahead of its first check) an ellipsis too, rather than a lone circle.
+  if (view.assessing || (running === undefined && state.status === 'unlocked')) return { text: `${glyph}${running ? ` ${running}` : ''} …`, dim: false }
   if (state.status === 'locked') return { text: `${glyph} ${running ?? ''}`.trim(), dim: false }
   return { text: `${glyph}${running ? ` ${running}` : ''} ${progressGlyph(state.assessed, view.limit)}`, dim: false }
 }
