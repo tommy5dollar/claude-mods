@@ -45,7 +45,7 @@ Level names don't mean the same thing on every model: each level buys a differen
 
 When to answer undecided, and when to suggest:
 - Answer undecided ONLY when no actionable task has been stated yet: greetings, setup or housekeeping ("pull the latest code", "install the deps", "what's in this repo?"), or pure questions asked before any work. That opening filler is not the task.
-- Once the user has stated a real task, suggest the best level for it NOW, even if the details are still unclear. Do not wait for a full spec: you are asked again after every user message and the level is refined as clarification arrives. Unclear details are a reason to pick the level the task most likely needs, never a reason to answer undecided.
+- Once the user has stated a real task, suggest the best level for it NOW, even if the details are still unclear. Do not wait for a full spec: you are asked again after each of the user's first few messages and the level is refined as clarification arrives. Unclear details are a reason to pick the level the task most likely needs, never a reason to answer undecided.
 
 Judge the task as it stands now:
 - Weigh the latest exchange most. A later clarification of scope overrides an earlier ask: "fix the whole auth system" followed by "actually just the typo in the login message" is a small change.

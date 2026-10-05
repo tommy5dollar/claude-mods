@@ -41,7 +41,7 @@ claude plugin marketplace add tommy5dollar/claude-mods
 claude plugin install context-gauge@tommy-mods
 ```
 
-Needs Claude Code 2.1.287 or later (Claude Mods).
+Needs Claude Code 2.1.286 or later (Claude Mods).
 
 ## Settings
 
