@@ -144,12 +144,12 @@ Set `routeSubagents` to `false` to leave subagents at the session's level.
 ```
 Effort for the last 7 days (since 2026-09-28): 412 requests in 9 sessions, 610k output tokens.
 By level:
-  low: 120 requests, 31k output tokens (avg 258)
-  medium: 260 requests, 410k output tokens (avg 1.6k)
-  high: 32 requests, 169k output tokens (avg 5.3k)
+- low: 120 requests, 31k output tokens (avg 258)
+- medium: 260 requests, 410k output tokens (avg 1.6k)
+- high: 32 requests, 169k output tokens (avg 5.3k)
 Changed by the router: 74 requests
-  subagents, medium → low: 44 requests, 9.9k output tokens (avg 225, vs 1.6k for those left at medium)
-  main conversation, medium → high: 30 requests, 160k output tokens (avg 5.3k, vs 1.6k for those left at medium)
+- subagents, medium → low: 44 requests, 9.9k output tokens (avg 225, vs 1.6k for those left at medium)
+- main conversation, medium → high: 30 requests, 160k output tokens (avg 5.3k, vs 1.6k for those left at medium)
 The router's own assessments: 61 (9 of a first prompt, 14 of a conversation, 38 for subagents), using 3.1k output and 1.20M input tokens.
 By repo (output tokens): payments 400k, web 210k.
 No "saved" figure: the router lowers easy tasks and raises hard ones, so these averages can't show what a changed request would have cost.

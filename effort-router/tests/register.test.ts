@@ -688,7 +688,8 @@ describe('effort-router', () => {
       await $.session.start(STARTED)
       await turn($, 'fix the crash in the parser')
       const status = await route($, 'status')
-      expect(status).toStartWith('Effort router: unlocked. High (chosen by the router), 90% confidence. Locks after 4 more prompts.\nLast assessment: medium 10%, high 90%')
+      expect(status).toStartWith('Unlocked. High (chosen by the router), 90% confidence. Locks after 4 more prompts.\nAssessed 1 of 5 prompts.\n\nLast assessment (after a prompt, a separate call')
+      expect(status).toContain('medium 10%, high 90%. 90% sure medium was too low, so it moved to high.\nTask: bug fix in existing code')
       expect(status).toContain('Assessed 1 of 5 prompts.')
       expect(status).toContain('Subagents: each gets its own level from its task.')
     })
@@ -704,7 +705,7 @@ describe('effort-router', () => {
       await submit($, 'fix the crash in the parser')
       expect(world.classifierCalls).toBe(0)
       expect((await footerOf(await mountFooter($))).shown).toBe('⏸️ medium')
-      expect(await route($, 'status')).toStartWith('Effort router: off on Haiku 4.5. It works with Fable 5.1, Opus 5.5 and Sonnet 5.5.')
+      expect(await route($, 'status')).toStartWith('Off on Haiku 4.5. It works with Fable 5.1, Opus 5.5 and Sonnet 5.5.')
       expect(await route($, 'on')).toBe("The router doesn't support Haiku 4.5, so your effort setting applies. It works with Fable 5.1, Opus 5.5 and Sonnet 5.5.")
     })
 
@@ -736,7 +737,7 @@ describe('effort-router', () => {
       await turn($, 'fix the crash in the parser')
       expect(world.classifierCalls).toBe(0)
       expect(world.sent).toEqual(['medium'])
-      expect(await route($, 'status')).toStartWith('Effort router: off. Medium (your effort setting). This session started before the router.')
+      expect(await route($, 'status')).toStartWith('Off. Medium (your effort setting). This session started before the router.')
     })
 
     test('a session first seen part way through the window counts its earlier prompts', async ($, on) => {
@@ -747,6 +748,19 @@ describe('effort-router', () => {
       await turn($, 'fix the crash in the parser')
       expect(world.classifierCalls).toBe(1)
       expect(await route($, 'status')).toContain('Assessed 4 of 5 prompts.')
+    })
+
+    test('a picker change is seen after a reload: your setting comes back from the ledger', async ($, on) => {
+      const world = worldOf(on, HIGH, {}, HOME)
+      world.files['/home/t/.claude/effort-router/spend/session-1.json'] = JSON.stringify({
+        version: 1, session: 'session-1', repo: 'scratch', rows: [], reads: [],
+        state: { status: 'locked', level: 'medium', assessed: 5, lockedBy: 'router', lockedAfter: 5 }, setting: 'medium',
+      })
+      await $.session.start(STARTED)
+      await turn($, 'one more thing', 'xhigh') // the picker moved while the router was reloading
+      expect(world.sent).toEqual(['xhigh'])
+      expect(world.lines).toEqual(['You changed the effort to xhigh, so routing is off.'])
+      expect(JSON.parse(world.files[LEDGER] ?? '{}').setting).toBe('xhigh')
     })
 
     test('the state is saved in the ledger at once, and a session carries on from it', async ($, on) => {
@@ -794,7 +808,7 @@ describe('effort-router', () => {
       const status = await route($, 'status')
       expect(status).toContain('Subagents: each gets its own level from its task.')
       expect(status).toContain('Recent subagents (1):')
-      expect(status).toContain('  low: Find parser call sites (codebase search)')
+      expect(status).toContain('- low: Find parser call sites (codebase search)')
     })
 
     test('the brief is capped at 24k characters', async ($, on) => {
@@ -955,7 +969,7 @@ describe('effort-router', () => {
       await step($, 0)
       expect(world.sent).toEqual(['medium', 'high']) // untouched (the engine applies low); the main thread keeps high
       const status = await route($, 'status')
-      expect(status).toContain('  low: Probe (set by its agent definition)')
+      expect(status).toContain('- low: Probe (set by its agent definition)')
       expect(world.debug.some(line => /subagent agent-1 \(effort-probe-low: Probe\) -> low set by its definition, left alone/.test(line))).toBe(true)
     })
 
@@ -968,7 +982,7 @@ describe('effort-router', () => {
       await $.session.start(STARTED)
       await spawn($, { subagentType: 'reviewer', description: 'Review', prompt: 'review it' })
       expect(world.subagentReads).toHaveLength(0)
-      expect(await route($, 'status')).toContain('  max: Review (set by its agent definition)')
+      expect(await route($, 'status')).toContain('- max: Review (set by its agent definition)')
       const scout = await spawn($, { subagentType: 'scout', description: 'Scout', prompt: 'search for X' })
       expect(world.subagentReads).toHaveLength(1) // the project's scout sets no effort: routed
       await step($, 0, scout)
@@ -1004,7 +1018,7 @@ describe('effort-router', () => {
       expect(world.subagentReads).toHaveLength(0)
       await step($, 0, id)
       expect(world.sent).toEqual(['medium'])
-      expect(await route($, 'status')).toContain('  xhigh: Audit (set by its agent definition)')
+      expect(await route($, 'status')).toContain('- xhigh: Audit (set by its agent definition)')
     })
 
     test("a plugin's agent is not looked up: it is routed", async ($, on) => {
@@ -1031,8 +1045,8 @@ describe('effort-router', () => {
       expect(world.sent).toEqual(['high', 'low'])
       const report = await route($, 'report session')
       expect(report).toContain('Effort for this session: 2 requests, 2.0k output tokens.')
-      expect(report).toContain('  main conversation, medium → high: 1 request, 1.0k output tokens (avg 1.0k)')
-      expect(report).toContain('  subagents, medium → low: 1 request, 1.0k output tokens (avg 1.0k)')
+      expect(report).toContain('- main conversation, medium → high: 1 request, 1.0k output tokens (avg 1.0k)')
+      expect(report).toContain('- subagents, medium → low: 1 request, 1.0k output tokens (avg 1.0k)')
       expect(report).toContain("The router's own assessments: 2 (1 of a first prompt, 1 for subagents),")
       const before = world.written.length // the state, written as it changed
       await done($)
@@ -1056,7 +1070,7 @@ describe('effort-router', () => {
       expect(world.sent).toEqual(['medium'])
       const week = await route($, 'report')
       expect(week).toContain('3 requests in 2 sessions, 2.6k output tokens.')
-      expect(week).toContain('  medium: 2 requests, 600 output tokens (avg 300)')
+      expect(week).toContain('- medium: 2 requests, 600 output tokens (avg 300)')
       expect(week).toContain('By repo (output tokens): employment 2.0k, mods 600.')
       expect(await route($, 'report session')).toContain('Effort for this session: 2 requests, 600 output tokens.')
     })

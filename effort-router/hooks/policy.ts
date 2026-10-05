@@ -804,7 +804,8 @@ export function subagentReport(status: SubagentStatus, shown = 10): string[] {
   lines.push(`Recent subagents (${status.agents.length}${status.agents.length > recent.length ? `, newest ${recent.length} shown` : ''}):`)
   for (const agent of recent) {
     const description = cut(agent.description.replace(/\s+/g, ' ').trim() || agent.subagentType || 'a subagent', 60).replace(/… \[\d+ more chars\]$/, '…')
-    lines.push(`  ${agent.level}: ${description} (${agent.byDefinition ? 'set by its agent definition' : agent.reason})`)
+    // A bullet, not an indent: the Desktop app drops leading spaces in command output.
+    lines.push(`- ${agent.level}: ${description} (${agent.byDefinition ? 'set by its agent definition' : agent.reason})`)
   }
   return lines
 }
@@ -880,7 +881,11 @@ export type VerdictRow = {
 export const MAX_VERDICTS = 200
 
 /** One session's ledger: its requests, the router's reads, its assessments and, since 0.17, its state. */
-export type SpendLedger = { version: 1; session: string; repo: string; rows: SpendRow[]; reads: ReadRow[]; verdicts?: VerdictRow[]; state?: SavedState }
+export type SpendLedger = {
+  version: 1; session: string; repo: string; rows: SpendRow[]; reads: ReadRow[]; verdicts?: VerdictRow[]; state?: SavedState
+  /** Your effort setting as the last main-thread request showed it, so a picker change is still seen after a reload, restart or resume. */
+  setting?: Level
+}
 
 /** A request's usage, in the API's spelling. */
 export type SpendUsage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
@@ -983,6 +988,7 @@ export function parseLedger(text: string): SpendLedger | undefined {
     version: 1, session: value.session, repo: typeof value.repo === 'string' ? value.repo : 'unknown', rows, reads,
     ...(verdicts.length > 0 ? { verdicts } : {}),
     ...(state ? { state: savedOf(state) } : {}),
+    ...(isLevel(value.setting) ? { setting: value.setting } : {}),
   }
 }
 
@@ -1045,7 +1051,7 @@ export function spendReport(ledgers: readonly SpendLedger[], period: SpendPeriod
   lines.push('By level:')
   for (const [level, list] of [...group(rows, r => r.to)].sort(([a], [b]) => byLevelOrder(a, b))) {
     const t = sum(list)
-    lines.push(`  ${level}: ${plural(t.requests, 'request')}, ${tokens(t.output)} output tokens (avg ${avg(t)})`)
+    lines.push(`- ${level}: ${plural(t.requests, 'request')}, ${tokens(t.output)} output tokens (avg ${avg(t)})`)
   }
 
   const unmoved = group(rows.filter(r => !r.byDefinition && r.from === r.to), r => r.to)
@@ -1061,7 +1067,7 @@ export function spendReport(ledgers: readonly SpendLedger[], period: SpendPeriod
     for (const { caller, from, to, t } of groups.sort((a, b) => b.t.requests - a.t.requests)) {
       const left = unmoved.get(from)
       const beside = left ? `, vs ${avg(sum(left))} for those left at ${from}` : ''
-      lines.push(`  ${caller === 'main' ? 'main conversation' : 'subagents'}, ${from} → ${to}: ${plural(t.requests, 'request')}, ${tokens(t.output)} output tokens (avg ${avg(t)}${beside})`)
+      lines.push(`- ${caller === 'main' ? 'main conversation' : 'subagents'}, ${from} → ${to}: ${plural(t.requests, 'request')}, ${tokens(t.output)} output tokens (avg ${avg(t)}${beside})`)
     }
   }
 
@@ -1404,19 +1410,30 @@ export function lastAssessmentLine(last: LastAssessment | undefined, threshold: 
   if (!last.spread || !last.level) return `Last assessment: no clear task yet, so it stayed.`
   const reason = last.reason ? ` (${last.reason})` : ''
   const parts = [`Last assessment: ${spreadText(last.spread)}${reason}.`]
-  if (last.against) {
-    const mass = (above: boolean) =>
-      offered.filter(l => (above ? rank(l) > rank(last.against as Level) : rank(l) < rank(last.against as Level)))
-        .reduce((n, l) => n + (last.spread?.[l] ?? 0), 0)
-    const up = mass(true)
-    const down = mass(false)
-    const side = up >= down ? { share: up, way: 'low' } : { share: down, way: 'high' }
-    const moved = last.outcome.startsWith('moved')
-    const did = moved ? `so it moved to ${last.level}` : 'so it stayed'
-    parts.push(`${percent(side.share)} sure ${last.against} ${moved ? 'was' : 'is'} too ${side.way}, ${did}.${moved ? '' : ` It moves at ${percent(threshold)}.`}`)
-  }
+  const verdict = verdictSentence(last, threshold, offered)
+  if (verdict) parts.push(verdict)
   if (locked && last.why) parts.push(last.why)
   return parts.join(' ')
+}
+
+/** `40% sure medium is too low, so it stayed. It moves at 70%.`: the larger side against the level it was judged against. */
+function verdictSentence(last: LastAssessment, threshold: number, offered: readonly Level[]): string | undefined {
+  if (!last.spread || !last.level || !last.against) return undefined
+  const against = last.against
+  const mass = (above: boolean) =>
+    offered.filter(l => (above ? rank(l) > rank(against) : rank(l) < rank(against))).reduce((n, l) => n + (last.spread?.[l] ?? 0), 0)
+  const up = mass(true)
+  const down = mass(false)
+  const side = up >= down ? { share: up, way: 'low' } : { share: down, way: 'high' }
+  const moved = last.outcome.startsWith('moved')
+  const did = moved ? `so it moved to ${last.level}` : 'so it stayed'
+  return `${percent(side.share)} sure ${against} ${moved ? 'was' : 'is'} too ${side.way}, ${did}.${moved ? '' : ` It moves at ${percent(threshold)}.`}`
+}
+
+/** A band line without its `Effort router: ` prefix, for command output that Claude Code already labels. */
+export const unprefixed = (line: string): string => {
+  const rest = line.replace(/^Effort router: /, '')
+  return rest.charAt(0).toUpperCase() + rest.slice(1)
 }
 
 /** The band's third line, when subagents were routed. */
@@ -1517,31 +1534,51 @@ export function parseRoute(args: string): RouteCommand {
 }
 
 /**
- * What `/er status` prints: the band's lines, then the troubleshooting
- * details: the last assessment's full reply and how it was made, the last
- * error, how much a separate call read, and the routed subagents.
+ * What `/er status` prints, in short blocks: where the router stands, the
+ * last assessment (how it was made, its spread and verdict, the task and
+ * why), the session's counts and errors, then the routed subagents. The raw
+ * reply appears only when it couldn't be read as a level.
  */
 export function routeReport(state: RouterState, view: View, diagnostics?: ReadDiagnostics): string {
-  const lines = [bandHeadline(state, view)]
-  const last = lastAssessmentLine(view.last, view.threshold, view.offered, state.status === 'locked')
-  if (last) lines.push(last)
-  if (state.status === 'unlocked') lines.push(`Assessed ${Math.min(state.assessed, view.limit)} of ${view.limit} prompts.`)
-  if (state.hint) lines.push(`Your hint for the next assessment: ${state.hint}`)
-  if (diagnostics) {
-    lines.push(`Assessments this session: ${diagnostics.calls}. It moves at ${percent(view.threshold)}.`)
-    const verdict = diagnostics.verdict
+  const blocks: string[][] = []
+  const now = [unprefixed(bandHeadline(state, view))]
+  if (state.status === 'unlocked') now.push(`Assessed ${Math.min(state.assessed, view.limit)} of ${view.limit} prompts.`)
+  if (state.hint) now.push(`Your hint for the next assessment: ${state.hint}`)
+  blocks.push(now)
+
+  const last = view.last
+  const verdict = diagnostics?.verdict
+  if (last) {
+    const details: string[] = []
     if (verdict) {
-      const took = diagnostics.lastReadMs === undefined ? '' : `, took ${(diagnostics.lastReadMs / 1000).toFixed(1)}s`
-      const how = verdict.kind === 'fork' ? 'a fork of the conversation' : verdict.kind === 'first' ? 'a separate call' : verdict.kind ?? 'an assessment'
-      lines.push(`Last reply (${verdict.trigger}, ${how}, ${ago(diagnostics.now, verdict.at)}${took}${view.last?.against ? `, judged against ${view.last.against}` : ''}): ${cut(verdict.raw.replace(/\s+/g, ' ').trim(), 600)}`)
+      details.push(verdict.trigger)
+      details.push(verdict.kind === 'fork' ? 'a fork of the conversation' : verdict.kind === 'first' ? 'a separate call' : verdict.kind ?? 'an assessment')
+      details.push(ago(diagnostics?.now ?? last.at, verdict.at))
+      if (diagnostics?.lastReadMs !== undefined) details.push(`took ${(diagnostics.lastReadMs / 1000).toFixed(1)}s`)
     }
-    const sent = diagnostics.sent
-    if (sent && sent.omitted > 0) lines.push(`The separate call read ${sent.sentChars} of the conversation's ${sent.fullChars} characters (limit ${sent.maxChars}).`)
-    if (diagnostics.error) lines.push(`Last error (${ago(diagnostics.now, diagnostics.error.at)}): ${cut(diagnostics.error.text, 200)}`)
-    if (diagnostics.subagents) lines.push(...subagentReport(diagnostics.subagents))
+    if (last.against) details.push(`judged against ${last.against}`)
+    const block = [`Last assessment${details.length > 0 ? ` (${details.join(', ')})` : ''}:`]
+    if (!last.spread || !last.level) {
+      block.push('No clear task yet, so it stayed.')
+      if (verdict && !/"undecided"/.test(verdict.raw)) block.push(`Its reply: ${cut(verdict.raw.replace(/\s+/g, ' ').trim(), 300)}`)
+    } else {
+      const sentence = verdictSentence(last, view.threshold, view.offered)
+      block.push(`${spreadText(last.spread)}.${sentence ? ` ${sentence}` : ''}`)
+      if (last.reason) block.push(`Task: ${last.reason}`)
+      if (last.why) block.push(`Why: ${last.why}`)
+    }
+    blocks.push(block)
   }
-  lines.push(ROUTE_USAGE)
-  return lines.join('\n')
+
+  if (diagnostics) {
+    const counts = [`Assessments this session: ${diagnostics.calls}. It moves at ${percent(view.threshold)}.`]
+    const sent = diagnostics.sent
+    if (sent && sent.omitted > 0) counts.push(`The separate call read ${sent.sentChars} of the conversation's ${sent.fullChars} characters (limit ${sent.maxChars}).`)
+    if (diagnostics.error) counts.push(`Last error (${ago(diagnostics.now, diagnostics.error.at)}): ${cut(diagnostics.error.text, 200)}`)
+    blocks.push(counts)
+    if (diagnostics.subagents) blocks.push(subagentReport(diagnostics.subagents))
+  }
+  return blocks.map(block => block.join('\n')).join('\n\n')
 }
 
 // --- saved state (in the session's ledger) ---------------------------------------------

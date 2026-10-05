@@ -11,7 +11,7 @@ A redesign of the main thread's rule, the footer, the band and the command. Sett
 - **The band** opens only from the footer or `/er`. It says the footer in words, the last assessment and how many subagents were routed, over four fixed slots: Hide, Lock or Unlock, Turn off or on, and Assess. A greyed-out slot stays in place and says why when pressed.
 - **Lock and Unlock.** Lock ends assessing early. Unlock keeps the level and assesses your next five prompts from there. Assess while locked runs one fresh assessment and keeps the result locked. Turning on offers locked at the router's last level, or unlocked from your own setting.
 - **One line per change** in the conversation, never sent to the model.
-- **Changing the effort picker turns routing off**, whether locked or unlocked.
+- **Changing the effort picker turns routing off**, whether locked or unlocked. Your setting is saved with the session, so a change made across a restart or resume is seen too.
 - **`/effort-router`, alias `/er`,** replaces `/route`. Its verbs are explicit (`lock`, `unlock`, `on`, `off`, `assess [hint]`, `report`, `status`, `rules`), and anything else is refused rather than run as a hint.
 - **Removed:** asking first (`consent: ask`, the question card and `EFFORT_ROUTER_CONSENT`), giving up after a budget, the organisation's `rulesMode: enforce` and `allowOff`, `/route rules init` and `critique`, and the options `decideWithin`, `showChecks`, `classifierModel`, `classifyTimeoutMs`, `classifierMaxChars`, `skipAboveTokens`, `firstCheckInstructions` and `footerControl`.
 - **Assessments** always run on the session's model, as a fork when there's a conversation to fork. The prompt being assessed goes to a separate call in whole, outside the 24,000-character cap.
@@ -19,6 +19,7 @@ A redesign of the main thread's rule, the footer, the band and the command. Sett
 - **A session set to max** is offered levels up to max, so it can stay there. Before, it was always moved down.
 - **State** is saved in each session's ledger, so the plugin store and its 100-session limit are gone.
 - An assessment may take up to 30 seconds (was 15): on Fable 5.1 at xhigh a fork took 15 seconds in testing.
+- `/er status` and `/er report` print short blocks and bulleted lists, which read in the Desktop app as well as the terminal.
 - A failed assessment still uses up its prompt. Each assessment in the ledger names the prompt it assessed.
 
 ### 0.16 (2026-10-05)

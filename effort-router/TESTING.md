@@ -15,7 +15,7 @@ bun test                            # 83 tests. The 0.17 rule: settle moves to t
                                     # ignored); the transcript (the prompt being assessed in whole, outside the cap), reply
                                     # parsing, the classifier frame, $defaults and settings rule layers (no enforce),
                                     # subagent reads, routing and reports, agent definitions, the spend ledger and report
-claude plugin test .                # 57 tests in the engine's kit: the first prompt assessed by a separate call with the
+claude plugin test .                # 58 tests in the engine's kit: the first prompt assessed by a separate call with the
                                     # instructions and judged at the first request; later prompts fork and are judged against
                                     # the level running; an unsure assessment stays; no clear task still counts; the lock
                                     # after the window; a move on the last prompt; the confidence option; a picker change
@@ -27,14 +27,14 @@ claude plugin test .                # 57 tests in the engine's kit: the first pr
                                     # on, Turn on and assess, Assess while locked, the subagent count, no band under a
                                     # survey; /effort-router and /er registered, -p prints the band, every verb's reply,
                                     # unknown text refused; unsupported models; /model to another; model notes; first
-                                    # sightings; the state saved at once and carried on by another load;
+                                    # sightings; the state saved at once and carried on by another load; a picker change seen after a reload;
                                     # subagents: agent.spawn reads the brief before the agent starts and its requests carry
                                     # that level; the brief cap; forks inherit; failed, hanging or unusable reads fall back
                                     # to the parent's level; routeSubagents false; an old session still routes them; off
                                     # stops it and on brings it back; Haiku agents left alone; a denied spawn; agent
                                     # definitions with and without effort; spend: each request recorded, saved when a turn
                                     # ends, carried on from a saved file, reported by week and repo
-"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 57 under Desktop's engine (2.1.286, passing 2026-10-05)
+"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 58 under Desktop's engine (2.1.286, passing 2026-10-05)
 claude plugin validate . --strict
 bun run eval -- --runs 3            # opt-in, real model: 23 session fixtures and 14 subagent briefs, see below
                                     # (both sets as separate calls on --model, default opus, with its notes; the forks

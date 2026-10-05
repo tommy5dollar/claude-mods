@@ -242,6 +242,11 @@ async function loadSession($: EngineInterface, id: string): Promise<Session> {
   const spend = await loadSpend($, id)
   let state = restored(spend.ledger.state)
   const session: Session = { state: state ?? freshState(), spend, reading: false, bandOpen: false, assessing: false, calls: 0, agents: new Map(), busy: false }
+  // Your setting as the last request before a reload, restart or resume showed it, so a change made since is seen.
+  if (spend.ledger.setting) {
+    session.picker = spend.ledger.setting
+    session.pickerSeen = true
+  }
   if (!state) {
     // First sighting: prompts already in the session count toward the window. A session with the window already
     // used up started before the router, and is left off.
@@ -986,8 +991,8 @@ export function register(on: On, options: PluginOptions): void {
       for (const name of COMMANDS) {
         await $.command.register({
           name,
-          description: name === 'er' ? 'Short for /effort-router' : 'Effort router: open the band, or lock, unlock, on, off, assess [hint], report, status, rules',
-          argumentHint: 'lock | unlock | on | off | assess [hint] | report [session|week|month|all] | status | rules',
+          description: 'Effort router: open the band, or lock, unlock, on, off, assess [hint], report, status, rules',
+          argumentHint: '[lock|unlock|on|off|assess|report|status|rules]',
           immediate: true,
         }).catch((error: unknown) => $.ui.log(`effort-router: /${name} not registered: ${String(error)}`, { to: 'debug' }))
       }
@@ -1110,6 +1115,7 @@ export function register(on: On, options: PluginOptions): void {
         if (isLevel(e.effort)) {
           const was = session.pickerSeen ? session.picker : undefined
           session.picker = e.effort
+          if (session.spend.ledger.setting !== e.effort) record(session, ledger => ({ ...ledger, setting: e.effort as Level }))
           if (!session.pickerSeen) {
             session.pickerSeen = true
             show($)

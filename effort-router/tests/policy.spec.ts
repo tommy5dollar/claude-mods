@@ -463,9 +463,9 @@ describe('subagent reads', () => {
     const lines = subagentReport({ routing: 'on', agents })
     expect(lines[0]).toBe('Subagents: each gets its own level from its task.')
     expect(lines[1]).toBe('Recent subagents (12, newest 10 shown):')
-    expect(lines[2]).toBe('  low: task 11 (reason 11)')
+    expect(lines[2]).toBe('- low: task 11 (reason 11)')
     expect(lines).toHaveLength(12)
-    expect(lines.at(-1)).toBe('  low: task 2 (reason 2)')
+    expect(lines.at(-1)).toBe('- low: task 2 (reason 2)')
     expect(subagentReport({ routing: 'setting', agents: [] })).toEqual(['Subagents: not routed (routeSubagents is off), so they use the session level.'])
     expect(subagentReport({ routing: 'user-off', agents: [] })[0]).toContain('they use your effort setting')
 
@@ -524,7 +524,7 @@ describe('agent definitions that set their own effort', () => {
 
   test('status marks a level set by a definition; a nested spawn inherits only a level', () => {
     const lines = subagentReport({ routing: 'on', agents: [{ level: 'low', reason: 'from u/probe.md', subagentType: 'probe', description: 'Probe', byDefinition: true }] })
-    expect(lines.at(-1)).toBe('  low: Probe (set by its agent definition)')
+    expect(lines.at(-1)).toBe('- low: Probe (set by its agent definition)')
     const agents = new Map([
       ['a', { level: 'low' as const, reason: 'r', subagentType: 't', description: 'd', byDefinition: true }],
       ['b', { level: 32000, reason: 'r', subagentType: 't', description: 'd', byDefinition: true }],
@@ -595,12 +595,12 @@ describe('the spend ledger', () => {
     expect(report.split('\n')).toEqual([
       'Effort for the last 7 days (since 2026-09-28): 18 requests in 2 sessions, 14k output tokens.',
       'By level:',
-      '  low: 11 requests, 2.3k output tokens (avg 209)',
-      '  medium: 4 requests, 4.0k output tokens (avg 1.0k)',
-      '  high: 3 requests, 8.0k output tokens (avg 2.7k)',
+      '- low: 11 requests, 2.3k output tokens (avg 209)',
+      '- medium: 4 requests, 4.0k output tokens (avg 1.0k)',
+      '- high: 3 requests, 8.0k output tokens (avg 2.7k)',
       'Changed by the router: 12 requests',
-      '  subagents, medium → low: 10 requests, 2.0k output tokens (avg 200, vs 1.0k for those left at medium)',
-      '  main conversation, medium → high: 2 requests, 6.0k output tokens (avg 3.0k, vs 1.0k for those left at medium)',
+      '- subagents, medium → low: 10 requests, 2.0k output tokens (avg 200, vs 1.0k for those left at medium)',
+      '- main conversation, medium → high: 2 requests, 6.0k output tokens (avg 3.0k, vs 1.0k for those left at medium)',
       'Set by agent definitions: 1 request (low 1).',
       "The router's own assessments: 1, using 50 output and 4.0k input tokens.",
       'By repo (output tokens): mods 12k, employment 2.0k.',
@@ -888,18 +888,29 @@ describe('0.17: messages, /er and saved state', () => {
     expect(ROUTE_USAGE).toContain('/er is short for /effort-router')
   })
 
-  test('/er status: the band lines, then the troubleshooting details', () => {
-    const last = { at: 5_000, spread: { medium: 0.6, high: 0.4 }, level: 'medium' as const, against: 'medium' as const, outcome: 'stayed' }
+  test('/er status: short blocks (where it stands, the last assessment, counts, subagents), no raw reply when it parsed', () => {
+    const last = { at: 5_000, spread: { medium: 0.6, high: 0.4 }, level: 'medium' as const, against: 'medium' as const, reason: 'small fix', why: 'One function.', outcome: 'stayed' }
     const report = routeReport(at({ assessed: 2, hint: 'security review' }), { ...VIEW, last }, {
       now: 10_000, calls: 2, verdict: { at: 5_000, trigger: 'after a prompt', raw: '{"decision":"level"}', kind: 'fork' }, lastReadMs: 1500,
       subagents: { routing: 'on', agents: [] },
     })
-    expect(report).toStartWith('Effort router: unlocked. Medium (your effort setting), 60% confidence. Locks after 3 more prompts.\nLast assessment: medium 60%, high 40%.')
-    expect(report).toContain('Assessed 2 of 5 prompts.')
-    expect(report).toContain('Your hint for the next assessment: security review')
-    expect(report).toContain('Assessments this session: 2. It moves at 70%.')
-    expect(report).toContain('Last reply (after a prompt, a fork of the conversation, 5s ago, took 1.5s, judged against medium): {"decision":"level"}')
-    expect(report).toContain('Subagents: each gets its own level from its task.')
+    expect(report).toBe([
+      'Unlocked. Medium (your effort setting), 60% confidence. Locks after 3 more prompts.',
+      'Assessed 2 of 5 prompts.',
+      'Your hint for the next assessment: security review',
+      '',
+      'Last assessment (after a prompt, a fork of the conversation, 5s ago, took 1.5s, judged against medium):',
+      'medium 60%, high 40%. 40% sure medium is too low, so it stayed. It moves at 70%.',
+      'Task: small fix',
+      'Why: One function.',
+      '',
+      'Assessments this session: 2. It moves at 70%.',
+      '',
+      'Subagents: each gets its own level from its task.',
+    ].join('\n'))
+    // A reply that couldn't be read as a level is shown.
+    const odd = routeReport(freshState(), { ...VIEW, last: { at: 5_000, outcome: 'no clear task' } }, { now: 10_000, calls: 1, verdict: { at: 5_000, trigger: 'after a prompt', raw: 'I think high?', kind: 'first' } })
+    expect(odd).toContain('No clear task yet, so it stayed.\nIts reply: I think high?')
   })
 
   test('the state is saved in the ledger and comes back; anything malformed is ignored', () => {
@@ -919,6 +930,8 @@ describe('0.17: messages, /er and saved state', () => {
     ledger = { ...ledger, state: savedOf(states[2] as RouterState) }
     expect(parseLedger(JSON.stringify(ledger))?.state).toEqual(savedOf(states[2] as RouterState))
     expect(parseLedger(JSON.stringify({ ...ledger, state: { status: 'bogus' } }))?.state).toBeUndefined()
+    expect(parseLedger(JSON.stringify({ ...ledger, setting: 'xhigh' }))?.setting).toBe('xhigh')
+    expect(parseLedger(JSON.stringify({ ...ledger, setting: 'huge' }))?.setting).toBeUndefined()
   })
 })
 
