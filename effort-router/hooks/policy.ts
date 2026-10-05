@@ -1608,16 +1608,28 @@ export function noticeActions(allowOff = true, setting?: Level, from?: Level): B
   return actions
 }
 
-/** The router's band above the prompt, which the footer button opens: one line about the state. */
-export function bandHeadline(state: RouterState): string {
+/** A check that picked a level but wasn't sure enough to act on it. */
+export function leaningOf(decision: Decision | undefined, threshold: number): Proposal | undefined {
+  return decision?.decision === 'lock' && decision.confidence !== undefined && !isConfident(decision, threshold) ? decision : undefined
+}
+
+/**
+ * The router's band above the prompt, which the footer button opens: one line
+ * about the state, naming the user's setting when it applies and, while
+ * deciding, what the last check leaned towards when it fell below the bar.
+ */
+export function bandHeadline(state: RouterState, context: { setting?: Level; leaning?: Proposal } = {}): string {
   const label = footerLabel(state).text
+  const yours = `Your effort setting${context.setting ? ` (${context.setting})` : ''} applies`
   if (state.unsupported) return `Effort router: off on ${state.unsupported}. It works with ${SUPPORTED_NAMES}.`
   if (state.asking) return `Effort router: ${label} Waiting for your answer.`
-  if (ranOut(state)) return `Effort router: no decision (${state.offReason}). Your effort setting applies.`
-  if (state.mode === 'picker') return `Effort router: off${state.offReason ? ` (${state.offReason})` : ''}. Your effort setting applies.`
+  if (ranOut(state)) return `Effort router: no decision (${state.offReason}). ${yours}.`
+  if (state.mode === 'picker') return `Effort router: off${state.offReason ? ` (${state.offReason})` : ''}. ${yours}.`
   if (state.phase === 'locked') return `Effort router: ${label} for this session (${state.reason ?? 'router'}).${state.why ? ` ${state.why}` : ''}`
-  if (state.gaveUp) return 'Effort router: stopped checking (no clear task yet). Your effort setting applies.'
-  return 'Effort router: undecided. Your effort setting applies until the task is clear.'
+  if (state.gaveUp) return `Effort router: stopped checking (no clear task yet). ${yours}.`
+  const leaning = context.leaning
+  const leaned = leaning ? ` The last check leaned ${leaning.level} but was only ${percent(leaning.confidence ?? 0)} sure.` : ''
+  return `Effort router: undecided. ${yours} until the task is clear.${leaned}`
 }
 
 /**

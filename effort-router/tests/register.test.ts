@@ -296,7 +296,7 @@ describe('effort-router', () => {
     expect((await footerOf(footer)).shown).toBe('using high')
     await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
     await settle($)
-    expect(world.efforts).toEqual(['high']) // the terminal picker is synced when idle
+    expect(world.efforts).toEqual([]) // /effort never runs: in the terminal it would also save the level as the default for new sessions
     await submit($, 'now add a test for it')
     expect(world.classifierCalls).toBe(1)
   })
@@ -538,7 +538,7 @@ describe('effort-router', () => {
 
     await footer.press({ key: 'route-state' })
     expect(await bandOf(band)).toMatchObject({ buttons: ['Assess now', 'Stop routing (back to medium)', 'Hide'] })
-    expect((await bandOf(band)).headline).toBe('Effort router: undecided. Your effort setting applies until the task is clear.')
+    expect((await bandOf(band)).headline).toBe('Effort router: undecided. Your effort setting (medium) applies until the task is clear.')
     await footer.press({ key: 'route-state' })
     expect((await bandOf(band)).headline).toBeUndefined()
 
@@ -559,7 +559,7 @@ describe('effort-router', () => {
     expect(world.sent.at(-1)).toBe('medium')
     expect((await footerOf(footer)).shown).toBe('off')
     await footer.press({ key: 'route-state' })
-    expect(await bandOf(band)).toEqual({ headline: 'Effort router: off. Your effort setting applies.', buttons: ['Start routing', 'Hide'] })
+    expect(await bandOf(band)).toEqual({ headline: 'Effort router: off. Your effort setting (medium) applies.', buttons: ['Start routing', 'Hide'] })
     await band.press({ key: 'on' })
     expect((await footerOf(footer)).shown).toBe('undecided')
   })

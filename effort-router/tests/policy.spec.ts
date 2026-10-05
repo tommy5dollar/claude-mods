@@ -475,6 +475,11 @@ describe('state', () => {
     expect(bandHeadline(ASKING)).toBe('Effort router: high? Waiting for your answer.')
     expect(bandHeadline(OFF)).toBe('Effort router: off. Your effort setting applies.')
     expect(bandHeadline(DECIDING)).toBe('Effort router: undecided. Your effort setting applies until the task is clear.')
+    expect(bandHeadline(DECIDING, { setting: 'low' })).toBe('Effort router: undecided. Your effort setting (low) applies until the task is clear.')
+    expect(bandHeadline(DECIDING, { setting: 'low', leaning: { level: 'high', reason: 'r', confidence: 0.62 } })).toBe(
+      'Effort router: undecided. Your effort setting (low) applies until the task is clear. The last check leaned high but was only 62% sure.',
+    )
+    expect(bandHeadline(OFF, { setting: 'medium' })).toBe('Effort router: off. Your effort setting (medium) applies.')
     expect(bandHeadline({ ...DECIDING, gaveUp: true })).toBe('Effort router: stopped checking (no clear task yet). Your effort setting applies.')
 
     expect(noticeHeadline(P_HIGH)).toBe('Effort router: using high for this session (bug fix in existing code).')

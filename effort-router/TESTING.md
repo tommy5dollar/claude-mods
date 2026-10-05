@@ -27,8 +27,8 @@ bun test                            # 101 tests: trimming (incl. the last assist
                                     # told its model with that model's notes, the subagent fork message, definitions' model
 claude plugin test .                # 74 tests in the engine's kit, among them, for the main thread: undecided runs at the
                                     # picker level with no question; the picker's level locks with no question and reading
-                                    # stops; a different level holds the request on the question, Use locks it and syncs
-                                    # /effort, Keep locks the picker level; the footer reads high? while the request waits;
+                                    # stops; a different level holds the request on the question, Use locks it and /effort
+                                    # never runs, Keep locks the picker level; the footer reads high? while the request waits;
                                     # dismissed runs at the picker level and the next read asks again; -p rejects; the
                                     # question at a later index after answered AskUserQuestion questions; a waiting verdict
                                     # asked after the budget runs out; /route asks from the command; /route while locked
@@ -302,7 +302,7 @@ Install the dev build in the Desktop Code tab, set the effort picker to Medium, 
 12. Existing session: resume a long chat from before the router was installed (6 or more prompts). The footer reads `off`, no card appears, and `/route status` starts `Off (session started before the router)`. Subagents are still routed there.
 13. Budget: in a fresh session send six filler prompts. The footer reads `off`, and `/route status` says `no clear task after 6 prompts`.
 14. Rules: `/route rules init project`, add a line after `$defaults`, run `/route rules`. It lists `+ <path>` and shows your line.
-15. Terminal: repeat 4 in the terminal. After `Use high`, a `/effort high` line appears when the turn ends and the terminal picker label follows.
+15. Terminal: repeat 4 in the terminal. After `Use high`, no `/effort` line appears and `effortLevel` in `~/.claude/settings.json` is unchanged. The footer reads `using high`.
 16. Spend report: after a few routed turns, run `/route report session` and `/route report`. The output is several lines; check the Desktop transcript keeps the line breaks and the two-space indents (unverified in Desktop: the -p output above is plain text).
 
 ## Org layer

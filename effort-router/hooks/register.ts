@@ -41,6 +41,7 @@ import {
   footerLabel,
   bandActions,
   bandHeadline,
+  leaningOf,
   noticeActions,
   noticeHeadline,
   type Notice,
@@ -140,7 +141,6 @@ type Settings = {
   skipAboveTokens: number
   /** Send the session's instructions (CLAUDE.md, rules, memory) with the first prompt's check. */
   firstCheckInstructions: boolean
-  syncPicker: boolean
   /** `button`: the footer state is a button that opens the band. `label`: plain text, /route is the control. */
   footerControl: 'button' | 'label'
   /** Route each subagent from its own brief at spawn. */
@@ -152,12 +152,10 @@ type Session = {
   state: RouterState
   /** A classification is in flight. */
   reading: boolean
-  /** The effort the session had before the router first ran /effort. */
+  /** The user's effort setting as the first unrouted main-thread request carried it. */
   baseline?: Level
   /** The last effort a main-loop request went out with. */
   lastSent?: string | number
-  /** An /effort sync to run when the session is next idle. */
-  pendingSync?: Level
   /**
    * The picker's level: `e.effort` as the last main-thread request arrived in
    * this hook, before the router's own rewrite (the engine's level for it).
@@ -215,11 +213,6 @@ type ReadInput = {
 
 const STORE_KEY = 'sessions'
 const SESSIONS = new Map<string, Session>()
-/**
- * Whether a person is at a UI. In a -p run the /effort sync's output would
- * replace the run's printed result, so headless runs rely on turn.step alone.
- */
-let isInteractive = true
 /** The organisation's `allowOff`, as the last rules read found it. */
 let allowOff = true
 /** `decideWithin`, for a session's first sighting (set at register). */
@@ -266,7 +259,6 @@ function settingsOf(options: PluginOptions): Settings {
     showChecks: options.showChecks === true || options.showChecks === 'true',
     skipAboveTokens: typeof options.skipAboveTokens === 'number' || typeof options.skipAboveTokens === 'string' ? num(options.skipAboveTokens, 20000) : 20000,
     firstCheckInstructions: options.firstCheckInstructions !== false && options.firstCheckInstructions !== 'false',
-    syncPicker: options.syncPicker !== false && options.syncPicker !== 'false',
     footerControl: options.footerControl === 'label' ? 'label' : 'button',
     routeSubagents: options.routeSubagents !== false && options.routeSubagents !== 'false',
   }
@@ -291,7 +283,6 @@ async function sessionOf($: EngineInterface): Promise<{ id: string; session: Ses
       if (prior > 0) $.ui.log(`effort-router: first sighting with ${prior} prompts (~${size.tokens} tokens) already in the session${state.gaveUp ? ', left off' : ''}`, { to: 'debug' })
     }
     session = { state, reading: false, bandOpen: false, checking: false, calls: 0, agents: new Map(), busy: false }
-    if (appliedLevel(state)) session.pendingSync = appliedLevel(state)
     SESSIONS.set(id, session)
   }
   return { id, session }
@@ -355,7 +346,6 @@ async function commit($: EngineInterface, id: string, session: Session, state: R
  */
 async function lock($: EngineInterface, id: string, session: Session, settings: Settings, level: Level, reason: string, why?: string): Promise<void> {
   await commit($, id, session, lockedAt(session.state, level, reason, why))
-  if (settings.syncPicker && session.picker !== level) session.pendingSync = level
   try {
     $.ui.log(`Effort router: ${level} for the rest of this session (${reason}).`)
   } catch {
@@ -427,17 +417,15 @@ async function askAndLock(
   return { chose: 'none' }
 }
 
-/** Turns the router off and puts the picker back where it was. */
-async function turnOff($: EngineInterface, id: string, session: Session, settings: Settings): Promise<void> {
+/** Turns the router off: the user's effort setting applies again. */
+async function turnOff($: EngineInterface, id: string, session: Session): Promise<void> {
   await commit($, id, session, turnedOff(session.state))
-  restorePicker($, session, settings)
 }
 
 /** The user changed the effort themselves while a level was in force: routing stops, and their level stands. */
 async function pickerMoved($: EngineInterface, id: string, session: Session, level: Level): Promise<void> {
   await commit($, id, session, turnedOff(session.state))
   session.baseline = level
-  session.pendingSync = undefined
   session.notice = undefined
   try {
     $.ui.log(`Effort router: you changed the effort to ${level}, so routing stopped for this session.`)
@@ -445,28 +433,6 @@ async function pickerMoved($: EngineInterface, id: string, session: Session, lev
     // headless
   }
   $.ui.log(`effort-router: picker moved to ${level} by the user; routing off`, { to: 'debug' })
-}
-
-/** Puts the picker back where it was before the router first synced it. */
-function restorePicker($: EngineInterface, session: Session, settings: Settings): void {
-  if (settings.syncPicker && session.baseline) {
-    session.pendingSync = session.baseline
-    flushSync($, session)
-  }
-}
-
-/** Runs /effort now if the session is idle; otherwise it waits for turn.complete. */
-function flushSync($: EngineInterface, session: Session): void {
-  const level = session.pendingSync
-  if (level === undefined || !isInteractive) return
-  session.pendingSync = undefined
-  $.command.run({ command: 'effort', args: level }).then(
-    () => $.ui.log(`effort-router: /effort ${level} synced`, { to: 'debug' }),
-    (error: unknown) => {
-      session.pendingSync ??= level
-      $.ui.log(`effort-router: /effort ${level} deferred: ${String(error)}`, { to: 'debug' })
-    },
-  )
 }
 
 // --- rules ---------------------------------------------------------------------------
@@ -642,8 +608,8 @@ const levelInForce = (session: Session): Level | undefined =>
 /** A spread not yet judged, because the level in force was unknown when it was checked. */
 const unjudged = (proposal: Proposal | undefined): proposal is Proposal & { spread: Spread } => proposal?.spread !== undefined && proposal.confidence === undefined
 
-/** The user's own effort setting: what the picker was before the router moved it, else the picker's level now. */
-const settingOf = (session: Session): Level | undefined => session.baseline ?? (isLevel(session.picker) ? session.picker : undefined)
+/** The user's own effort setting: the picker's level as the last main-thread request carried it. */
+const settingOf = (session: Session): Level | undefined => (isLevel(session.picker) ? session.picker : session.baseline)
 
 /** The levels a check is offered: low up to `highestLevel`. */
 const levelsFor = (settings: Settings): readonly Level[] => levelsUpTo(settings.highestLevel)
@@ -703,7 +669,6 @@ async function spendBudget($: EngineInterface, id: string, session: Session, set
   const spent = afterBudget(was, settings.decideWithin, allowOff, unsure)
   if (spent === was) return
   await commit($, id, session, spent)
-  if (spent.mode === 'picker') restorePicker($, session, settings)
   $.ui.log(`effort-router: ${spent.offReason ?? 'budget spent; the waiting verdict is still asked'}`, { to: 'debug' })
 }
 
@@ -1106,7 +1071,7 @@ async function bandAction($: EngineInterface, id: string, session: Session, sett
   try {
     if (value === 'ok') return
     if (value === 'previous' && notice?.from) await lock($, id, session, settings, notice.from, 'your choice')
-    else if (value === 'off' || value === 'revert') await turnOff($, id, session, settings)
+    else if (value === 'off' || value === 'revert') await turnOff($, id, session)
     else if (value === 'on' || value === 'next') {
       const text = await route($, value, settings)
       $.ui.log(`effort-router: ${text}`, { to: 'debug' })
@@ -1188,7 +1153,7 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
       })
     case 'off': {
       if (!(await loadRules($)).allowOff) return 'Your organisation keeps the router on.'
-      await turnOff($, id, session, settings)
+      await turnOff($, id, session)
       const setting = settingOf(session)
       return `Routing stopped for this session. Your effort setting${setting ? ` (${setting})` : ''} applies again. /route on starts it again.`
     }
@@ -1197,7 +1162,6 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
       // turn starts. Until then the user's setting applies.
       if (!supportedModel(session.model)) return unsupportedText(session.model)
       await commit($, id, session, turnedOn(session.state))
-      restorePicker($, session, settings)
       const setting = settingOf(session)
       return `The router will reassess with your next prompt. Until then your effort setting${setting ? ` (${setting})` : ''} applies.`
     }
@@ -1244,7 +1208,6 @@ export function register(on: On, options: PluginOptions): void {
   skipAboveTokens = settings.skipAboveTokens
 
   on('session.start', async ($, e, next) => {
-    isInteractive = e.isInteractive
     try {
       await $.command.register({
         name: 'route',
@@ -1378,7 +1341,7 @@ export function register(on: On, options: PluginOptions): void {
         }
         if (e.effort !== undefined) {
           // The user moved the picker while a level was in force: they take over (as Stop routing,
-          // but at their new level). The router's own /effort sync lands on the locked level, so it isn't this.
+          // but at their new level). Moving it to the locked level itself agrees with the router, so it isn't this.
           const was = session.pickerSeen ? session.picker : undefined
           const locked = appliedLevel(session.state)
           const moved = locked !== undefined && isLevel(was) && isLevel(e.effort) && e.effort !== was && e.effort !== locked
@@ -1391,7 +1354,7 @@ export function register(on: On, options: PluginOptions): void {
       const own = e.agentId !== undefined && subagentRouting(settings, session) === 'on' ? session.agents.get(e.agentId) : undefined
       byDefinition = own?.byDefinition === true
       const level = own ? (own.byDefinition ? undefined : own.level) : appliedLevel(view(session))
-      if (e.agentId === undefined && session.baseline === undefined && isLevel(e.effort) && session.pendingSync === undefined && level === undefined) {
+      if (e.agentId === undefined && session.baseline === undefined && isLevel(e.effort) && level === undefined) {
         session.baseline = e.effort
       }
       if (level !== undefined && e.effort !== undefined) effort = level
@@ -1415,15 +1378,12 @@ export function register(on: On, options: PluginOptions): void {
     return result
   })
 
-  // A loop's turn ended. The main thread is between turns: run a pending
-  // /effort so the picker matches. Any loop (a subagent's too): save the spend
-  // ledger if it changed.
+  // A loop's turn ended (a subagent's too): save the spend ledger if it changed.
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
     try {
       const { session } = await sessionOf($)
       if (e.agentId === undefined) session.busy = false
-      if (e.agentId === undefined && settings.syncPicker) flushSync($, session)
       await saveSpend($, session)
     } catch {
       // best effort
@@ -1457,7 +1417,7 @@ export function register(on: On, options: PluginOptions): void {
     const { notice } = session
     const state = view(session)
     const result = !notice && !session.bandOpen ? session.result : undefined
-    const headline = notice && !session.bandOpen ? noticeHeadline(notice) : result ? `Effort router: ${result}` : bandHeadline(state)
+    const headline = notice && !session.bandOpen ? noticeHeadline(notice) : result ? `Effort router: ${result}` : bandHeadline(state, { setting: settingOf(session), leaning: leaningOf(session.verdict?.decision, settings.confidence) })
     const setting = settingOf(session)
     const noticeShown = notice !== undefined && !session.bandOpen
     const actions = noticeShown ? noticeActions(allowOff, setting, notice.from) : result ? [] : bandActions(state, allowOff, setting)
@@ -1486,7 +1446,8 @@ export function register(on: On, options: PluginOptions): void {
         onPress: () => bandAction($, id, session, settings, action.value),
       }),
     )
-    if (!noticeShown) buttons.push(Button({ key: 'close', label: 'Hide', hotkey: 'x', plain: true, dimColor: true, role: 'dismiss', onPress: () => closeBand($, session) }))
+    // A digit, like the others: from the prompt only a bare digit presses a band button (a letter needs ctrl+x tab first).
+    if (!noticeShown) buttons.push(Button({ key: 'close', label: 'Hide', hotkey: String(buttons.length + 1), plain: true, dimColor: true, role: 'dismiss', onPress: () => closeBand($, session) }))
     return Box({
       flexDirection: 'column',
       children: [line, Box({ flexDirection: 'row', columnGap: 2, children: buttons }), theirs],
