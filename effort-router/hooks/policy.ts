@@ -1170,6 +1170,22 @@ export function appliedLevel(state: RouterState): Level | undefined {
   return state.status !== 'off' && !state.unsupported ? state.level : undefined
 }
 
+/**
+ * What the router adds to Claude Code's own `api_request` records for an organisation's telemetry collector. The record
+ * already carries `effort`, the level the request went out at, so these say what it would have been and why it wasn't.
+ * The values are the session's: the engine gives a mod no way to tie a record to one request, so a subagent's request
+ * carries its session's values too.
+ */
+export function telemetryAttributes(state: RouterState, setting: Level | undefined, version: string): Record<string, string> {
+  const status = state.unsupported ? 'standing aside' : state.status
+  const attributes: Record<string, string> = { 'effort_router.version': version, 'effort_router.status': status }
+  if (setting) attributes['effort_router.setting'] = setting
+  const level = appliedLevel(state)
+  if (level) attributes['effort_router.level'] = level
+  if (state.status === 'off' && state.offReason) attributes['effort_router.off_reason'] = state.offReason
+  return attributes
+}
+
 /** Whether a human prompt should be assessed now. */
 export function wantsAssessment(state: RouterState, limit: number): boolean {
   return state.status === 'unlocked' && !state.unsupported && state.assessed < limit

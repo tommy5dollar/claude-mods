@@ -4,6 +4,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import {
+  telemetryAttributes,
   DEFAULT_TRIM,
   GLYPH,
   ROUTE_USAGE,
@@ -935,3 +936,25 @@ describe('0.17: messages, /er and saved state', () => {
   })
 })
 
+describe('telemetryAttributes', () => {
+  test('unlocked before anything moved: your setting, no level of its own', () => {
+    expect(telemetryAttributes(freshState(), 'medium', '1.0.0')).toEqual({
+      'effort_router.version': '1.0.0', 'effort_router.status': 'unlocked', 'effort_router.setting': 'medium',
+    })
+  })
+  test('locked at a level of its own', () => {
+    expect(telemetryAttributes({ status: 'locked', level: 'high', assessed: 5, lockedBy: 'router', lockedAfter: 5 }, 'medium', '1.0.0')).toEqual({
+      'effort_router.version': '1.0.0', 'effort_router.status': 'locked', 'effort_router.setting': 'medium', 'effort_router.level': 'high',
+    })
+  })
+  test('off says why, and has no level', () => {
+    expect(telemetryAttributes({ status: 'off', assessed: 2, offReason: 'picker', lastLevel: 'high' }, 'xhigh', '1.0.0')).toEqual({
+      'effort_router.version': '1.0.0', 'effort_router.status': 'off', 'effort_router.setting': 'xhigh', 'effort_router.off_reason': 'picker',
+    })
+  })
+  test('on a model it does not support it stands aside, and the setting is left out until seen', () => {
+    expect(telemetryAttributes({ status: 'locked', level: 'high', assessed: 5, unsupported: 'Haiku 4.5' }, undefined, '1.0.0')).toEqual({
+      'effort_router.version': '1.0.0', 'effort_router.status': 'standing aside',
+    })
+  })
+})

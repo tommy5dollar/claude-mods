@@ -1,6 +1,7 @@
 import type { AgentSpawnInput, EngineInterface, On, PluginOptions } from 'claude-code'
 
 import {
+  telemetryAttributes,
   type AgentDefinition,
   type BandAction,
   type CheckKind,
@@ -201,6 +202,8 @@ const FALLBACK_RULES =
   "paying for thinking it won't use."
 
 const HUMAN_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
+/** Sent with each telemetry record, so a collector can tell versions apart. Keep in step with plugin.json. */
+const VERSION = '0.17.1'
 const COMMANDS = ['effort-router', 'er']
 
 function settingsOf(options: PluginOptions): Settings {
@@ -984,6 +987,20 @@ let currentSettings: Settings = settingsOf({})
 export function register(on: On, options: PluginOptions): void {
   const settings = settingsOf(options)
   currentSettings = settings
+
+  // Claude Code's api_request records go to the collector your organisation configured, never anywhere else. They already
+  // carry the level each request went out at. This adds your own setting and the router's status, so the collector can
+  // see what the router changed.
+  on('telemetry.log', { to: 'collector' }, async ($, e, next) => {
+    if (e.to !== 'collector' || e.event !== 'api_request') return next(e)
+    try {
+      const { session } = await sessionOf($)
+      const extra = telemetryAttributes(stateOf(session), seenSetting(session), VERSION)
+      return next({ ...e, attributes: { ...e.attributes, ...extra } })
+    } catch {
+      return next(e)
+    }
+  })
 
   on('session.start', async ($, e, next) => {
     hasBand = e.isInteractive && (e.surface === 'terminal' || e.surface === 'desktop')

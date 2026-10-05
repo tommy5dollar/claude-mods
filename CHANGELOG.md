@@ -2,6 +2,12 @@
 
 ## effort-router
 
+### 0.17.1 (2026-10-05)
+
+- **Telemetry for organisations.** When Claude Code's OpenTelemetry is on, each `api_request` record (which already
+  carries the level the request went out at) also carries `effort_router.setting`, `status`, `level`, `off_reason`
+  and `version`, so a collector can see what the router changed. Nothing is sent anywhere new.
+
 ### 0.17.0 (2026-10-05)
 
 A redesign of the main thread's rule, the footer, the band and the command. Settings from earlier versions other than the five below are ignored.

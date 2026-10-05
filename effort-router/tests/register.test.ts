@@ -763,6 +763,30 @@ describe('effort-router', () => {
       expect(JSON.parse(world.files[LEDGER] ?? '{}').setting).toBe('xhigh')
     })
 
+    test('api_request records for the collector carry your setting and the router\'s status', async ($, on) => {
+      worldOf(on, HIGH, {}, HOME)
+      const records: { event: string; attributes: Record<string, unknown> }[] = []
+      on('telemetry.log', ($, e) => {
+        if (e.to === 'collector') records.push({ event: e.event, attributes: { ...e.attributes } })
+        return { value: undefined }
+      })
+      const log = (event: string) =>
+        $.telemetry.log({ to: 'collector', event, attributes: { effort: 'high', model: 'claude-sonnet-5-5' }, loggedAt: '2026-10-05T18:00:00.000Z' })
+      await $.session.start(STARTED)
+      await turn($, 'fix the crash in the parser')
+      await log('api_request')
+      await log('user_prompt')
+      expect(records[0]).toEqual({
+        event: 'api_request',
+        attributes: {
+          effort: 'high', model: 'claude-sonnet-5-5',
+          'effort_router.version': '0.17.1', 'effort_router.status': 'unlocked', 'effort_router.setting': 'medium', 'effort_router.level': 'high',
+        },
+      })
+      // Other records go out untouched.
+      expect(records[1]).toEqual({ event: 'user_prompt', attributes: { effort: 'high', model: 'claude-sonnet-5-5' } })
+    })
+
     test('the state is saved in the ledger at once, and a session carries on from it', async ($, on) => {
       const world = worldOf(on, HIGH, {}, HOME)
       await $.session.start(STARTED)

@@ -39,8 +39,9 @@ Opus, then nothing more. A subagent's assessment is about 2 cents.
 
 Mods run inside Claude Code without a sandbox, so here's exactly what this one does:
 
-- **Sends:** assessments go to your session's own model through Claude Code, on your existing login. Nothing else
-  leaves your machine: no telemetry and no other network calls.
+- **Sends:** assessments go to your session's own model through Claude Code, on your existing login. If your
+  organisation has set up Claude Code's OpenTelemetry, it adds a few attributes to Claude Code's own records for that
+  collector (see [Telemetry](#telemetry-for-organisations)). Nothing else leaves your machine.
 - **Reads:** your conversation, your CLAUDE.md files, rules and memory, your agent definitions and its own rules files
   (see [How it assesses](#how-it-assesses) for what goes into each assessment).
 - **Writes:** one small JSON file per session in `~/.claude/effort-router/spend/`, and nothing else.
@@ -268,6 +269,30 @@ An organisation can add routing rules for everyone in managed settings (`managed
 ```
 
 The organisation's rules layer over the shipped defaults, and each person's and project's rules layer over those. They're there to help people pick well, not to stop anyone changing their effort, so a person can still turn the router off or replace the rules with their own. A top-level `"effortRouter": { "rules": "..." }` object works too.
+
+## Telemetry for organisations
+
+If your organisation collects Claude Code's OpenTelemetry (`CLAUDE_CODE_ENABLE_TELEMETRY=1` with an OTLP exporter),
+each `claude_code.api_request` record already carries `effort`: the level that request actually went out at, after
+the router. The router adds these attributes to the same record, so a collector can see what it changed:
+
+| Attribute | Value |
+| --- | --- |
+| `effort_router.setting` | The person's own effort setting, the level the request would have run at. Left out until a request has shown it |
+| `effort_router.status` | `unlocked`, `locked`, `off` or `standing aside` (a model the router doesn't support) |
+| `effort_router.level` | The level the router applies on the main thread, when it has one |
+| `effort_router.off_reason` | When off: `you` (turned off), `picker` (changed the effort picker) or `mid-flow` (the session started before the router) |
+| `effort_router.version` | The router's version |
+
+Claude Code's own `query_source` attribute says whose request it was. In testing under `-p` the main thread was `sdk`
+and a general-purpose subagent was `agent:builtin:general-purpose`. Check the values your own sessions send.
+
+- **What moved:** `effort` differs from `effort_router.setting`. On the main thread that's the router. On a subagent
+  it's the router or the agent definition's own `effort:`.
+- **The values are the session's, not the request's.** The engine gives a mod no way to tie a record to one request,
+  so a subagent's record carries its session's status and setting.
+- **Nothing is sent anywhere new.** The attributes ride on records Claude Code was already sending to your collector.
+  Without telemetry configured there are no records and nothing is added. Other records are left alone.
 
 ## Known limits
 

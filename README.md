@@ -40,8 +40,9 @@ and your own time. The routing itself costs about 20 cents a session on Opus 5.5
 
 Mods run inside Claude Code without a sandbox, so here's exactly what this one does:
 
-- **Sends:** assessments go to your session's own model through Claude Code, on your existing login. Nothing else
-  leaves your machine: no telemetry and no other network calls.
+- **Sends:** assessments go to your session's own model through Claude Code, on your existing login. If your
+  organisation has set up Claude Code's OpenTelemetry, it adds a few attributes to Claude Code's own records for that
+  collector (see [Telemetry](effort-router/#telemetry-for-organisations)). Nothing else leaves your machine.
 - **Reads:** your conversation, your CLAUDE.md files, rules and memory, your agent definitions and its own rules files.
 - **Writes:** one small JSON file per session in `~/.claude/effort-router/spend/`, and nothing else.
 - **Never:** runs a process, changes your saved effort setting or changes the model.

@@ -15,7 +15,7 @@ bun test                            # 83 tests. The 0.17 rule: settle moves to t
                                     # ignored); the transcript (the prompt being assessed in whole, outside the cap), reply
                                     # parsing, the classifier frame, $defaults and settings rule layers (no enforce),
                                     # subagent reads, routing and reports, agent definitions, the spend ledger and report
-claude plugin test .                # 58 tests in the engine's kit: the first prompt assessed by a separate call with the
+claude plugin test .                # 59 tests in the engine's kit: the first prompt assessed by a separate call with the
                                     # instructions and judged at the first request; later prompts fork and are judged against
                                     # the level running; an unsure assessment stays; no clear task still counts; the lock
                                     # after the window; a move on the last prompt; the confidence option; a picker change
@@ -34,7 +34,7 @@ claude plugin test .                # 58 tests in the engine's kit: the first pr
                                     # stops it and on brings it back; Haiku agents left alone; a denied spawn; agent
                                     # definitions with and without effort; spend: each request recorded, saved when a turn
                                     # ends, carried on from a saved file, reported by week and repo
-"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 58 under Desktop's engine (2.1.286, passing 2026-10-05)
+"$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 59 under Desktop's engine (2.1.286, passing 2026-10-05)
 claude plugin validate . --strict
 bun run eval -- --runs 3            # opt-in, real model: 23 session fixtures and 14 subagent briefs, see below
                                     # (both sets as separate calls on --model, default opus, with its notes; the forks
@@ -270,6 +270,14 @@ prompts fed into one process with `--input-format stream-json`, a minute or more
 Opus 5.5 at medium for comparison: a separate call took 2.8 s. A fork thinks at the session's effort and
 `$.model.fork` takes only a prompt, so the router can't cap it. On Fable at xhigh, one fork in two hit the
 15-second limit in this run. 0.17.0 raises the limit to 30 seconds for that reason.
+
+## Live: telemetry (2026-10-05, 0.17.1)
+
+`claude -p` on CLI 2.1.289 with `CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_LOGS_EXPORTER=console`, Sonnet 5.5 at medium, a
+prompt that launched a general-purpose subagent. Every `api_request` record carried `effort_router.version`, `status`
+and `setting` beside the engine's own `effort`. `query_source` was `sdk` on the main thread and
+`agent:builtin:general-purpose` in the subagent. A probe mod on 2.1.289 and on Desktop's 2.1.286 engine showed the
+engine's `effort` is the level after a mod's rewrite (medium rewritten to high read `high`).
 
 ## Live, Desktop: verified
 
