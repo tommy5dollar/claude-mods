@@ -4,12 +4,12 @@ A Claude Code plugin that saves time and money by running each task at the lowes
 session's own model assesses each of your first five prompts and moves the level to whichever gets the work done fastest
 and cheapest, up or down. Then the level locks for the rest of the session. Each subagent gets its own level, chosen by the agent that launches it.
 
-<img src="docs/race.gif" width="720" alt="A race between two Claude Code sessions on the same three chores, Fable 5.1 set to xhigh. Fixed at xhigh it takes 8:28 and $3.74. With effort-router the main thread moves to medium and its subagents to low, medium and low, and it takes 2:24 and $1.64. All 7 hidden tests pass on both">
+<img src="docs/race.gif" width="720" alt="A race between two Claude Code sessions on the same three chores, Fable 5.1 set to xhigh. Fixed at xhigh it takes 8:28 and $3.74. With effort-router the main thread moves to medium and its subagents to low, medium and low. It takes 2:24 and $1.64. All 7 hidden tests pass on both">
 
 It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the terminal and in the Desktop app's Code tab. It requires
 Claude Code 2.1.286 or later.
 
-In the Desktop app, go to Customize, then Plugins, Add marketplace, Add from a repository, and enter
+In the Desktop app, go to Customize, then Plugins, Add marketplace, Add from a repository, then enter
 `tommy5dollar/effort-router`. Then in a Code tab session, click **+** next to the prompt box, then Plugins, Add plugin,
 and install effort-router. In the terminal:
 
@@ -38,7 +38,7 @@ do on that model, then lets it judge. It never maps a kind of task to a fixed le
 different things on Opus, Sonnet and Fable.
 
 **Does it save money and time?** That's what it's for. When two levels would both do the work, it picks the cheaper
-one, so the higher you run, the more it saves. In our test, Fable 5.1 on xhigh was given three small chores in a
+one. The higher you run, the more it saves. In our test, Fable 5.1 on xhigh was given three small chores in a
 payments repo to hand to subagents. The router moved it to medium and its Opus subagents to medium or low. It finished
 in about 2 minutes for $1.10 to $1.65, against 6 to 8.5 minutes and $3.20 to $3.75 left on xhigh, and every hidden
 test passed both ways. Those figures include the router's own assessments. On Opus 5.5's default of medium there's

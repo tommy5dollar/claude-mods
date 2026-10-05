@@ -10,7 +10,7 @@ Claude Code runs every task at the effort level you picked, whether it's renamin
 touches three services. Anthropic's [Spending your effort](https://claude.dev/blog/spending-your-effort/) says the
 right level depends on the task. effort-router picks it for you, so easy work stops paying for thinking it doesn't need.
 
-<img src="effort-router/docs/race.gif" width="720" alt="A race between two Claude Code sessions on the same three chores, Fable 5.1 set to xhigh. Fixed at xhigh it takes 8:28 and $3.74. With effort-router the main thread moves to medium and its subagents to low, medium and low, and it takes 2:24 and $1.64. All 7 hidden tests pass on both">
+<img src="effort-router/docs/race.gif" width="720" alt="A race between two Claude Code sessions on the same three chores, Fable 5.1 set to xhigh. Fixed at xhigh it takes 8:28 and $3.74. With effort-router the main thread moves to medium and its subagents to low, medium and low. It takes 2:24 and $1.64. All 7 hidden tests pass on both">
 
 - **Your session.** Your session's own model assesses each of your first five prompts and moves the level to the one
   that gets the work done fastest and cheapest, then locks. The footer shows the level in use, and clicking it gives
@@ -26,7 +26,7 @@ It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the Desktop app's Code tab 
 
 ## Install
 
-**In the Desktop app:** go to Customize, then Plugins, Add marketplace, Add from a repository, and enter
+**In the Desktop app:** go to Customize, then Plugins, Add marketplace, Add from a repository, then enter
 `tommy5dollar/effort-router`. Then in a Code tab session, click **+** next to the prompt box, then Plugins, Add plugin,
 and install effort-router.
 
@@ -43,7 +43,7 @@ Desktop app the footer appears once you've sent the first message. `/er off` tur
 
 ## Does it save money and time?
 
-That's what it's for, and the higher you run, the more it saves. In our test, Fable 5.1 on xhigh was given three small
+That's what it's for. The higher you run, the more it saves. In our test, Fable 5.1 on xhigh was given three small
 chores to hand to subagents. The router moved it to medium and its Opus subagents to medium or low. It finished in
 about 2 minutes for $1.10 to $1.65, against 6 to 8.5 minutes and $3.20 to $3.75 left on xhigh, and every hidden test
 passed both ways. Those figures include the router's own assessments.
