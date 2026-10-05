@@ -8,7 +8,7 @@ Anthropic's advice, then each level with its cost, time and behaviours. A line t
 can't pick (max, unless offered) is left out of the prompt. Evidence: research-2026-10.md and
 research-2026-10-addendum.md. Never add eval results, ours or anyone's: these have to stay heuristics.
 -->
-How effort pays on this model: little, on most work. Even low is very strong, and each step up changes the result less than on Opus 5.5 or Sonnet 5.5. Effort pays most on edge-case-heavy work such as security and hardware, and least on routine and rulebook-style work.
+How effort pays on this model: little, on most work. Even low is very strong, and each step up changes the result less than on Opus 5.5 or Sonnet 5.5. Effort pays most on edge-case-heavy work such as security and hardware, and least on routine and rulebook-style work. High covers most edge-case-heavy work, and xhigh is for the most capability-sensitive. Medium already checks its own work well enough for most builds, including long, loosely specified ones the user leaves it to finish alone.
 
 Anthropic's advice for this model: start at high, drop to medium or low for routine work, and keep xhigh for the most capability-sensitive work.
 

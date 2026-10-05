@@ -1,6 +1,6 @@
 // Writes eval/routing-approved.json: the judge's levels where the router agrees, the judge's best where it doesn't,
 // and the overrides below where a level was decided against the judge (each with its reason, kept in the file).
-// Run it after a routing run to rebuild the approvals. Fable has none yet.
+// Run it after a routing run to rebuild the approvals.
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -17,10 +17,12 @@ const picks = (rows: Row[]) => {
 const now = {
   opus: picks(rowsOf(/-opus-(live|cheap)\.json$/)),
   sonnet: picks(rowsOf(/-sonnet-(live|cheap)\.json$/)),
+  fable: picks(rowsOf(/-fable-live\.json$/)),
 }
 const judge = {
   opus: JSON.parse(readFileSync(join(EVAL, 'routing-judge-opus.json'), 'utf8')),
   sonnet: JSON.parse(readFileSync(join(EVAL, 'routing-judge-sonnet.json'), 'utf8')),
+  fable: JSON.parse(readFileSync(join(EVAL, 'routing-judge-fable.json'), 'utf8')),
 }
 
 const overrides: Record<string, { opus?: string | string[]; sonnet?: string | string[]; why: string }> = {
@@ -46,11 +48,31 @@ const overrides: Record<string, { opus?: string | string[]; sonnet?: string | st
   'subagent:vague: "same for the invoices table"': { sonnet: ['medium', 'high'], why: 'The brief is vague, so the subagent has to work out the earlier change. Medium or high.' },
 }
 
+// Fable, set 2026-10-05 from three runs starting on high. Its main job is stepping down from high to medium or low.
+const fableOverrides: Record<string, { fable: string | string[]; why: string }> = {
+  'session:repo question before work': { fable: ['undecided', 'low'], why: 'Before any task undecided is right. Low on a question is harmless and cheaper.' },
+  'session:install and run (housekeeping)': { fable: ['undecided', 'low'], why: 'As the repo question.' },
+  'session:pay: what does this repo do': { fable: ['undecided', 'low'], why: 'As the repo question.' },
+  'session:pull, then what does it do': { fable: ['undecided', 'low'], why: 'As the repo question.' },
+  'session:held out: morning + git status': { fable: ['undecided', 'low'], why: 'As the repo question.' },
+  'session:vague feature': { fable: ['medium', 'low', 'undecided'], why: 'As on the other models.' },
+  'session:pay: explain fees, no changes': { fable: ['undecided', 'low', 'medium'], why: 'As on the other models.' },
+  'session:ordinary feature': { fable: ['low', 'medium'], why: 'Fable is strong at low and the judge picked it, but medium for a feature is a fine step down from high.' },
+  'session:held out: bank statement importer, vague': { fable: ['low', 'medium'], why: 'As the ordinary feature.' },
+  'session:cheap: ordinary feature with tests': { fable: ['low', 'medium'], why: 'As the ordinary feature.' },
+  'subagent:vague: "same for the invoices table"': { fable: ['low', 'medium'], why: 'Repeating earlier work on another table. Either cheap level.' },
+  'subagent:Plan: design proposal for event-driven reconciliation': { fable: ['medium', 'high'], why: 'As on Opus: a design doc with no user in the loop. Medium is enough; high is tolerated.' },
+  'session:held out: pagination': { fable: ['low', 'medium'], why: 'Both step down from high. Medium after the notes said medium checks its own work.' },
+  'session:cheap: update snapshots': { fable: ['low', 'medium'], why: 'As pagination, and low or medium on Opus too.' },
+  'session:autonomous end-to-end build': { fable: 'medium', why: 'Fable stayed on high for this until its notes said medium copes with long unattended builds (2026-10-05).' },
+  'session:pay: security review': { fable: 'high', why: 'Fable went to xhigh until its notes said high covers most edge-case-heavy work (2026-10-05).' },
+}
+
 const keys = [...new Set([...Object.keys(now.opus), ...Object.keys(now.sonnet)])]
 const out: Record<string, Record<string, unknown>> = {}
 for (const key of keys) {
   const entry: Record<string, unknown> = {}
-  for (const m of ['opus', 'sonnet'] as const) {
+  for (const m of ['opus', 'sonnet', 'fable'] as const) {
     const p = now[m][key]
     const j = judge[m][key]
     if (!p || !j) continue
@@ -63,9 +85,14 @@ for (const key of keys) {
     if (o.sonnet) entry.sonnet = o.sonnet
     entry.why = o.why
   }
+  const fo = fableOverrides[key]
+  if (fo) {
+    entry.fable = fo.fable
+    entry.why = entry.why ? `${entry.why} Fable: ${fo.why}` : `Fable: ${fo.why}`
+  }
   out[key] = entry
 }
-const missing = Object.keys(overrides).filter(k => !out[k])
+const missing = [...Object.keys(overrides), ...Object.keys(fableOverrides)].filter(k => !out[k])
 if (missing.length) throw new Error(`overrides for unknown fixtures: ${missing.join(', ')}`)
 writeFileSync(join(EVAL, 'routing-approved.json'), `${JSON.stringify(out, null, 2)}\n`)
 console.log(`${Object.keys(out).length} prompts approved`)

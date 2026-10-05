@@ -1,0 +1,517 @@
+{
+  "session:greeting": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "The conversation is only a greeting with no task stated yet, so undecided is the only right level."
+  },
+  "session:pull, then what does it do": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "The session so far is only setup (pulling code) and a question asked before any work, so no task has been stated yet and undecided is the right level."
+  },
+  "session:pull latest": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "Pulling the latest code is setup, not a task, so the router should stay undecided until the user states the actual work."
+  },
+  "session:repo question before work": {
+    "right": [
+      "undecided",
+      "low"
+    ],
+    "best": "undecided",
+    "why": "\"What's in this repo?\" is an orientation question asked before any task, so undecided is right; if a level must be set, low handles a quick repo overview well at the lowest cost."
+  },
+  "session:install and run (housekeeping)": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "Installing dependencies and starting the dev server is setup like pulling code, and no real task has been stated yet, so the router should stay undecided."
+  },
+  "session:finance build after filler (the live miss)": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "medium",
+    "why": "Building a multi-platform finance integration needs current API lookups, which low skimps on, and has some edge cases (OAuth tokens, currency and rounding, pagination), but on a model where effort pays little, medium should handle this broad, still-unscoped build well, while high costs 1.3x and risks unrequested changes outside the task."
+  },
+  "session:ordinary feature": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding a dark mode toggle to a settings page is routine UI work, and on Fable 5.1 low is already very strong, so higher levels would only add cost, time and unrequested edits elsewhere."
+  },
+  "session:vague feature": {
+    "right": [
+      "undecided",
+      "low"
+    ],
+    "best": "undecided",
+    "why": "The user has only stated a vague intent with no concrete task yet, so undecided fits best; if this counts as a task, the next step is cheap clarifying and brainstorming that low handles fine on Fable 5.1."
+  },
+  "session:mechanical rename": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "A repo-wide rename is routine mechanical work that low handles well on Fable 5.1, so higher levels would only add cost, time and the risk of unrequested edits outside the task."
+  },
+  "session:brownfield bug fix": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This checkout bug fix carries real risk: money math, coupon validity timing and existing checkout code that could break. That calls for more investigation than low tends to do, but on Fable 5.1 it is still not edge-case-heavy enough to justify paying 1.3 times as much for high, which also tends to add small unrequested changes outside the task."
+  },
+  "session:edge-case tests": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Testing named date-parser edge cases is routine for Fable 5.1, but DST behaviour means it has to read the existing parser carefully rather than answer from memory as low tends to, while high would only add cost and stray edits."
+  },
+  "session:research on current tools": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is routine research into current products, where low tends to answer from memory instead of looking things up, and high or above only adds cost and time without improving a straightforward survey table."
+  },
+  "session:storage engine concurrency": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "A lock-free ring buffer for a write-ahead log is concurrency work full of hidden edge cases (memory ordering, wraparound, ABA, partial writes affecting durability) that medium could miss and that would cause costly rework, so high is justified, while xhigh's extra cost buys little on this model."
+  },
+  "session:autonomous vulnerability hunt": {
+    "right": [
+      "high",
+      "xhigh"
+    ],
+    "best": "high",
+    "why": "Finding and fixing auth vulnerabilities unattended is edge-case-heavy security work, where effort pays most on Fable 5.1 and missed cases or broken existing code would mean costly rework, so high is warranted, with xhigh acceptable but likely more cost than needed."
+  },
+  "session:autonomous end-to-end build": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "A full booking app is large but routine web work, where Fable 5.1 gains little above medium; low risks stale dependency and API choices because it looks things up less, and high's extra cost and stray edits outside the task aren't justified for an unattended run."
+  },
+  "session:held out: morning + git status": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "A greeting plus running git status is setup work, like pulling code, and no real task has been stated yet, so the router should stay undecided."
+  },
+  "session:held out: payout reconciliation webhook": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "medium",
+    "why": "A Stripe payout-reconciliation webhook has real edge cases (signature verification, idempotent handling of retried or out-of-order events, failed or reversed payouts), so low risks missing them, but these are well-known patterns that Fable 5.1 handles at medium. High is defensible for money-touching code, yet costs about 1.3x for little expected gain."
+  },
+  "session:held out: \"b\" after a lettered question": {
+    "right": [
+      "low",
+      "medium"
+    ],
+    "best": "low",
+    "why": "Adding one status column to the orders table is routine work, and on Fable 5.1 even low does that well, so medium is acceptable but higher levels would only add cost, time and unrequested changes."
+  },
+  "session:held out: bank statement importer, vague": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "A task is now stated, so undecided no longer fits, and the next step (asking which banks and formats, then routine CSV/OFX parsing) is well within what Fable 5.1 does at low, where higher levels would only add cost and deliberation."
+  },
+  "session:\"2, keep it simple\" after a numbered question": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Moving one backoff constant into config is routine work that low on Fable 5.1 handles well, so medium or higher would only add cost, and high risks unrequested edits to the payment code."
+  },
+  "session:held out: pagination": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding pagination to one endpoint is routine work well within Fable 5.1's ability, where even low is very strong, so medium or higher would cost more for the same result."
+  },
+  "session:scope narrowed by a later clarification": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Fixing a typo in a login error message is trivial routine work that Fable 5.1 does well even at low, so any higher level only adds cost and time."
+  },
+  "session:pay: README typo": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Fixing one spelling typo in a README is about as routine as work gets, and on Fable 5.1 low handles it well at the lowest cost, so any higher level would only add cost and risk unrequested edits."
+  },
+  "session:pay: what does this repo do": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "\"What does this repo do?\" is a question asked before any task, so the router should stay undecided until real work is stated."
+  },
+  "session:AskUserQuestion answers refine the task": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "A nightly Xero/QuickBooks invoice sync is a standard integration that Fable 5.1 handles well at medium; low risks relying on memory for current third-party API details, and high would add cost, extra deliberation and unrequested file changes without a better result."
+  },
+  "session:pay: rename and run tests": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Renaming a function across the codebase and running the tests is routine work that low on Fable 5.1 does well, so any higher level costs more for the same result and, from high up, risks unrequested edits outside the task."
+  },
+  "session:pay: --json flag": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding a --json flag to an existing CLI command is routine work, and on Fable 5.1 low handles that well, so medium or higher would only add cost and time."
+  },
+  "session:pay: explain fees, no changes": {
+    "right": [
+      "undecided",
+      "low"
+    ],
+    "best": "undecided",
+    "why": "This is a read-only question asked before any work, so undecided fits best, and if a level must be picked, low is enough on Fable 5.1 to read the code and explain how monthly fees are calculated."
+  },
+  "session:pay: CSV exporter": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding a CSV exporter that mirrors an existing JSON one is routine work that low handles well on Fable 5.1, so the costlier levels would give the same result more slowly."
+  },
+  "session:pay: sketch designs, no code": {
+    "right": [
+      "low",
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Sketching three design options with no code is well within Fable 5.1's ability; medium is the safest cheap choice because it is more likely than low to check the existing account model before proposing options, while high would only add deliberation and cost."
+  },
+  "session:pay: date edge-case tests": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Writing tests for named date edge cases (month ends, leap years, mid-month openings) is well within Fable 5.1's ability at medium, but the expected values involve subtle date arithmetic that low is more likely to get wrong, while high only adds cost and unrequested out-of-scope edits."
+  },
+  "session:pay: fees from a spec": {
+    "right": [
+      "low",
+      "medium"
+    ],
+    "best": "low",
+    "why": "Implementing fees from a written spec is rulebook-style work, where effort pays least on Fable 5.1 and low is already very strong; medium is acceptable cover for money-handling edge cases like rounding or proration, while high and above would add cost, over-deliberation and stray edits for no gain."
+  },
+  "session:pay: double debit bug": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Tracing a double debit on a payout is concurrency and idempotency work in live payment code, full of hidden edge cases where a missed race or retry path means real money lost and rework, so high is justified on Fable 5.1."
+  },
+  "session:pay: concurrency-safe billing": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Making a billing job safe across two servers without the database's duplicate-key guard is edge-case-heavy concurrency work: races, lock expiry, partial failures and retries could double-charge customers and break existing code, so high is worth its cost on Fable 5.1, while xhigh adds cost without a clear gain."
+  },
+  "session:cheap: fix a lint error": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Removing an unused import to fix a lint error is trivial routine work that low effort on Fable 5.1 handles well at the lowest cost."
+  },
+  "session:cheap: bump a dependency": {
+    "right": [
+      "low",
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Bumping a dependency and checking the build is routine work Fable 5.1 handles well below high, but finding the 'latest 3.x' means looking up the current version, and low tends to answer from memory there, so medium is the safest cheap choice."
+  },
+  "session:cheap: add a log line": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding one debug log line to a single function is routine local work that low on Fable 5.1 does well at the lowest cost, so any higher level would only add cost and time."
+  },
+  "session:pay: security review": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "A security review of whether one account can see or change another's money is full of hidden edge cases, which is where effort pays on Fable 5.1, so it needs more than medium; xhigh would cost about 1.4 times more than high for little extra gain on a review of this size."
+  },
+  "session:pay: unattended bigint migration": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "high",
+    "why": "Converting every amount to bigint is a codebase-wide refactor with many hidden edge cases (mixing bigint with number throws, bigint division truncates, JSON.stringify and Math calls fail, formatting must stay identical), and the user is offline, so a miss means costly rework; high is the safest fit, while medium could still succeed because the test suite gives it a check loop."
+  },
+  "session:cheap: commit message": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Writing a commit message for staged changes and running the commit is routine work; on Fable 5.1 low handles it well, at the lowest cost."
+  },
+  "session:cheap: document a flag": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding one flag to the README in the existing format is routine documentation work that low handles well on Fable 5.1, so medium or higher would only add cost and time."
+  },
+  "session:cheap: add a field following the pattern": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding an optional field by copying the existing description pattern is routine work, and on Fable 5.1 low handles it well at the lowest cost, so higher levels would only add cost and time."
+  },
+  "session:cheap: change a default": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Changing a default page size from 20 to 50 is a routine edit well within Fable 5.1's ability, where low is already very strong, so any higher level would cost more for the same result."
+  },
+  "session:cheap: update snapshots": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Regenerating snapshots after an intentional format change and rerunning the suite is routine work, which low on Fable 5.1 handles well at the lowest cost, while higher levels would over-deliberate and risk unrequested edits."
+  },
+  "session:cheap: explain an error": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Explaining a common undefined-property TypeError, and perhaps checking line 12 of src/format.ts, is routine debugging that low effort on Fable 5.1 handles well at the lowest cost."
+  },
+  "session:cheap: convert config": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Converting a JSON config to YAML and pointing the loader at it is routine work that Fable 5.1 handles well at low, so medium or higher would cost more for the same result."
+  },
+  "session:cheap: delete dead code": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Removing the exporter is routine, but each helper it uses has to be checked for other callers before deletion, and low's habit of looking things up less risks removing shared code, while high adds cost and stray edits for no gain."
+  },
+  "session:cheap: small UI tweak": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Bolding a header and moving the currency code is routine UI work well within the model's ability, so low does it well at the lowest cost."
+  },
+  "session:cheap: follow-up, same again": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Repeating the --json flag already added to balance on the payouts command follows an established pattern on Fable 5.1, where low is very strong, so it gets the job done at the lowest cost."
+  },
+  "session:cheap: follow-up, run and fix the tests": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Running tests and fixing fallout from a mechanical rename is routine work that low on Fable 5.1 handles well, so higher levels would only add cost, time and possible unrequested edits."
+  },
+  "session:cheap: ordinary bug with a clear cause": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Fixing a missing leading zero in currency formatting and adding a test is routine work well within Fable 5.1's ability at low, so any higher level would only add cost and time."
+  },
+  "session:ask: think hard on a small task": {
+    "right": [
+      "xhigh"
+    ],
+    "best": "xhigh",
+    "why": "The user explicitly asked for much more thinking and inference than usual, and since the session's default is already high, the level matching their words is xhigh (max is not on offer), even though the task itself is routine."
+  },
+  "session:cheap: ordinary feature with tests": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding a read-only command that lists the last 10 payouts, plus a test, is routine work well within Fable 5.1's ability, where even low is very strong, so medium or higher would cost more for the same result."
+  },
+  "session:ask: low effort on a spec": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "The user explicitly asked for low effort, and low is offered on Fable 5.1, so low is the right level whatever the task."
+  },
+  "session:ask: quick one on a money bug": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "The user said \"Quick one, don't overthink it,\" and an explicit instruction about how hard to think picks the matching level, low, even though a double-debit payout bug would otherwise call for more care."
+  },
+  "session:ask: xhigh on a typo": {
+    "right": [
+      "xhigh"
+    ],
+    "best": "xhigh",
+    "why": "The user explicitly asked to run at xhigh, and when the user names a level that is on offer, that level is the right one, even for a trivial typo fix."
+  },
+  "session:ask: medium on a security review": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "The user explicitly asked for medium effort, so medium is right even though a security review would otherwise lean toward a higher level."
+  },
+  "session:ask: max on a rename": {
+    "right": [
+      "xhigh"
+    ],
+    "best": "xhigh",
+    "why": "The user asked for max effort, which isn't offered on Fable 5.1, so the nearest available level, xhigh, is right even for this routine rename."
+  },
+  "subagent:web research, tabulate lender criteria": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is routine web lookup that doesn't need high's extra deliberation, but low on Fable 5.1 tends to answer current-product details like LTVs, ICRs and fees from memory rather than the lenders' live criteria pages, so medium is the cheapest level that reliably gets sourced, accurate figures."
+  },
+  "subagent:run the tests and report, no fixing": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Running bun test and reporting the failures without touching any code is routine mechanical work that low handles fully on Fable 5.1, so any higher level just costs more for the same result."
+  },
+  "subagent:summarise a given doc": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Summarizing one named doc into 10 bullets with quoted headings is routine reading work that low on Fable 5.1 does well, so any higher level would only add cost and time."
+  },
+  "subagent:list npm scripts across the monorepo": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Listing npm scripts from every package.json is routine lookup work that Fable 5.1 does well even at low, and low is the cheapest level on offer, so higher levels would only add cost and time."
+  },
+  "subagent:Explore: where is the token refreshed": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Finding where the frontend refreshes the session token and listing the files is routine codebase exploration, which even low does well on Fable 5.1, so medium or higher would only add cost and time."
+  },
+  "subagent:extract action items from given text": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Pulling three action items out of four sentences of notes into a table is routine and well within Fable 5.1's ability even at low, and it needs no lookups, so the cheapest level does it as well as any higher one."
+  },
+  "subagent:add translation keys in the existing format": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding one key to two JSON files with the existing nesting and ordering is routine work that low does well on Fable 5.1, so any higher level only adds cost and time, and from high up risks unrequested edits in other files."
+  },
+  "subagent:debug a failing test after a merge": {
+    "right": [
+      "low",
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Tracing a regression from yesterday's merge in currency and partial-refund ledger logic is bounded debugging that Fable 5.1 handles well at low or medium. Medium gives a bit more care for the money-handling edge cases at small extra cost, while high would only add deliberation and stray edits."
+  },
+  "subagent:implement rate limiting from a spec, with tests": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "A Redis token bucket is a well-known pattern that Fable 5.1 handles well at medium, but atomicity races, Retry-After maths, the exemption bypass and wiring into the existing Express app carry enough risk that low could cause rework, while high would only add cost and stray edits."
+  },
+  "subagent:security review of a branch": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "A security review of an OAuth callback and cookie settings is edge-case-heavy work (state/CSRF handling, redirect validation, token leakage, cookie flags), which is exactly where effort pays on Fable 5.1, so high is justified. Its drawback of unrequested edits doesn't apply to a read-only review, and the scoped branch diff doesn't need xhigh."
+  },
+  "subagent:autonomous port with property tests": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Porting a payment state machine carries subtle C#-to-TypeScript semantic traps (decimal rounding, null and enum handling) that warrant more care than low, but the recorded fixtures and the test-until-pass loop catch most misses. On Fable 5.1, high costs 1.3 times as much, gains little, and tends to make unrequested changes outside the task."
+  },
+  "subagent:review a PR for correctness": {
+    "right": [
+      "high"
+    ],
+    "best": "high"
+  },
+  "subagent:vague: \"same for the invoices table\"": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Repeating an already-established change for one more table is routine, pattern-following work where Fable 5.1's low effort is already very strong, so medium or higher would only add cost and time."
+  },
+  "subagent:Plan: design proposal for event-driven reconciliation": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "A design proposal for moving settlement reconciliation to events has real edge cases (late or duplicate settlements, cutoff timing, parallel-run drift at month-end) that are worth more care than low gives, but it is planning prose rather than code that can break, so on Fable 5.1 high would mostly add cost and over-deliberation."
+  }
+}
