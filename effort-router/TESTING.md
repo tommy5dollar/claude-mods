@@ -273,13 +273,33 @@ Opus 5.5 at medium for comparison: a separate call took 2.8 s. A fork thinks at 
 
 ## Live, Desktop: verified
 
+### 0.17.0: the whole walkthrough (2026-10-05, Desktop 2.1.286, Opus 5.5 at Medium, by Tommy)
+
+One session in a scratch folder with a 16-line `checkout.js` holding a coupon-expiry bug, run through the list below
+(screenshots in `docs/`):
+
+- A new session loads mods with its first message: before it there is no footer and no `/er`. That first message
+  (`hi`) was assessed ("no clear task", prompt 1 of 5) and the ledger recorded it.
+- The footer emoji (🔓 🔒 ⏸️ and the circles) line up with the text. The typeahead lists `/effort-router` and `/er`.
+- The coupon prompt moved medium to high (78% sure medium was too low), shown by a dim line labelled
+  `effort-router`, while the Desktop picker kept showing Medium.
+- Follow-ups moved the level back to medium, and after the fifth prompt it locked at medium.
+- Assess, Unlock, Turn off and Turn on, locked each added their line and the footer followed.
+- A general-purpose subagent was routed to low and counted in the band.
+- `/er stauts` was refused with the command list. `/er on` while on said so.
+- Changing the picker to High turned routing off (`You changed the effort to high, so routing is off.`, footer
+  `⏸️ high`). Found and fixed on the way: a hot reload had wiped the router's memory of the picker, so the first
+  attempt went unseen. The setting is now kept in the ledger.
+- Fixed on the way too: messages no longer repeat "Effort router:" after the engine's own label, and `/er status`
+  prints short blocks with bulleted lists (Desktop drops leading spaces).
+
 ### 0.16.2: changing the picker yourself stops routing (2026-10-05, Desktop 2.1.286, Fable 5.1)
 
 In a two-day session the router had kept at high (248 requests, picker at medium), the model was switched to Fable 5.1
 and the picker to xhigh. The router's store for that session went to `mode: picker` at 08:46:19Z, on the first request
 after the change, and every request since has run at xhigh (`perTurnEffort` in the transcript). Nothing was pressed.
 
-## Live: 0.17 (to run by hand)
+## Live: 0.17 checklist (run in Desktop 2026-10-05, see above)
 
 Load the build with `claude --plugin-dir <path>/effort-router` (terminal) or in the Desktop Code tab, with the effort picker at Medium, in a fresh session in a scratch repo. With a debug log, `grep "effort-router: " <log>` shows each assessment and each step as `effort <arrived> -> <sent>`.
 
