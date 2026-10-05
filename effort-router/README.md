@@ -105,7 +105,7 @@ The footer sits beside the native model and effort pickers. It shows the router'
 | `🔓 HIGH ◔` | Unlocked with one prompt assessed, which moved the level to high |
 | `🔓 HIGH ◑` | Two or three assessed |
 | `🔓 HIGH ◕` | Four assessed. The next prompt is the last one assessed |
-| `🔓 ASSESSING…` | An assessment is running. The turn starts when it's done |
+| `🔓 HIGH …` | An assessment is running. The turn starts when it's done |
 | `🔒 HIGH` | Locked. Every request on the main thread runs at high |
 | `⏸️ MEDIUM` | Off. Your own effort setting applies |
 

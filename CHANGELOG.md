@@ -32,7 +32,8 @@
   to the prompt, rules or notes runs it first, and a prompt that moves off its approved level is flagged.
 - **The footer shows the level in capitals** (`🔓 HIGH ◑`), which tells the level running apart from the picker's own
   label (your setting). It also fixes the Desktop app cutting off the bottom of "high": the app's footer button clips
-  descenders, and capitals have none.
+  descenders, and capitals have none. While a check runs the level stays and an ellipsis takes the circle's place
+  (`🔓 HIGH …`), instead of the word ASSESSING.
 - **Routed subagents are kept in the ledger.** Each one's level, the level it would have inherited from its parent,
   why, and how long its spawn waited. Before, only the last ten were kept, in memory, for `/er status`.
 

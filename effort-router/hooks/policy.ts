@@ -1300,8 +1300,9 @@ function footerWords(state: RouterState, view: View): { text: string; dim: boole
   const setting = view.setting
   if (state.unsupported || state.status === 'off') return { text: `${GLYPH.off} ${setting ?? 'off'}`, dim: true }
   const glyph = GLYPH[state.status]
-  if (view.assessing) return { text: `${glyph} assessing…`, dim: false }
   const running = runningLevel(state, setting)
+  // While a check runs, the level stays and an ellipsis takes the progress circle's place.
+  if (view.assessing) return { text: `${glyph}${running ? ` ${running}` : ''} …`, dim: false }
   if (state.status === 'locked') return { text: `${glyph} ${running ?? ''}`.trim(), dim: false }
   return { text: `${glyph}${running ? ` ${running}` : ''} ${progressGlyph(state.assessed, view.limit)}`, dim: false }
 }

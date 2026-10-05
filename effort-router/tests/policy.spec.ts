@@ -777,7 +777,7 @@ describe('0.17: the footer', () => {
     expect(footerLabel(at({ status: 'locked', level: 'high', assessed: 5 }), VIEW)).toEqual({ text: '🔒 HIGH', dim: false })
     expect(footerLabel(turnedOff(freshState(), 'you'), VIEW)).toEqual({ text: '⏸️ MEDIUM', dim: true })
     expect(footerLabel(freshState(), { ...VIEW, setting: undefined }).text).toBe('🔓 ○')
-    expect(footerLabel(freshState(), { ...VIEW, assessing: true }).text).toBe('🔓 ASSESSING…')
+    expect(footerLabel(freshState(), { ...VIEW, assessing: true }).text).toBe('🔓 MEDIUM …')
     expect([0, 1, 2, 3, 4].map(n => progressGlyph(n, 5))).toEqual(['○', '◔', '◑', '◑', '◕'])
     expect(GLYPH).toEqual({ unlocked: '🔓', locked: '🔒', off: '⏸️' })
   })

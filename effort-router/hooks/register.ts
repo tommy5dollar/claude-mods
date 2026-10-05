@@ -140,7 +140,7 @@ type Session = {
   bandOpen: boolean
   /** A line the band shows under its own (why a slot is greyed out, what an action did). */
   note?: string
-  /** An assessment is running: the footer reads `assessing…`. */
+  /** An assessment is running: the footer shows an ellipsis where the progress circle goes. */
   assessing: boolean
   /** Assessments this session, for `/er status`. */
   calls: number
