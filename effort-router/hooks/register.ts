@@ -193,7 +193,8 @@ const MAX_ROUTED_AGENTS = 200
 
 const FALLBACK_RULES =
   'Effort buys verification, edge-case testing and independent judgement, not a better approach. Weigh how much is ' +
-  'hidden (edge cases, existing code, money, integrations, concurrency, security), whether the user is in the loop, ' +
+  'hidden (what a careful engineer could miss: edge cases, existing code, concurrency, security), whether the user ' +
+  'is in the loop, ' +
   'and how well specified and how big the task is. Pick the level that does the work well on this model without ' +
   "paying for thinking it won't use."
 
