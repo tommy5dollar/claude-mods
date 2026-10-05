@@ -4,7 +4,7 @@ A Claude Code plugin that saves time and money by running each task at the lowes
 session's own model assesses each of your first five prompts and moves the level to whichever gets the work done fastest
 and cheapest, up or down. Then the level locks for the rest of the session. Each subagent gets its own level, chosen by the agent that launches it.
 
-<img src="docs/demo.gif" width="560" alt="A Claude Code session in the Desktop app with the effort picker on Medium. A rename is assessed and moved to low, then a production coupon bug is assessed and moved from low to high, and the band shows the last assessment">
+<img src="docs/race.gif" width="720" alt="A race between two Claude Code sessions on the same three chores, Fable 5.1 set to xhigh. Fixed at xhigh it takes 8:28 and $3.74. With effort-router the main thread moves to medium and its subagents to low, medium and low, and it takes 2:24 and $1.64. All 7 hidden tests pass on both">
 
 It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the terminal and in the Desktop app's Code tab. It requires
 Claude Code 2.1.286 or later.
@@ -106,6 +106,8 @@ Before 0.18 the model gave every level a probability and the router moved only w
 
 The footer sits beside the native model and effort pickers. It shows the router's status, the level running and, while unlocked, how much of the window is used.
 
+<img src="docs/footer.gif" width="720" alt="The footer in the Desktop app. A rename is assessed and moves from medium to low, a production bug moves from low to high while the effort picker still says Medium, and clicking the footer opens the band">
+
 | Footer | What it means |
 | --- | --- |
 | `🔓 MEDIUM ○` | Unlocked, nothing assessed yet. Your setting (medium) runs |
@@ -142,7 +144,7 @@ The four buttons always sit in the same slots, so the digit keys are learnable. 
 | 3 | Turn off | Turn off | Turn on, unlocked |
 | 4 | Assess (greyed out) | Assess | Turn on and assess |
 
-![The band in the Desktop app after the router locked at medium, with the last assessment and why](docs/band-locked.png)
+![The band in the Desktop app after you locked it at high, with the last assessment and why](docs/band-locked.png)
 
 - **Lock** ends assessing early when the level is plainly right.
 - **Unlock** keeps the locked level running and assesses your next five prompts from there. Use it when you're about to steer the work somewhere new.

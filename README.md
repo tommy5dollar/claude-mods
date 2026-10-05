@@ -10,7 +10,7 @@ Claude Code runs every task at the effort level you picked, whether it's renamin
 touches three services. Anthropic's [Spending your effort](https://claude.dev/blog/spending-your-effort/) says the
 right level depends on the task. effort-router picks it for you, so easy work stops paying for thinking it doesn't need.
 
-<img src="effort-router/docs/demo.gif" width="560" alt="A Claude Code session in the Desktop app. A rename is assessed and moved down to low, then a production bug is assessed and moved up to high">
+<img src="effort-router/docs/race.gif" width="720" alt="A race between two Claude Code sessions on the same three chores, Fable 5.1 set to xhigh. Fixed at xhigh it takes 8:28 and $3.74. With effort-router the main thread moves to medium and its subagents to low, medium and low, and it takes 2:24 and $1.64. All 7 hidden tests pass on both">
 
 - **Your session.** Your session's own model assesses each of your first five prompts and moves the level to the one
   that gets the work done fastest and cheapest, then locks. The footer shows the level in use, and clicking it gives
@@ -19,6 +19,8 @@ right level depends on the task. effort-router picks it for you, so easy work st
   the router every subagent runs at your level.
 - **Your rules.** Add to the routing rules in plain markdown, per user, per project or for a whole organisation.
 - **Where it went.** `/er report` shows the requests and output tokens at each level, and what the router changed.
+
+<img src="effort-router/docs/footer.gif" width="720" alt="The footer in the Desktop app. A rename is assessed and moves from medium to low, a production bug moves from low to high while the effort picker still says Medium, and clicking the footer opens the band">
 
 It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the Desktop app's Code tab and in the terminal.
 
