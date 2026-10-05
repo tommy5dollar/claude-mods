@@ -178,7 +178,7 @@ The verbs are explicit rather than toggles, so repeating one is safe ("Already l
 
 ## Options
 
-Set them in `/plugin configure`, or under `pluginConfigs["effort-router@tommy-mods"].options` in settings.json. Every option has a default, so there's nothing to set up.
+Set them in `/plugin configure`, or under `pluginConfigs["effort-router@tommy5dollar"].options` in settings.json. Every option has a default, so there's nothing to set up.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
@@ -222,7 +222,7 @@ An organisation can add routing rules for everyone in managed settings (`managed
 ```json
 {
   "pluginConfigs": {
-    "effort-router@tommy-mods": {
+    "effort-router@tommy5dollar": {
       "options": {
         "rules": "$defaults\n\n- Code under payments/ or ledger/ is never routed below high.\n- Infrastructure changes (terraform/, k8s/) are high."
       }
@@ -236,8 +236,8 @@ The organisation's rules layer over the shipped defaults, and each person's and 
 ## Install
 
 ```
-claude plugin marketplace add tommy5dollar/claude-mods
-claude plugin install effort-router@tommy-mods
+claude plugin marketplace add tommy5dollar/claude-plugins
+claude plugin install effort-router@tommy5dollar
 ```
 
 Start a new session (or restart the Desktop app) after installing.

@@ -3,7 +3,7 @@
   "version": "0.1.2",
   "description": "Context-window usage as a small coloured percentage in the prompt footer: green below 30%, yellow 30-40%, red above 40%. /ctx prints the breakdown by category.",
   "author": { "name": "Tommy Long" },
-  "repository": "https://github.com/tommy5dollar/claude-mods",
+  "repository": "https://github.com/tommy5dollar/claude-plugins",
   "license": "MIT",
   "keywords": ["context", "usage", "status", "mod"],
   "userConfig": {

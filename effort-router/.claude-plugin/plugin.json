@@ -6,8 +6,8 @@
     "name": "Tommy Long"
   },
   "license": "MIT",
-  "homepage": "https://github.com/tommy5dollar/claude-mods/tree/main/effort-router",
-  "repository": "https://github.com/tommy5dollar/claude-mods",
+  "homepage": "https://github.com/tommy5dollar/claude-plugins/tree/main/effort-router",
+  "repository": "https://github.com/tommy5dollar/claude-plugins",
   "userConfig": {
     "promptsToAssess": {
       "type": "number",

@@ -6,6 +6,8 @@
 
 A redesign of the main thread's rule, the footer, the band and the command. Settings from earlier versions other than the five below are ignored.
 
+The marketplace is now `tommy5dollar`, at `tommy5dollar/claude-plugins` (it was `tommy-mods`, at `tommy5dollar/claude-mods`). To move, run `claude plugin marketplace remove tommy-mods`, then the commands in Install in the README.
+
 - **The rule.** Each of a session's first five prompts (`promptsToAssess`) is assessed. The router moves to the middle of the spread when it's at least 70% sure the level running is wrong (`confidence`), and otherwise stays. After the fifth it locks whatever is running. A move never locks early.
 - **Statuses.** Unlocked, locked and off, shown in the footer as 🔓, 🔒 and ⏸️ with the level and a circle for the window's progress. The level word is dim while the last assessment was less than 50% sure of it. Levels have no colours.
 - **The band** opens only from the footer or `/er`. It says the footer in words, the last assessment and how many subagents were routed, over four fixed slots: Hide, Lock or Unlock, Turn off or on, and Assess. A greyed-out slot stays in place and says why when pressed.

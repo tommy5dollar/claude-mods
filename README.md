@@ -1,7 +1,7 @@
-# claude-mods
+# claude-plugins
 
-Mods for Claude Code: function-hook plugins that run in the terminal and in the Desktop app's Code tab. They require
-Claude Code 2.1.286 or later.
+Claude Code plugins by Tommy Long. The two here are mods: function-hook plugins that run in the terminal and in the
+Desktop app's Code tab. They require Claude Code 2.1.286 or later.
 
 ## effort-router
 
@@ -33,9 +33,9 @@ red above 40%. `/ctx` prints the breakdown.
 ## Install
 
 ```
-claude plugin marketplace add tommy5dollar/claude-mods
-claude plugin install effort-router@tommy-mods
-claude plugin install context-gauge@tommy-mods
+claude plugin marketplace add tommy5dollar/claude-plugins
+claude plugin install effort-router@tommy5dollar
+claude plugin install context-gauge@tommy5dollar
 ```
 
 Start a new session (or restart the Desktop app) after installing. [CHANGELOG.md](CHANGELOG.md) lists the versions.

@@ -37,15 +37,15 @@ without adding a separate usage panel.
 ## Install
 
 ```
-claude plugin marketplace add tommy5dollar/claude-mods
-claude plugin install context-gauge@tommy-mods
+claude plugin marketplace add tommy5dollar/claude-plugins
+claude plugin install context-gauge@tommy5dollar
 ```
 
 Needs Claude Code 2.1.286 or later (Claude Mods).
 
 ## Settings
 
-Set these in `/config`, `/plugin configure context-gauge@tommy-mods`, or under `pluginConfigs` in settings.
+Set these in `/config`, `/plugin configure context-gauge@tommy5dollar`, or under `pluginConfigs` in settings.
 
 | Option | Default | What it does |
 | --- | --- | --- |

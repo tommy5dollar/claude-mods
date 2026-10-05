@@ -23,8 +23,8 @@ and whether the theme colours look right. Do these by eye.
 
 ## Desktop app (once its bundled Claude Code is 2.1.287 or later)
 
-1. Install it: `claude plugin marketplace add tommy5dollar/claude-mods`, then
-   `claude plugin install context-gauge@tommy-mods`, or set `CLAUDE_CODE_PLUGIN_DIRS=D:\code\mods\context-gauge`.
+1. Install it: `claude plugin marketplace add tommy5dollar/claude-plugins`, then
+   `claude plugin install context-gauge@tommy5dollar`, or set `CLAUDE_CODE_PLUGIN_DIRS=D:\code\mods\context-gauge`.
 2. Open a Code tab chat, send a message, and look for `ctx N%` near the prompt footer.
 3. Open a second chat. Issue #99265 says the band draws only in the active chat, so check whether the footer has
    the same problem.

@@ -358,7 +358,7 @@ describe('spreads and replies', () => {
 
 describe('settings-borne rules', () => {
   test('reads rules from pluginConfigs options under any marketplace key, then a top-level effortRouter object', () => {
-    expect(settingsRulesOf({ pluginConfigs: { 'effort-router@tommy-mods': { options: { rules: 'R', rulesMode: 'enforce', allowOff: false } } } })).toBe('R')
+    expect(settingsRulesOf({ pluginConfigs: { 'effort-router@tommy5dollar': { options: { rules: 'R', rulesMode: 'enforce', allowOff: false } } } })).toBe('R')
     expect(settingsRulesOf({ effortRouter: { rules: 'TOP' } })).toBe('TOP')
     expect(settingsRulesOf({ pluginConfigs: { 'other@x': { options: { rules: 'NO' } } } })).toBeUndefined()
     expect(settingsRulesOf({ effortRouter: { rules: '  ' } })).toBeUndefined()
