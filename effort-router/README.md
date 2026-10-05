@@ -1,6 +1,6 @@
 # effort-router
 
-A Claude Code mod that saves time and money by running each task at the lowest reasoning effort that does it well. Your
+A Claude Code plugin that saves time and money by running each task at the lowest reasoning effort that does it well. Your
 session's own model assesses each of your first five prompts and moves the level to whichever gets the work done fastest
 and cheapest, up or down. Then the level locks for the rest of the session. Each subagent gets its own level, chosen by the agent that launches it.
 
@@ -10,7 +10,7 @@ It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the terminal and in the Des
 Claude Code 2.1.286 or later.
 
 ```
-claude plugin marketplace add tommy5dollar/claude-plugins
+claude plugin marketplace add tommy5dollar/effort-router
 claude plugin install effort-router@tommy5dollar
 ```
 
@@ -34,9 +34,12 @@ do on that model, then lets it judge. It never maps a kind of task to a fixed le
 different things on Opus, Sonnet and Fable.
 
 **Does it save money and time?** That's what it's for. When two levels would both do the work, it picks the cheaper
-one. If you run everything at high or xhigh, easy work moves down, and those turns come back much faster as well as
-cheaper. It still steps up when the work clearly needs it, because a hard task done right first time costs less than
-the rework, in tokens and in your own time.
+one, so the higher you run, the more it saves. In our test, Fable 5.1 on xhigh was given three small chores in a
+payments repo to hand to subagents. The router moved it to medium and its Opus subagents to medium or low. It finished
+in about 2 minutes for $1.10 to $1.65, against 6 to 8.5 minutes and $3.20 to $3.75 left on xhigh, and every hidden
+test passed both ways. Those figures include the router's own assessments. On Opus 5.5's default of medium there's
+less to step down from, so it mostly picks off the small tasks. It still steps up when the work clearly needs it,
+because a hard task done right first time costs less than the rework, in tokens and in your own time.
 `/er report` shows what ran at each level, so you can see what it did to your own work.
 
 **What routing costs.** Each of the first five prompts waits about 1.5 seconds for an assessment. The first is a
@@ -46,7 +49,7 @@ Opus, then nothing more. A subagent's assessment is about 2 cents.
 
 ## What it reads, sends and stores
 
-Mods run inside Claude Code without a sandbox, so here's exactly what this one does:
+This plugin runs inside Claude Code without a sandbox, so here's exactly what it does:
 
 - **Sends:** assessments go to your session's own model through Claude Code, on your existing login. If your
   organisation has set up Claude Code's OpenTelemetry, it adds a few attributes to Claude Code's own records for that
@@ -124,7 +127,7 @@ Subagents get their own level: 4 routed this session.
 1 Hide   2 Lock at high   3 Turn off   4 Assess
 ```
 
-The first line is the footer in words: the status, the level and where it came from, how confident the last assessment was in it, and what happens next. The second is the last assessment. The third appears once a subagent has been routed.
+The first line is the footer in words: the status, the level and where it came from, and what happens next. The second is the last assessment. The third appears once a subagent has been routed.
 
 The four buttons always sit in the same slots, so the digit keys are learnable. They run from doing nothing to taking action:
 
@@ -223,7 +226,7 @@ Set `routeSubagents` to `false` to leave subagents at the session's level.
 
 The router supports Fable 5.1, Opus 5.5 and Sonnet 5.5. Level names don't mean the same amount of thinking on each, and each responds to effort differently. In Claude Code, Opus 5.5 and Sonnet 5.5 default to medium and Fable 5.1 to high. Opus 5.5 gains most from low to medium and little above high, while Sonnet 5.5 gains a lot at every step. Routing one like another would be a mistake.
 
-Each has a notes file in [`rules/models/`](rules/models/) on how its levels behave, in the same shape for every model: how effort pays on it, Anthropic's advice for it, then each level with its cost and time against medium and how it behaves. They are heuristics. Benchmark scores are left out, because a few points on a hard benchmark means a few more of the hardest tasks solved, not every task done better. Every assessment carries the notes for the model it's about, after the routing rules. Lines about max are left out unless max is on offer. `/er rules` prints them. The evidence behind each line, with sources, is in [`rules/models/research-2026-10.md`](rules/models/research-2026-10.md) and its [addendum](rules/models/research-2026-10-addendum.md). No eval results are in the notes, ours or anyone's. The router's routing eval ([val/routing.ts](eval/routing.ts)) checks 87 prompts against an approved level for each, and any change to the prompt, rules or notes has to pass it.
+Each has a notes file in [`rules/models/`](rules/models/) on how its levels behave, in the same shape for every model: how effort pays on it, Anthropic's advice for it, then each level with its cost and time against medium and how it behaves. They are heuristics. Benchmark scores are left out, because a few points on a hard benchmark means a few more of the hardest tasks solved, not every task done better. Every assessment carries the notes for the model it's about, after the routing rules. Lines about max are left out unless max is on offer. `/er rules` prints them. The evidence behind each line, with sources, is in [`rules/models/research-2026-10.md`](rules/models/research-2026-10.md) and its [addendum](rules/models/research-2026-10-addendum.md). No eval results are in the notes, ours or anyone's. The router's routing eval ([eval/routing.ts](eval/routing.ts)) checks 87 prompts against an approved level for each, and any change to the prompt, rules or notes has to pass it.
 
 The notes guide the level instead of fixed rules because of an eval on 4 October 2026. With rules that tied kinds of task to levels, all three models gave almost the same answers and ignored their notes. Without those rules, each model's answers moved the way its evidence predicts (`TESTING.md`, "Prompt variants").
 
@@ -269,7 +272,7 @@ Options from earlier versions (`consent`, `decideWithin`, `showChecks` and the r
 The shipped rules ([`rules/default.md`](rules/default.md)) are principles, not a table of levels:
 
 - Effort buys verification, edge-case testing and independent judgement, not a better approach.
-- Weigh how much is hidden (edge cases, existing code, money, several external systems, concurrency, security), whether you're in the loop, how well specified the task is, and how big it is.
+- Weigh how much is hidden (what a careful engineer could miss: edge cases, existing code, concurrency, security), whether you're in the loop, how well specified the task is, and how big it is.
 
 You can add to them or replace them. Rules are plain markdown, layered from the bottom up:
 
@@ -355,7 +358,7 @@ and a general-purpose subagent was `agent:builtin:general-purpose`. Check the va
 - **Subagent levels are kept in memory.** After a restart, a subagent still running from before takes the main thread's level.
 - **The model isn't told its level.** Adding a note to the system prompt would break the prompt cache.
 - **The spend report starts at 0.9.0**, so sessions from before it aren't in it. A request with no reported usage isn't counted. Days are UTC.
-- **In the Desktop app a new session loads mods with its first message.** Until you send something there is no footer and `/er` isn't available. That first message is assessed like any other.
+- **In the Desktop app a new session loads plugins with its first message.** Until you send something there is no footer and `/er` isn't available. That first message is assessed like any other.
 - **The footer and band draw in the terminal and the Desktop app.** VS Code and `-p` run the router without them, and `/er` is the control there.
 
 ## Development
