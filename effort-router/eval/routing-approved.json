@@ -86,9 +86,13 @@
     "why": "Fable: Fable is strong at low and the judge picked it, but medium for a feature is a fine step down from high."
   },
   "session:brownfield bug fix": {
-    "opus": "medium",
+    "opus": [
+      "medium",
+      "high"
+    ],
     "sonnet": "high",
-    "fable": "medium"
+    "fable": "medium",
+    "why": "Timing and stale state in a bug fix. Goes to high in some runs."
   },
   "session:mechanical rename": {
     "opus": "low",
@@ -121,10 +125,16 @@
     ]
   },
   "session:autonomous end-to-end build": {
-    "opus": "medium",
+    "opus": [
+      "medium",
+      "high"
+    ],
     "sonnet": "high",
-    "fable": "medium",
-    "why": "Fable: Fable stayed on high for this until its notes said medium copes with long unattended builds (2026-10-05)."
+    "fable": [
+      "medium",
+      "high"
+    ],
+    "why": "Fable: Fable stayed on high for this until its notes said medium copes with long unattended builds (2026-10-05). A large loose build with nobody watching. High is what generic rules give, and on Fable it is Anthropic's own default."
   },
   "session:research on current tools": {
     "opus": "medium",
@@ -147,12 +157,16 @@
     "why": "As the repo question. Fable: As the repo question."
   },
   "session:held out: payout reconciliation webhook": {
-    "opus": "medium",
+    "opus": [
+      "medium",
+      "high"
+    ],
     "sonnet": "high",
     "fable": [
       "medium",
       "high"
-    ]
+    ],
+    "why": "Money moving through an outside system. High is what generic rules give."
   },
   "session:held out: bank statement importer, vague": {
     "opus": "medium",
@@ -195,9 +209,13 @@
     "fable": "low"
   },
   "session:AskUserQuestion answers refine the task": {
-    "opus": "medium",
+    "opus": [
+      "medium",
+      "high"
+    ],
     "sonnet": "high",
-    "fable": "medium"
+    "fable": "medium",
+    "why": "A sync across two outside accounting systems. High is what generic rules give."
   },
   "session:pay: what does this repo do": {
     "opus": "undecided",
@@ -311,7 +329,11 @@
   "session:ask: quick one on a money bug": {
     "opus": "low",
     "sonnet": "low",
-    "fable": "low"
+    "fable": [
+      "low",
+      "medium"
+    ],
+    "why": "Reworded so it no longer repeats the frame's own example. Fable steps down to medium, which follows the user's direction if not all the way."
   },
   "session:ask: low effort on a spec": {
     "opus": "low",
@@ -418,9 +440,16 @@
     "fable": "high"
   },
   "subagent:autonomous port with property tests": {
-    "opus": "medium",
+    "opus": [
+      "medium",
+      "high"
+    ],
     "sonnet": "high",
-    "fable": "medium"
+    "fable": [
+      "medium",
+      "high"
+    ],
+    "why": "A long unattended port of payment logic. High is what generic rules give."
   },
   "subagent:vague: \"same for the invoices table\"": {
     "opus": "medium",

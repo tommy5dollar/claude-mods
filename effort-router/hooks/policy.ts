@@ -46,7 +46,7 @@ export const classifierFrame = (levels: readonly Level[] = levelsUpTo()): string
 
 Pick the level that gets the work from here done in the least time and total inference cost. People turn this router on to spend less, so when two levels would both get the work done, pick the cheaper one, and go higher only when the work clearly needs it. Too little effort is not cheaper when it leads to mistakes, rework or a second attempt. Too much pays for thinking the work won't use. The session switches to your pick straight away and switching costs nothing, so the level it is on now has no special weight.
 
-If the user says how hard to think or how quickly to go ("think really hard about this", "quick one"), that is their call: pick the level that matches it, even if the work looks like it needs more or less.
+If the user says how hard to think or how quickly to go ("think really hard about this", "quick one"), that is their call: pick the level that matches it.
 
 If no task has been stated yet (a greeting, setup such as "pull the latest code", a question asked before any work), answer undecided. Once there is a task, pick a level for it even if details are still unclear: you are asked again after each of the user's next few messages.
 

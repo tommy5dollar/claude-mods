@@ -22,10 +22,12 @@
   don't need either. Undecided is now just another answer in the one reply format.
 - **Model notes are heuristics, in one shape for every model.** How effort pays on the model, Anthropic's advice for it,
   then each level with its cost and time against medium and how it behaves. No benchmark scores: a few points on a hard
-  benchmark means a few more of the hardest tasks solved, and a model reads it as every task done better. On Opus the
-  notes now say what medium already covers (most bug fixes, integrations and builds, including unattended ones), and
-  the rules no longer count money or other systems as hidden risk on their own. Before that, routine payments work went
-  to high. Lines about max only reach the check when max is on offer.
+  benchmark means a few more of the hardest tasks solved, and a model reads it as every task done better. The Opus
+  notes say what medium already does, so ordinary work stays on medium. Lines about max only reach the check when max
+  is on offer.
+- **Hidden risk means something a careful engineer could miss.** The rules no longer list money or other systems as
+  hidden on their own, and the well-known pitfalls of a kind of work don't count. A user being away makes hidden
+  problems costlier but doesn't create them. Before this, routine payments work went to high.
 - **A routing eval.** 72 prompts, each with an approved level per model, and a judge with a written rubric. Any change
   to the prompt, rules or notes runs it first, and a prompt that moves off its approved level is flagged.
 

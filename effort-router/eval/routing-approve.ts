@@ -68,6 +68,19 @@ const fableOverrides: Record<string, { fable: string | string[]; why: string }> 
   'session:pay: security review': { fable: 'high', why: 'Fable went to xhigh until its notes said high covers most edge-case-heavy work (2026-10-05).' },
 }
 
+// Accepted on 2026-10-05 when the rules were cut back to generic heuristics (Tommy: "I'd rather we don't land all 72
+// scenarios correctly than end up writing the scenarios themselves into the rules"). The judge still prefers medium.
+// Fixing these took lines that named these very scenarios, so high stays acceptable here and the gate flags any
+// further change.
+const genericAccepted: Record<string, { opus?: string[]; fable?: string[]; why: string }> = {
+  'session:autonomous end-to-end build': { opus: ['medium', 'high'], fable: ['medium', 'high'], why: 'A large loose build with nobody watching. High is what generic rules give, and on Fable it is Anthropic\'s own default.' },
+  'session:held out: payout reconciliation webhook': { opus: ['medium', 'high'], why: 'Money moving through an outside system. High is what generic rules give.' },
+  'session:AskUserQuestion answers refine the task': { opus: ['medium', 'high'], why: 'A sync across two outside accounting systems. High is what generic rules give.' },
+  'subagent:autonomous port with property tests': { opus: ['medium', 'high'], fable: ['medium', 'high'], why: 'A long unattended port of payment logic. High is what generic rules give.' },
+  'session:brownfield bug fix': { opus: ['medium', 'high'], why: 'Timing and stale state in a bug fix. Goes to high in some runs.' },
+  'session:ask: quick one on a money bug': { fable: ['low', 'medium'], why: 'Reworded so it no longer repeats the frame\'s own example. Fable steps down to medium, which follows the user\'s direction if not all the way.' },
+}
+
 const keys = [...new Set([...Object.keys(now.opus), ...Object.keys(now.sonnet)])]
 const out: Record<string, Record<string, unknown>> = {}
 for (const key of keys) {
@@ -90,9 +103,15 @@ for (const key of keys) {
     entry.fable = fo.fable
     entry.why = entry.why ? `${entry.why} Fable: ${fo.why}` : `Fable: ${fo.why}`
   }
+  const ga = genericAccepted[key]
+  if (ga) {
+    if (ga.opus) entry.opus = ga.opus
+    if (ga.fable) entry.fable = ga.fable
+    entry.why = entry.why ? `${entry.why} ${ga.why}` : ga.why
+  }
   out[key] = entry
 }
-const missing = [...Object.keys(overrides), ...Object.keys(fableOverrides)].filter(k => !out[k])
+const missing = [...Object.keys(overrides), ...Object.keys(fableOverrides), ...Object.keys(genericAccepted)].filter(k => !out[k])
 if (missing.length) throw new Error(`overrides for unknown fixtures: ${missing.join(', ')}`)
 writeFileSync(join(EVAL, 'routing-approved.json'), `${JSON.stringify(out, null, 2)}\n`)
 console.log(`${Object.keys(out).length} prompts approved`)

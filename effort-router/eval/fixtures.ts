@@ -187,7 +187,7 @@ export const FIXTURES: Fixture[] = [
 
   // --- the user's own words about effort win -------------------------------------------------------------------
   { name: 'ask: think hard on a small task', messages: [], current: "Think particularly hard, long and deep on this one, and use way more inference than usual: add a --json flag to the CLI's balance command that prints the same data as JSON.", expect: ['xhigh'] },
-  { name: 'ask: quick one on a money bug', messages: [], current: "Quick one, don't overthink it: a customer got debited twice for the same payout last week. Find out why and fix it.", expect: ['low'] },
+  { name: 'ask: quick one on a money bug', messages: [], current: "No need to be thorough, just get a fix in fast: a customer got debited twice for the same payout last week. Find out why and fix it.", expect: ['low'] },
   { name: 'ask: low effort on a spec', messages: [], current: 'Use low effort for this: implement the monthly fees described in docs/monthly-fees.md.', expect: ['low'] },
   { name: 'ask: xhigh on a typo', messages: [], current: 'Run this at xhigh: fix the typo in the README, "recieve" should be "receive".', expect: ['xhigh'] },
   { name: 'ask: medium on a security review', messages: [], current: "Use medium effort. Do a security review of the CLI and the exporters: can anyone see or change another account's money?", expect: ['medium'] },

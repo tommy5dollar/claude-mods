@@ -8,7 +8,7 @@ Anthropic's advice, then each level with its cost, time and behaviours. A line t
 can't pick (max, unless offered) is left out of the prompt. Evidence: research-2026-10.md and
 research-2026-10-addendum.md. Never add eval results, ours or anyone's: these have to stay heuristics.
 -->
-How effort pays on this model: most of what it buys comes between low and medium. Above medium it only solves more of the hardest tasks, the ones with edge cases medium misses. Well-scoped work comes out the same at medium, and above medium it makes more changes nobody asked for. Medium already reproduces bugs, tests the usual edge cases and checks its own work, which covers most bug fixes, integrations and builds, including loosely specified ones, ones the user leaves it to finish alone and ones handed to a subagent. High pays where the hard part is something careful engineers often miss, such as races, security holes or a change that ripples through a lot of existing code.
+How effort pays on this model: most of what it buys comes between low and medium. Above medium it only solves more of the hardest tasks, the ones with edge cases medium misses. Well-scoped work comes out the same at medium, and above medium it makes more changes nobody asked for. Medium already reproduces bugs, tests the usual edge cases and checks its own work, so it is enough for most day-to-day work, whether or not the user is watching. High pays only where hidden problems are the hard part of the task.
 
 Anthropic's advice for this model: medium for well-scoped, day-to-day work, high when medium stalls, low for mechanical work such as renames, and xhigh only where a gain has been measured.
 
