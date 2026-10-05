@@ -10,8 +10,9 @@ match the effort to the task. effort-router is a mod that does that for you.
 
 ![The footer in the Desktop app: the router moved this session to high while the effort picker still shows Medium](effort-router/docs/footer-moved.png)
 
-- **Your session.** Your session's own model assesses each of your first five prompts. It moves the level only when
-  it's at least 70% sure the one running is wrong, then locks. The footer shows where it is, and clicking it gives you
+- **Your session.** Your session's own model assesses each of your first five prompts and steps the level both ways:
+  up for a prompt that needs more, back down for follow-ups that don't. It moves only when it's at least 70% sure the
+  level running is wrong, then locks. The footer shows where it is, and clicking it gives you
   Lock, Unlock, Turn off and Assess.
 - **Subagents.** Each subagent gets its own level, chosen by the agent launching it, which knows why it's delegating.
 - **Your rules.** Add to the routing rules in plain markdown, per user, per project or for a whole organisation.
@@ -29,12 +30,13 @@ claude plugin install effort-router@tommy5dollar
 
 Then start a new session. In the Desktop app the footer appears once you've sent the first message.
 
-### Does it save money?
+### Does it save money and time?
 
-Often, but not by always going lower. The right level depends on the task, and where it moves depends on where you
-start: if you run everything at high it moves easy work down, and at medium it moves hard work up. Running a hard task
-at a higher level often costs less overall, because getting it right first time saves the rework, which costs tokens
-and your own time. The routing itself costs about 20 cents a session on Opus 5.5.
+Often, but not by always going lower. Where it moves depends on where you start. If you run everything at high, it
+moves easy work down, and those turns come back much faster as well as cheaper: no more waiting on deep thinking for
+a one-line change. If you run at medium, it moves hard work up, and getting a hard task right first time often costs
+less overall than the rework, in tokens and in your own time. The routing itself costs about 20 cents a session on
+Opus 5.5, and each of the first five prompts waits about 1.5 seconds for its assessment.
 
 ### What it reads, sends and stores
 

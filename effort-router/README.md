@@ -1,8 +1,8 @@
 # effort-router
 
 A Claude Code mod that picks the reasoning effort each task needs. Your session's own model assesses each of your first
-five prompts and moves the level when it's confident the current one is wrong. Then the level locks for the rest of
-the session. Each subagent gets its own level, chosen by the agent that launches it.
+five prompts and steps the level up or down when it's confident the current one is wrong. Then the level locks for the
+rest of the session. Each subagent gets its own level, chosen by the agent that launches it.
 
 ![The footer in the Desktop app: the router running high, unlocked with two of five prompts assessed, while the effort picker still shows Medium](docs/footer-moved.png)
 
@@ -25,9 +25,10 @@ depends on the task. The router gives your session's model those principles and 
 do on that model, then lets it judge. It never maps a kind of task to a fixed level, because level names mean
 different things on Opus, Sonnet and Fable.
 
-**Does it save money?** Often, but not by always going lower. Where it moves depends on where you start: if you run
-everything at high it moves easy work down, and at medium it moves hard work up. Running a hard task at a higher level
-often costs less overall, because getting it right first time saves the rework, which costs tokens and your own time.
+**Does it save money and time?** Often, but not by always going lower. Where it moves depends on where you start.
+If you run everything at high, it moves easy work down, and those turns come back much faster as well as cheaper. If
+you run at medium, it moves hard work up, and getting a hard task right first time often costs less overall than the
+rework, in tokens and in your own time.
 `/er report` shows what ran at each level, so you can see what it did to your own work.
 
 **What routing costs.** Each of the first five prompts waits about 1.5 seconds for an assessment. The first is a
