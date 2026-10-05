@@ -60,6 +60,8 @@ The four buttons always sit in the same slots, so the digit keys are learnable. 
 | 3 | Turn off | Turn off | Turn on, unlocked |
 | 4 | Assess (greyed out) | Assess | Turn on and assess |
 
+![The band in the Desktop app after the router locked at medium, with the last assessment and why](docs/band-locked.png)
+
 - **Lock** ends assessing early when the level is plainly right.
 - **Unlock** keeps the locked level running and assesses your next five prompts from there. Use it when you're about to steer the work somewhere new.
 - **Assess** while locked runs one fresh assessment now. If it moves the level, the new level stays locked. This is the "the work changed, look again" case the article recommends. While unlocked it's greyed out, because your next prompt is assessed anyway and a re-roll invites fishing for an answer.
