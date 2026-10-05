@@ -581,5 +581,94 @@
     ],
     "fable": "low",
     "why": "The cause is stated in the prompt. Either cheap level does it."
+  },
+  "session:blind: change empty-state copy": {
+    "opus": "low",
+    "fable": "low"
+  },
+  "session:blind: DSN from an env var": {
+    "opus": "low",
+    "fable": "low"
+  },
+  "session:blind: bump Node in the Dockerfile": {
+    "opus": "low",
+    "fable": "low"
+  },
+  "session:blind: add an index": {
+    "opus": [
+      "low",
+      "medium"
+    ],
+    "fable": "low",
+    "why": "One index in a new migration is mechanical. The judge preferred medium, low is fine."
+  },
+  "session:blind: sortable members table": {
+    "opus": "medium",
+    "fable": "low"
+  },
+  "session:blind: CSV user import": {
+    "opus": "medium",
+    "fable": "medium"
+  },
+  "session:blind: flaky test": {
+    "opus": [
+      "medium",
+      "high"
+    ],
+    "fable": [
+      "medium",
+      "high"
+    ],
+    "why": "Fable: Flaky tests usually hide timing. Medium or high."
+  },
+  "session:blind: stale permission cache": {
+    "opus": "high",
+    "fable": "high"
+  },
+  "session:blind: codebase tour first": {
+    "opus": "undecided",
+    "fable": "undecided"
+  },
+  "session:blind: morning, check CI": {
+    "opus": [
+      "undecided",
+      "low"
+    ],
+    "fable": "low",
+    "why": "As the repo question."
+  },
+  "session:blind: class components to hooks": {
+    "opus": "medium",
+    "fable": [
+      "low",
+      "medium"
+    ]
+  },
+  "session:blind: cross-tenant data audit": {
+    "opus": "high",
+    "fable": "high",
+    "why": "Fable: Hard security work, but high covers it. Fable went to xhigh on the blind run, a known miss."
+  },
+  "session:blind: overnight framework upgrade": {
+    "opus": [
+      "medium",
+      "high"
+    ],
+    "fable": [
+      "medium",
+      "high"
+    ],
+    "why": "Fable: As the unattended build: high is the default Anthropic advises for Fable."
+  },
+  "session:blind: follow-up, move the toggle": {
+    "opus": "low",
+    "fable": "low"
+  },
+  "session:blind: user asks for care": {
+    "opus": "high",
+    "fable": [
+      "high",
+      "xhigh"
+    ]
   }
 }

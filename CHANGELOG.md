@@ -28,11 +28,8 @@
 - **Hidden risk means something a careful engineer could miss.** The rules no longer list money or other systems as
   hidden on their own, and the well-known pitfalls of a kind of work don't count. A user being away makes hidden
   problems costlier but doesn't create them. Before this, routine payments work went to high.
-- **A routing eval.** 72 prompts, each with an approved level per model, and a judge with a written rubric. Any change
+- **A routing eval.** 87 prompts, each with an approved level per model, and a judge with a written rubric. Any change
   to the prompt, rules or notes runs it first, and a prompt that moves off its approved level is flagged.
-
-### 0.17.3 (2026-10-05)
-
 - **The footer shows the level in capitals** (`🔓 HIGH ◑`), which tells the level running apart from the picker's own
   label (your setting). It also fixes the Desktop app cutting off the bottom of "high": the app's footer button clips
   descenders, and capitals have none.

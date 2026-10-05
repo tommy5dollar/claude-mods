@@ -37,7 +37,7 @@ claude plugin test .                # 60 tests in the engine's kit: the first pr
                                     # ends, carried on from a saved file, reported by week and repo
 "$APPDATA/Claude/claude-code/2.1.286/635c1867224a/claude.exe" plugin test .   # the same 59 under Desktop's engine (2.1.286, passing 2026-10-05)
 claude plugin validate . --strict
-bun eval/routing.ts                 # the routing gate, real model: every fixture (58 sessions, 14 subagent briefs) read 3
+bun eval/routing.ts                 # the routing gate, real model: every fixture (73 sessions, 14 subagent briefs) read 3
                                     # times on Opus from medium, checked against eval/routing-approved.json. A prompt off
                                     # its approved level on most runs is MOVED and needs Tommy's say-so before shipping, one
                                     # run in three off is a wobble. --model sonnet|fable, --setting high (approvals hold

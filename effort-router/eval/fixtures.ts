@@ -185,6 +185,29 @@ export const FIXTURES: Fixture[] = [
   { name: 'cheap: ordinary feature with tests', messages: [], current: 'Add a command that lists the last 10 payouts for an account, with a test.', expect: ['medium', 'low'] },
   { name: 'cheap: ordinary bug with a clear cause', messages: [], current: 'Amounts under £1 print as "£.50" instead of "£0.50". Fix it and add a test.', expect: ['low', 'medium'] },
 
+  // --- added 2026-10-05 as a blind test, after the rules were cut back to generic heuristics: a different kind of
+  // repo (a SaaS web app, not payments), written with the expected levels below before any run, and never tuned on.
+  { name: 'blind: change empty-state copy', messages: [], current: "Change the empty-state text on the projects page to 'No projects yet. Create one to get started.'", expect: ['low'] },
+  { name: 'blind: DSN from an env var', messages: [], current: 'Read the Sentry DSN from an env var instead of the hard-coded string in src/sentry.ts.', expect: ['low'] },
+  { name: 'blind: bump Node in the Dockerfile', messages: [], current: 'Update the Dockerfile to Node 22 and check the image still builds.', expect: ['low'] },
+  { name: 'blind: add an index', messages: [], current: 'Queries on events by user_id are slow. Add an index in a new migration.', expect: ['low', 'medium'] },
+  { name: 'blind: sortable members table', messages: [], current: 'Let users sort the members table by name and by join date.', expect: ['low', 'medium'] },
+  { name: 'blind: CSV user import', messages: [], current: 'Add a page where admins upload a CSV of users and we create accounts for them, skipping rows that already exist.', expect: ['medium'] },
+  { name: 'blind: flaky test', messages: [], current: 'test/notifications.spec.ts fails about one run in ten on CI. Find out why and fix it.', expect: ['medium', 'high'] },
+  { name: 'blind: stale permission cache', messages: [], current: 'Our Redis cache of project permissions sometimes keeps serving access after someone is removed from a project. Fix it.', expect: ['high', 'medium'] },
+  { name: 'blind: codebase tour first', messages: [], current: 'Before I start, can you give me a tour of how a request flows through this codebase?', expect: ['undecided', 'low'] },
+  { name: 'blind: morning, check CI', messages: [], current: 'morning! can you check CI is green on main?', expect: ['undecided', 'low'] },
+  { name: 'blind: class components to hooks', messages: [], current: 'Convert the three class components in src/settings to function components with hooks. No behaviour changes.', expect: ['low', 'medium'] },
+  { name: 'blind: cross-tenant data audit', messages: [], current: "Check every API route for places one organisation could read another organisation's data, and fix what you find.", expect: ['high'] },
+  { name: 'blind: overnight framework upgrade', messages: [], current: "I'm off for the night. Upgrade the app from Next 13 to Next 15, fix whatever breaks and leave it with the tests passing.", expect: ['medium', 'high'] },
+  {
+    name: 'blind: follow-up, move the toggle',
+    messages: [u('Add a dark mode toggle to the settings menu.'), a('Added the toggle to the settings menu. It saves the choice to localStorage.', [{ tool: 'Edit', text: 'src/components/SettingsMenu.tsx' }])],
+    current: "It's a bit lost down there, move it next to the avatar in the header.",
+    expect: ['low'],
+  },
+  { name: 'blind: user asks for care', messages: [], current: 'Take your time and be really careful with this one: add soft delete to projects.', expect: ['high', 'xhigh'] },
+
   // --- the user's own words about effort win -------------------------------------------------------------------
   { name: 'ask: think hard on a small task', messages: [], current: "Think particularly hard, long and deep on this one, and use way more inference than usual: add a --json flag to the CLI's balance command that prints the same data as JSON.", expect: ['xhigh'] },
   { name: 'ask: quick one on a money bug', messages: [], current: "No need to be thorough, just get a fix in fast: a customer got debited twice for the same payout last week. Find out why and fix it.", expect: ['low'] },

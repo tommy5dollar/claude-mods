@@ -15,9 +15,9 @@ const picks = (rows: Row[]) => {
   return out
 }
 const now = {
-  opus: picks(rowsOf(/-opus-(live|cheap)\.json$/)),
+  opus: picks(rowsOf(/-opus-(live|cheap|blind)\.json$/)),
   sonnet: picks(rowsOf(/-sonnet-(live|cheap)\.json$/)),
-  fable: picks(rowsOf(/-fable-live\.json$/)),
+  fable: picks(rowsOf(/-fable-(live|blind)\.json$/)),
 }
 const judge = {
   opus: JSON.parse(readFileSync(join(EVAL, 'routing-judge-opus.json'), 'utf8')),
@@ -42,6 +42,8 @@ const overrides: Record<string, { opus?: string | string[]; sonnet?: string | st
   'session:held out: morning + git status': { opus: ['undecided', 'low'], sonnet: ['undecided', 'low'], why: 'As the repo question.' },
   'session:pay: what does this repo do': { sonnet: ['undecided', 'low'], why: 'As the repo question.' },
   'session:"2, keep it simple" after a numbered question': { sonnet: ['low', 'medium'], why: '"Keep it simple" narrows the change, it does not ask for less thinking. Low or medium.' },
+  'session:blind: add an index': { opus: ['low', 'medium'], why: 'One index in a new migration is mechanical. The judge preferred medium, low is fine.' },
+  'session:blind: morning, check CI': { opus: ['undecided', 'low'], why: 'As the repo question.' },
   'subagent:security review of a branch': { opus: ['medium', 'high'], why: 'Security is one of the hidden-risk areas the rules name, and no user is there to catch a miss. High is acceptable here, but medium is enough for a small diff with a checklist.' },
   'subagent:Plan: design proposal for event-driven reconciliation': { opus: ['medium', 'high'], why: 'A design doc with no user in the loop. Medium is enough; high is tolerated rather than wanted.' },
   'subagent:implement rate limiting from a spec, with tests': { opus: ['medium', 'high'], sonnet: ['medium', 'high'], why: 'A specified feature, so medium should do, but Redis atomicity is a race and the Opus notes say high pays for races.' },
@@ -62,6 +64,9 @@ const fableOverrides: Record<string, { fable: string | string[]; why: string }> 
   'session:cheap: ordinary feature with tests': { fable: ['low', 'medium'], why: 'As the ordinary feature.' },
   'subagent:vague: "same for the invoices table"': { fable: ['low', 'medium'], why: 'Repeating earlier work on another table. Either cheap level.' },
   'subagent:Plan: design proposal for event-driven reconciliation': { fable: ['medium', 'high'], why: 'As on Opus: a design doc with no user in the loop. Medium is enough; high is tolerated.' },
+  'session:blind: flaky test': { fable: ['medium', 'high'], why: 'Flaky tests usually hide timing. Medium or high.' },
+  'session:blind: overnight framework upgrade': { fable: ['medium', 'high'], why: 'As the unattended build: high is the default Anthropic advises for Fable.' },
+  'session:blind: cross-tenant data audit': { fable: 'high', why: 'Hard security work, but high covers it. Fable went to xhigh on the blind run, a known miss.' },
   'session:held out: pagination': { fable: ['low', 'medium'], why: 'Both step down from high. Medium after the notes said medium checks its own work.' },
   'session:cheap: update snapshots': { fable: ['low', 'medium'], why: 'As pagination, and low or medium on Opus too.' },
   'session:autonomous end-to-end build': { fable: 'medium', why: 'Fable stayed on high for this until its notes said medium copes with long unattended builds (2026-10-05).' },

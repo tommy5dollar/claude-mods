@@ -505,5 +505,112 @@
     ],
     "best": "low",
     "why": "Adding a missing leading zero to a currency formatter and writing one test is small, clearly scoped work that low handles well at about half of medium's cost, and nothing here has the hidden edge cases that would justify a higher level."
+  },
+  "session:blind: change empty-state copy": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Swapping one string on the projects page is mechanical work, so low does it well at about half the cost of medium."
+  },
+  "session:blind: sortable members table": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding name and join-date sorting to a members table is well-scoped day-to-day feature work that medium handles well, and it is not mechanical enough for low or edge-case-heavy enough to justify high."
+  },
+  "session:blind: DSN from an env var": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Swapping a hard-coded Sentry DSN in one file for an environment variable is small, well-scoped mechanical work that low effort handles well at about half medium's cost, so any higher level would only add cost."
+  },
+  "session:blind: CSV user import": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "A CSV bulk-create feature with admin auth, parsing and duplicate-skipping is well-scoped day-to-day work: medium handles its usual edge cases, low risks stopping early, and high would only add cost on Opus."
+  },
+  "session:blind: bump Node in the Dockerfile": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Changing the Node base image tag and running the Docker build is mechanical, well-scoped work that low handles at about half the cost of medium, and any build failure it turns up can be rerouted to a higher level."
+  },
+  "session:blind: add an index": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding the index is a small, well-scoped migration, but medium is worth it over low so the session checks the migration conventions, existing indexes and query shape, and avoids locking a likely large events table; high would add cost with no gain."
+  },
+  "session:blind: codebase tour first": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "The user is asking for a codebase tour before stating any task (\"Before I start\"), so no work has been defined yet and the router should stay undecided."
+  },
+  "session:blind: morning, check CI": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Checking whether CI is green on main is a quick read-only task that low handles fully at about half medium's cost, and a task has been stated so undecided no longer applies."
+  },
+  "session:blind: flaky test": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "high",
+    "why": "Finding the cause of a test that fails one run in ten is work where the hidden problem (a race, a timing issue or shared state) is the hard part. High is worth its cost here because medium is more likely to settle on a surface fix like a retry or a longer timeout, which leads to rework."
+  },
+  "session:blind: class components to hooks": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Converting class components to hooks is well-scoped day-to-day work that medium handles fully, but it isn't purely mechanical: keeping behaviour identical across lifecycle methods, setState callbacks and effect dependencies has pitfalls that low would likely miss."
+  },
+  "session:blind: stale permission cache": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "An intermittent stale-permission cache is a security bug whose difficulty is hidden: it likely involves races where reads repopulate the cache after invalidation, or removal paths that skip invalidation, and medium is likely to stop at the obvious fix of adding a delete on removal."
+  },
+  "session:blind: cross-tenant data audit": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Finding cross-organisation data leaks across every API route is the kind of task where the hidden edge cases (indirect object references, nested resources, list filters, joins) are the hard part, so medium is likely to miss some and cause rework, while xhigh adds cost with no measured gain over high."
+  },
+  "session:blind: follow-up, move the toggle": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Moving an existing toggle from the settings menu to the header beside the avatar is a small, well-scoped relocation with few hidden edge cases, so low handles it well at about half medium's cost."
+  },
+  "session:blind: user asks for care": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "The user explicitly asked to take time and be really careful, which maps to high, and that instruction overrides the default preference for medium on Opus 5.5."
+  },
+  "session:blind: overnight framework upgrade": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "high",
+    "why": "An unattended two-major Next.js upgrade (13 to 15) has many hidden breakages, such as async request APIs, changed fetch and route caching defaults, and React 19, that medium could miss, so high is worth its modest extra cost; medium is still acceptable since codemods and the test suite constrain the work, but xhigh adds cost with no measured gain."
   }
 }

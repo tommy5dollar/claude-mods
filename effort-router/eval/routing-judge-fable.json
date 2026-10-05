@@ -513,5 +513,112 @@
     ],
     "best": "medium",
     "why": "A design proposal for moving settlement reconciliation to events has real edge cases (late or duplicate settlements, cutoff timing, parallel-run drift at month-end) that are worth more care than low gives, but it is planning prose rather than code that can break, so on Fable 5.1 high would mostly add cost and over-deliberation."
+  },
+  "session:blind: change empty-state copy": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Changing one empty-state string is trivial routine work that Fable 5.1 does well even at low, so low is the cheapest level that gets it done and anything higher only adds cost, time and possible unrequested edits."
+  },
+  "session:blind: DSN from an env var": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Swapping a hard-coded Sentry DSN for an env var is a small routine edit, and on Fable 5.1 low handles it as well as higher levels for less cost and time."
+  },
+  "session:blind: sortable members table": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding name and join-date sorting to a members table is routine UI and data work that Fable 5.1's already-strong low effort handles well, so medium or high would only add cost and time without a better result."
+  },
+  "session:blind: add an index": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding an index on events.user_id in a new migration is routine work that Fable 5.1 handles well at low, so higher levels would only add cost and time."
+  },
+  "session:blind: bump Node in the Dockerfile": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Bumping a Dockerfile's base image to Node 22 and running the build is routine work that Fable 5.1 does well even at low, so medium or above would only add cost and time."
+  },
+  "session:blind: CSV user import": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is a moderate feature that touches existing auth and user code and has real edge cases (admin-only access, CSV quirks, duplicates within the file and against existing users), so low's lighter lookup risks rework, but on Fable 5.1 medium handles it well and high would only add cost and unrequested side changes."
+  },
+  "session:blind: codebase tour first": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "The user is asking an orientation question before stating any task (\"Before I start\"), and the router's rule says undecided is right until there is a task."
+  },
+  "session:blind: morning, check CI": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Checking whether CI is green on main is a concrete but routine lookup that low effort handles well on Fable 5.1, so higher levels would only add cost and time."
+  },
+  "session:blind: flaky test": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Fixing an intermittent CI failure takes careful investigation of timing and shared state, which low may skimp on, but on Fable 5.1 medium handles this kind of debugging well and high would add cost, slower deliberation and unrequested edits for little gain."
+  },
+  "session:blind: stale permission cache": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "An intermittent stale-permission bug in a cache is security-sensitive and edge-case-heavy (invalidation races, read-through repopulation, multiple keys, TTLs), so it is the kind of work where effort pays on Fable 5.1 and medium could miss the real race, while high covers it without needing xhigh."
+  },
+  "session:blind: cross-tenant data audit": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Checking every route for cross-organisation data leaks is security work with many hidden edge cases, and the fixes change existing code, so medium is likely to miss some; on Fable 5.1, high covers most of this work and xhigh's extra cost buys little."
+  },
+  "session:blind: follow-up, move the toggle": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Moving an existing toggle into the header next to the avatar is routine UI work well within Fable 5.1's ability, so low, the cheapest level, does it well."
+  },
+  "session:blind: class components to hooks": {
+    "right": [
+      "low",
+      "medium"
+    ],
+    "best": "low",
+    "why": "Converting three class components to hooks is well-trodden refactoring that even low on Fable 5.1 handles reliably; medium is acceptable insurance for lifecycle subtleties such as componentDidUpdate and setState callbacks, while high and above would only add deliberation and unrequested edits to a routine task."
+  },
+  "session:blind: overnight framework upgrade": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "A Next 13→15 upgrade is real migration work with breaking changes that the test suite will catch, so medium handles it well; low leans on memory about current framework details, and high adds cost plus unrequested edits outside the task in an unattended run."
+  },
+  "session:blind: user asks for care": {
+    "right": [
+      "high",
+      "xhigh"
+    ],
+    "best": "high",
+    "why": "The user asked Claude to take its time and be really careful, which calls for a high level whatever the task, and on Fable 5.1 high already covers almost all of what extra effort adds, while xhigh still fits their words."
   }
 }
