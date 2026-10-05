@@ -72,17 +72,13 @@ Mods run inside Claude Code without a sandbox, so here's exactly what this one d
 ## How it works
 
 ```mermaid
-flowchart TD
-    P["You send a prompt"] --> F{"One of the session's<br>first five?"}
-    F -- "no" --> R["It runs at the locked level"]
-    F -- "yes" --> S["Your session's model rates each level<br>e.g. medium 10%, high 50%, xhigh 40%"]
-    S --> C{"At least 70% sure the<br>level running is wrong?"}
-    C -- "yes" --> M["Step to the middle of the spread"]
+flowchart LR
+    P["Prompts 1 to 5"] --> R["Your model rates<br>each level"]
+    R --> C{"70%+ sure<br>it's wrong?"}
+    C -- "yes" --> M["Step up<br>or down"]
     C -- "no" --> K["Stay"]
-    M --> T["The turn runs"]
-    K --> T
-    T --> L{"Was that the fifth?"}
-    L -- "yes" --> Lock["Lock the level for the session"]
+    M --> L["After prompt 5,<br>lock"]
+    K --> L
 ```
 
 1. **It starts from your effort setting.** Nothing changes until an assessment is sure.
