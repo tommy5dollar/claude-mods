@@ -25,13 +25,15 @@ const QUESTIONS = {
 }
 const ANSWERS = 'User has answered your questions: "Which platforms?"="Xero, QuickBooks", "What is it for?"="Month-end close". You can now continue.'
 
-/** Assessments as the classifier writes them: a spread over the levels. */
-const HIGH = '{"decision":"level","levels":{"medium":0.1,"high":0.9},"reason":"bug fix in existing code"}'
-const XHIGH = '{"decision":"level","levels":{"high":0.05,"xhigh":0.95},"reason":"security review"}'
-/** Leans high but only 60% sure medium is too low: stays on medium. */
-const LEANS = '{"decision":"level","levels":{"medium":0.4,"high":0.6},"reason":"small fix"}'
+/** Assessments as the classifier writes them: one level. */
+const HIGH = '{"decision":"level","level":"high","reason":"bug fix in existing code"}'
+const XHIGH = '{"decision":"level","level":"xhigh","reason":"security review"}'
+/** Picks medium: stays on medium. */
+const MEDIUM = '{"decision":"level","level":"medium","reason":"small fix"}'
+/** Picks high: stays on high. */
+const LEANS = '{"decision":"level","level":"high","reason":"small fix"}'
 const UNCLEAR = '{"decision":"undecided"}'
-const SEARCH_REPLY = '{"decision":"lock","level":"low","confidence":0.9,"reason":"codebase search"}'
+const SEARCH_REPLY = '{"decision":"lock","level":"low","reason":"codebase search"}'
 
 type World = {
   sent: (string | number | undefined)[]
@@ -290,7 +292,7 @@ describe('effort-router', () => {
         { role: 'user', text: 'fix the crash in the parser', toolUses: [] },
         { role: 'assistant', text: 'Fixed: a null check in parse().', toolUses: [] },
       ]
-      world.reply = LEANS // 40% below high, 0% above: stays at high
+      world.reply = LEANS // picks high: stays at high
       await submit($, 'now add a test for it')
       expect(world.completes).toHaveLength(1)
       expect(world.forks).toHaveLength(1)
@@ -304,8 +306,8 @@ describe('effort-router', () => {
       expect(await route($, 'status')).toContain('Assessments this session: 2.')
     })
 
-    test('an unsure assessment stays, and your setting runs untouched', async ($, on) => {
-      const world = worldOf(on, LEANS)
+    test('an assessment that picks the level running stays, and your setting runs untouched', async ($, on) => {
+      const world = worldOf(on, MEDIUM)
       await $.session.start(STARTED)
       await turn($, 'something is off in checkout')
       expect(world.sent).toEqual(['medium'])
@@ -313,8 +315,8 @@ describe('effort-router', () => {
       const band = await mountBand($)
       await $.command.run({ command: 'er', args: '' } as never)
       expect((await bandOf(band)).lines).toEqual([
-        'Effort router: unlocked. Medium (your effort setting), 40% confidence. Locks after 4 more prompts.', // 40% sure medium is right
-        'Last assessment: medium 40%, high 60% (small fix). 60% sure medium is too low, so it stayed. It moves at 70%.',
+        'Effort router: unlocked. Medium (your effort setting). Locks after 4 more prompts.',
+        'Last assessment: medium (small fix), the level it was already on.',
       ])
     })
 
@@ -348,11 +350,12 @@ describe('effort-router', () => {
       expect(world.sent).toEqual(['high'])
     })
 
-    test('a confidence of 0.95 needs more: a 90% sure assessment stays', { options: { confidence: 0.95 } }, async ($, on) => {
-      const world = worldOf(on)
+    test('the session goes where the check says, two levels at once included', async ($, on) => {
+      const world = worldOf(on, '{"decision":"level","level":"low","reason":"rename"}')
       await $.session.start(STARTED)
-      await turn($, 'fix the crash in the parser')
-      expect(world.sent).toEqual(['medium'])
+      await turn($, 'rename getTxns', 'xhigh')
+      expect(world.sent).toEqual(['low'])
+      expect(world.lines).toEqual(['Assessed, xhigh to low (rename).'])
     })
 
     test('changing the effort picker turns routing off and your level is used; it is not assessed again', async ($, on) => {
@@ -436,7 +439,7 @@ describe('effort-router', () => {
       expect(status).toContain('Assessed 1 of 5 prompts.') // a failure still uses up its prompt
     })
 
-    test('each assessment is recorded with its kind, spread and what came of it', async ($, on) => {
+    test('each assessment is recorded with its kind, level and what came of it', async ($, on) => {
       const world = worldOf(on, HIGH, {}, HOME)
       await $.session.start(STARTED)
       await $.prompt.context({ blocks: [{ name: 'claudeMd', text: INSTRUCTIONS }] } as never)
@@ -452,9 +455,9 @@ describe('effort-router', () => {
       const saved = JSON.parse(world.files[LEDGER] ?? '{}')
       const rows = (saved.verdicts as Record<string, unknown>[]).map(({ at: _, ...row }) => row)
       expect(rows).toEqual([
-        { kind: 'first', model: 'claude-sonnet-5-5', prompt: 1, level: 'high', confidence: 0.9, reason: 'bug fix in existing code', spread: { medium: 0.1, high: 0.9 }, against: 'medium', outcome: 'moved to high', withInstructions: true },
-        { kind: 'fork', model: 'claude-sonnet-5-5', prompt: 2, level: 'high', confidence: 0.6, reason: 'small fix', spread: { medium: 0.4, high: 0.6 }, against: 'high', outcome: 'stayed' },
-        { kind: 'fork', model: 'claude-sonnet-5-5', prompt: 2, level: 'xhigh', confidence: 0.95, reason: 'security review', spread: { high: 0.05, xhigh: 0.95 }, against: 'high', outcome: 'moved to xhigh', manual: true },
+        { kind: 'first', model: 'claude-sonnet-5-5', prompt: 1, level: 'high', reason: 'bug fix in existing code', against: 'medium', outcome: 'moved to high', withInstructions: true },
+        { kind: 'fork', model: 'claude-sonnet-5-5', prompt: 2, level: 'high', reason: 'small fix', against: 'high', outcome: 'stayed' },
+        { kind: 'fork', model: 'claude-sonnet-5-5', prompt: 2, level: 'xhigh', reason: 'security review', against: 'high', outcome: 'moved to xhigh', manual: true },
       ])
     })
   })
@@ -502,8 +505,8 @@ describe('effort-router', () => {
       const band = await mountBand($)
       await er($, '', 'effort-router')
       expect((await bandOf(band)).lines).toEqual([
-        'Effort router: unlocked. High (chosen by the router), 90% confidence. Locks after 4 more prompts.',
-        'Last assessment: medium 10%, high 90% (bug fix in existing code). 90% sure medium was too low, so it moved to high.',
+        'Effort router: unlocked. High (chosen by the router). Locks after 4 more prompts.',
+        'Last assessment: high (bug fix in existing code), so it moved from medium.',
       ])
       const hotkeys = (await band.findAll({ type: 'Button' })).map(b => b.props.hotkey)
       expect(hotkeys).toEqual(['1', '2', '3', '4'])
@@ -518,7 +521,7 @@ describe('effort-router', () => {
       await band.press({ key: 'lock' })
       expect(world.lines.at(-1)).toBe('You locked it at high.')
       expect(await bandOf(band)).toMatchObject({
-        headline: 'Effort router: locked. High (locked by you after 1 prompt), 90% confidence.',
+        headline: 'Effort router: locked. High (locked by you after 1 prompt).',
         buttons: ['Hide', 'Unlock', 'Turn off', 'Assess'],
       })
       world.forkable = true
@@ -688,8 +691,8 @@ describe('effort-router', () => {
       await $.session.start(STARTED)
       await turn($, 'fix the crash in the parser')
       const status = await route($, 'status')
-      expect(status).toStartWith('Unlocked. High (chosen by the router), 90% confidence. Locks after 4 more prompts.\nAssessed 1 of 5 prompts.\n\nLast assessment (after a prompt, a separate call')
-      expect(status).toContain('medium 10%, high 90%. 90% sure medium was too low, so it moved to high.\nTask: bug fix in existing code')
+      expect(status).toStartWith('Unlocked. High (chosen by the router). Locks after 4 more prompts.\nAssessed 1 of 5 prompts.\n\nLast assessment (after a prompt, a separate call')
+      expect(status).toContain('High, so it moved from medium.\nTask: bug fix in existing code')
       expect(status).toContain('Assessed 1 of 5 prompts.')
       expect(status).toContain('Subagents: each gets its own level from its task.')
     })
@@ -780,7 +783,7 @@ describe('effort-router', () => {
         event: 'api_request',
         attributes: {
           effort: 'high', model: 'claude-sonnet-5-5',
-          'effort_router.version': '0.17.3', 'effort_router.status': 'unlocked', 'effort_router.setting': 'medium', 'effort_router.level': 'high',
+          'effort_router.version': '0.18.0', 'effort_router.status': 'unlocked', 'effort_router.setting': 'medium', 'effort_router.level': 'high',
         },
       })
       // Other records go out untouched.
@@ -907,7 +910,7 @@ describe('effort-router', () => {
       const world = worldOf(on)
       await $.session.start(STARTED)
       await atHigh($, world)
-      world.subagentReply = '{"decision":"lock","level":"xhigh","confidence":0.9,"reason":"security audit"}'
+      world.subagentReply = '{"decision":"lock","level":"xhigh","reason":"security audit"}'
       await spawn($, { prompt: 'audit the upload handler' }) // agent-1: xhigh
       world.subagentReply = 'THROW'
       const nested = await spawn($, { prompt: 'check this one file', parentAgentId: 'agent-1' })
@@ -1097,6 +1100,11 @@ describe('effort-router', () => {
       expect(world.written).toHaveLength(before + 1)
       const saved = JSON.parse(world.files[LEDGER] ?? '{}')
       expect(saved.rows.map((r: { caller: string; from: string; to: string; requests: number }) => `${r.caller} ${r.from}→${r.to} ×${r.requests}`)).toEqual(['main medium→high ×1', 'subagent medium→low ×1'])
+      // Each routed subagent is kept with the level it would have inherited and why it got its own.
+      expect(saved.subagents).toHaveLength(1)
+      expect(saved.subagents[0]).toMatchObject({ description: 'Find usages', parent: 'high', level: 'low' })
+      expect(typeof saved.subagents[0].reason).toBe('string')
+      expect(typeof saved.subagents[0].ms).toBe('number')
       await done($)
       expect(world.written).toHaveLength(before + 1) // nothing new: not written again
     })

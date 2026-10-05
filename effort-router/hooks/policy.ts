@@ -33,64 +33,60 @@ export function clampLevel(level: Level, levels: readonly Level[]): Level {
 }
 
 /**
- * The fixed frame around the routing rules. It describes the job and how to
- * read a transcript, but never ties a kind of task to a level: what a level
- * can do differs by model, and the model notes say it. (An eval on 2026-10-04
- * showed a frame whose examples named levels overrode the notes.) The rules
+ * The fixed frame around the routing rules: the job, what to optimise and
+ * when there is nothing to judge yet. It never ties a kind of task to a
+ * level: what a level can do differs by model, and the model notes say it.
+ * (An eval on 2026-10-04 showed a frame whose examples named levels overrode
+ * the notes.) It has no worked examples: Tommy, 2026-10-05, "The era of
+ * multi-shot prompting is long dead", and the checks run on Opus 5.5 and
+ * Fable 5.1, which read a conversation without being shown how. The rules
  * (`rules/default.md` and the user's files) hold the principles for choosing.
  */
-export const classifierFrame = (levels: readonly Level[] = levelsUpTo()): string => `You pick the reasoning-effort level for a whole Claude Code session from its transcript. Levels you may pick, lowest to highest: ${levels.join(', ')}.
+export const classifierFrame = (levels: readonly Level[] = levelsUpTo()): string => `You pick the reasoning-effort level for this Claude Code session. Levels you may pick, lowest to highest: ${levels.join(', ')}.
 
-Level names don't mean the same thing on every model: each level buys a different amount of thinking, and different behaviour, on each. Judge what this session needs on the model it runs on, using what the notes below say each level can do there.
+Pick the level that gets the work from here done in the least time and total inference cost. People turn this router on to spend less, so when two levels would both get the work done, pick the cheaper one, and go higher only when the work clearly needs it. Too little effort is not cheaper when it leads to mistakes, rework or a second attempt. Too much pays for thinking the work won't use. The session switches to your pick straight away and switching costs nothing, so the level it is on now has no special weight.
 
-When to answer undecided, and when to suggest:
-- Answer undecided ONLY when no actionable task has been stated yet: greetings, setup or housekeeping ("pull the latest code", "install the deps", "what's in this repo?"), or pure questions asked before any work. That opening filler is not the task.
-- Once the user has stated a real task, suggest the best level for it NOW, even if the details are still unclear. Do not wait for a full spec: you are asked again after each of the user's first few messages and the level is refined as clarification arrives. Unclear details are a reason to pick the level the task most likely needs, never a reason to answer undecided.
+If the user says how hard to think or how quickly to go ("think really hard about this", "quick one"), that is their call: pick the level that matches it.
 
-Judge the task as it stands now:
-- Weigh the latest exchange most. A later clarification of scope overrides an earlier ask: "fix the whole auth system" followed by "actually just the typo in the login message" is a small change.
-- Read short replies against the question they answer. If the assistant asked "1. full rewrite or 2. minimal patch?" and the user replied "2", the task is the minimal patch. Answers to the assistant's multiple-choice questions are the user's words about the task.
-- If a user hint is given, the user asked for this routing explicitly: weigh the hint strongly.
-
-How sure you are:
-- Give each level you may pick a probability that it is the right level for the work from here. They sum to 1.
-- Spread the probability where you are torn. If the task clearly needs more than the level the session is on but you can't tell high from xhigh, say so (for example medium 0.1, high 0.5, xhigh 0.4) rather than naming one level and sounding unsure of it.
-- The router moves the session only when you are sure its current level is wrong in one direction, and then to the middle of your spread, so be honest rather than decisive.
-- Put most of the probability on one level only when the task, and what makes it easy or hard, is clear and more conversation is unlikely to move it.
-
-Worked examples of reading a transcript (what level each needs depends on the model, so none is shown):
-1. USER: hi → {"decision":"undecided"}
-2. USER: pull the latest code → {"decision":"undecided"}
-3. USER: what's in this repo? / ASSISTANT: A Next.js storefront with a Postgres backend. → {"decision":"undecided"}
-4. USER: pull latest code / ASSISTANT: Pulled, 3 new commits. / USER: implement for me a new finance solution pulling from multiple accountancy platforms → a level for the finance build. The filler before it doesn't matter, and the details not being settled is no reason to wait.
-5. USER: fix the whole auth system / ASSISTANT: Where should I start? / USER: actually just the typo in the login message → a level for a one-word typo fix.
-6. USER: refactor the payment retry logic / ASSISTANT: 1. a full rewrite with a state machine or 2. just extract the backoff constant? / USER: 2, keep it simple → a level for extracting one constant.
-7. USER: build a sync job for our invoices / ASSISTANT asked: Which platforms? [options: Xero | QuickBooks | Sage] / USER answered: Xero and QuickBooks, nightly, EU data residency → a level for a nightly two-platform invoice sync.
+If no task has been stated yet (a greeting, setup such as "pull the latest code", a question asked before any work), answer undecided. Once there is a task, pick a level for it even if details are still unclear: you are asked again after each of the user's next few messages.
 
 Principles for choosing. Later rules override earlier ones where they conflict:`
 
 /** The frame at the default highest level. */
 export const CLASSIFIER_FRAME = classifierFrame()
 
-export const classifierContract = (levels: readonly Level[] = levelsUpTo()): string => `Reply with exactly one JSON object and nothing else:
-{"decision":"undecided"}
-or
-{"decision":"level","levels":{${levels.map(level => `"${level}":<0 to 1>`).join(',')}},"reason":"<what the task is, 3-8 words, e.g. bug fix in existing code>","why":"<one or two sentences: why the work needs about this much effort on this model, and what would tip it a level either way>"}
-"levels" gives the probability that each level is the right one for the work from here, summing to 1.`
+export const classifierContract = (levels: readonly Level[] = levelsUpTo()): string => `Reply with one JSON object and nothing else:
+{"level":"<undecided|${levels.join('|')}>","reason":"<what the task is, 3-8 words>","why":"<one or two sentences: why this level, and what would change your pick>"}`
 
 export const CLASSIFIER_CONTRACT = classifierContract()
 
 /** What effort means on a model: its name and the notes in `rules/models/`. */
 export type ModelNotes = { name: string; notes: string }
 
-const modelBlock = (model: ModelNotes | undefined, who: string): string =>
+/**
+ * A model's notes cut to the levels on offer: a line that starts with a level
+ * the check can't pick (a `| max |` table row or a `- max:` bullet) is left out, so
+ * the notes don't argue about a level nobody is choosing.
+ */
+export function notesFor(notes: string, levels: readonly Level[]): string {
+  const absent = LEVELS.filter(level => !levels.includes(level))
+  if (absent.length === 0) return notes.trim()
+  const starts = new RegExp(`^(?:- |\\|\\s*)?(?:${absent.join('|')})\\b`)
+  return notes
+    .split('\n')
+    .filter(line => !starts.test(line.trim()))
+    .join('\n')
+    .trim()
+}
+
+const modelBlock = (model: ModelNotes | undefined, who: string, levels: readonly Level[]): string =>
   model && model.notes.trim() !== ''
-    ? `\n\n${who} ${model.name}. What each level can do on this model (the main guide to the level):\n<model_notes>\n${model.notes.trim()}\n</model_notes>`
+    ? `\n\n${who} ${model.name}. Level names buy different amounts of thinking on different models. On this one:\n<model_notes>\n${notesFor(model.notes, levels)}\n</model_notes>`
     : ''
 
 /** The classifier's whole system prompt around the composed rules, with the session model's notes when there are any. */
 export const classifierSystem = (rules: string, model?: ModelNotes, levels: readonly Level[] = levelsUpTo()): string =>
-  `${classifierFrame(levels)}\n\n<rules>\n${rules.trim()}\n</rules>${modelBlock(model, 'The session runs on')}\n\n${classifierContract(levels)}`
+  `${classifierFrame(levels)}\n\n<rules>\n${rules.trim()}\n</rules>${modelBlock(model, 'The session runs on', levels)}\n\n${classifierContract(levels)}`
 
 /**
  * The one message a check sends into a fork of the session (`$.model.fork`):
@@ -100,6 +96,9 @@ export const classifierSystem = (rules: string, model?: ModelNotes, levels: read
  * along here, as do the prompt being submitted and, mid-turn, the answers the
  * user just gave to the model's questions.
  */
+/** The question that ends every session check. */
+export const QUESTION = "Which effort level gets this session's work done in the least time and total inference cost? JSON only."
+
 export function forkPrompt(input: { rules: string; model?: ModelNotes; current?: string; lastReply?: string; hint?: string; answered?: string; levels?: readonly Level[]; inForce?: Level }): string {
   const parts = [
     'Pause the task for a moment. Do not use any tools and do not carry on with the work: answer only the question below.',
@@ -114,7 +113,7 @@ export function forkPrompt(input: { rules: string; model?: ModelNotes; current?:
   const hint = input.hint?.trim()
   if (hint) parts.push(`<user_hint>\n${hint}\n</user_hint>\nThe user asked for this routing explicitly and gave this hint; weigh it strongly.`)
   if (input.inForce) parts.push(`The session is at ${input.inForce} effort now.`)
-  parts.push("The transcript is this conversation: everything above, with your instructions, CLAUDE.md and memory. Suggest the session's effort level now; answer undecided only if no actionable task has been stated yet. JSON only.")
+  parts.push(QUESTION)
   return parts.join('\n\n')
 }
 
@@ -401,7 +400,7 @@ export function humanPromptCount(messages: readonly TranscriptMessage[]): number
  * (CLAUDE.md files, rules, memory) come first when known; a manual
  * `/er assess <hint>` adds the hint after the transcript.
  */
-/** The line that tells a check which level the session is on now, which its spread is judged against. */
+/** The line that tells a check which level the session is on now. */
 const inForceLine = (inForce: Level | undefined): string => (inForce ? `\n\nThe session is at ${inForce} effort now.` : '')
 
 export const classifierPrompt = (transcript: string, hint?: string, instructions?: string, inForce?: Level): string => {
@@ -409,24 +408,26 @@ export const classifierPrompt = (transcript: string, hint?: string, instructions
   const hintBlock = said ? `\n\n<user_hint>\n${said}\n</user_hint>\nThe user asked for this routing explicitly and gave this hint; weigh it strongly.` : ''
   const given = instructions?.trim()
   const instructionsBlock = given ? `The session's instructions (CLAUDE.md files, rules and memory), as its model sees them:\n<instructions>\n${given}\n</instructions>\n\n` : ''
-  return `${instructionsBlock}Transcript so far (oldest first):\n<transcript>\n${transcript}\n</transcript>${hintBlock}${inForceLine(inForce)}\n\nSuggest the session's effort level now; answer undecided only if no actionable task has been stated yet. JSON only.`
+  return `${instructionsBlock}Transcript so far (oldest first):\n<transcript>\n${transcript}\n</transcript>${hintBlock}${inForceLine(inForce)}\n\n${QUESTION}`
 }
 
 // --- parsing the classifier's reply ---------------------------------------------
 
 export type Decision =
   | { decision: 'undecided' }
-  | { decision: 'lock'; level: Level; reason: string; why?: string; confidence?: number; spread?: Spread; against?: Level }
+  | { decision: 'lock'; level: Level; reason: string; why?: string; against?: Level }
 
 /**
  * Reads the classifier's reply: the first `{...}` in it, so a reply fenced
- * in a json code block or wrapped in prose still parses. Anything
- * unparseable or an unknown level is `undecided`: the router never locks on a reply it cannot
- * read (fail open).
+ * in a json code block or wrapped in prose still parses. A reply with a level
+ * and no `decision` is read as that level. Anything unparseable or an unknown
+ * level is `undecided`: the router never moves on a reply it cannot read
+ * (fail open).
  */
 export function parseDecision(reply: string | undefined | null): Decision {
   const record = levelInDecision(jsonObjectOf(reply))
-  if (!record || (record.decision !== 'level' && record.decision !== 'lock' && record.decision !== 'suggest')) return { decision: 'undecided' }
+  const decided = record?.decision === 'level' || record?.decision === 'lock' || record?.decision === 'suggest' || (record?.decision === undefined && record?.level !== undefined)
+  if (!record || !decided) return { decision: 'undecided' }
   const proposal = proposalOf(record)
   return proposal ? { decision: 'lock', ...proposal } : { decision: 'undecided' }
 }
@@ -474,94 +475,15 @@ function jsonObjectOf(reply: string | undefined | null): Record<string, unknown>
   }
 }
 
-/**
- * A reply's level (case-insensitive), reason (capped) and confidence;
- * undefined for an unknown level. A reply with a spread (`levels`) takes the
- * spread's median as its level, and its confidence is judged later against
- * the level in force (judgeSpread).
- */
+/** A reply's level (case-insensitive) and reason (capped); undefined for an unknown level. */
 function proposalOf(record: Record<string, unknown>): Proposal | undefined {
-  const spread = spreadOf(record.levels)
-  const named = typeof record.level === 'string' ? record.level.trim().toLowerCase() : undefined
-  const level = spread ? judgeSpread(spread, undefined, LEVELS).level : named
+  const level = typeof record.level === 'string' ? record.level.trim().toLowerCase() : undefined
   if (!isLevel(level)) return undefined
   const reason = typeof record.reason === 'string' ? record.reason.replace(/\s+/g, ' ').trim() : ''
   const why = typeof record.why === 'string' ? record.why.replace(/\s+/g, ' ').trim().slice(0, 400) : ''
-  const proposal: Proposal = { level, reason: reason === '' ? 'classifier' : cut(reason, 60).replace(/… \[\d+ more chars\]$/, '…'), ...(why ? { why } : {}) }
-  if (spread) return { ...proposal, spread }
-  const confidence = confidenceOf(record.confidence)
-  return confidence === undefined ? proposal : { ...proposal, confidence }
+  return { level, reason: reason === '' ? 'classifier' : cut(reason, 60).replace(/… \[\d+ more chars\]$/, '…'), ...(why ? { why } : {}) }
 }
 
-/** A reply's `levels` object as a spread: known levels with a probability (0-1 or a percentage), normalised. */
-export function spreadOf(value: unknown): Spread | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-  const spread: Spread = {}
-  let total = 0
-  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    const level = key.trim().toLowerCase()
-    const p = confidenceOf(raw)
-    if (!isLevel(level) || p === undefined) continue
-    spread[level] = (spread[level] ?? 0) + p
-    total += p
-  }
-  if (total <= 0) return undefined
-  for (const level of LEVELS) if (spread[level] !== undefined) spread[level] = (spread[level] as number) / total
-  return spread
-}
-
-/**
- * Turns a spread into a level and a confidence, against the level in force.
- * The level is the spread's median within the offered levels (the lowest
- * level at least as likely as not to be enough), so a check torn between high
- * and xhigh lands on high. The confidence is how sure the check is that the
- * level in force is wrong in that direction: the probability above it for a
- * move up, below it for a move down, and for staying, one minus the larger of
- * the two. Tommy, 2026-10-05: a check "certain that it has to go up, just not
- * [sure] to what" should still move; one confidence in one exact level kept it
- * on the level it was sure was wrong. With no level in force known, the
- * confidence is the median level's own probability.
- */
-export function judgeSpread(spread: Spread, inForce: Level | undefined, offered: readonly Level[] = levelsUpTo()): { level: Level; confidence: number; against?: Level } {
-  const mass = offered.map(() => 0)
-  for (const level of LEVELS) {
-    const p = spread[level]
-    if (p !== undefined) {
-      const at = offered.indexOf(clampLevel(level, offered))
-      mass[at] = (mass[at] ?? 0) + p
-    }
-  }
-  let cumulative = 0
-  let at = offered.length - 1
-  for (let i = 0; i < offered.length; i++) {
-    cumulative += mass[i] as number
-    if (cumulative >= 0.5 - 1e-9) {
-      at = i
-      break
-    }
-  }
-  const level = offered[at] as Level
-  if (inForce === undefined) return { level, confidence: mass[at] as number }
-  const ref = offered.indexOf(clampLevel(inForce, offered))
-  const up = mass.slice(ref + 1).reduce((a, b) => a + b, 0)
-  const down = mass.slice(0, ref).reduce((a, b) => a + b, 0)
-  const confidence = at > ref ? up : at < ref ? down : 1 - Math.max(up, down)
-  return { level, confidence: Math.round(confidence * 1000) / 1000, against: offered[ref] as Level }
-}
-
-/** A confidence from 0 to 1. A percentage (1 to 100) is read as one; anything else is undefined. */
-export function confidenceOf(value: unknown): number | undefined {
-  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value.replace(/%$/, '')) : NaN
-  if (!Number.isFinite(n) || n < 0) return undefined
-  if (n <= 1) return n
-  return n <= 100 ? n / 100 : undefined
-}
-
-/** Whether a check is sure enough to act on. A reply with no confidence is not. A threshold of 0 acts on any level. */
-export const isConfident = (proposal: Proposal, threshold: number): boolean => threshold <= 0 || (proposal.confidence ?? 0) >= threshold
-
-/** `72%`. */
-export const percent = (confidence: number): string => `${Math.round(confidence * 100)}%`
 
 // --- supported models ---------------------------------------------------------------
 
@@ -610,24 +532,20 @@ export function modelName(model: string | undefined): string {
  */
 export const subagentFrame = (levels: readonly Level[] = levelsUpTo()): string => `You pick the reasoning-effort level for one Claude Code subagent. Levels you may pick, lowest to highest: ${levels.join(', ')}.
 
-Level names don't mean the same thing on every model. Judge what this subagent needs on the model it runs on, using what the notes below say each level can do there.
+No user is in the loop: the subagent works alone from its brief until it reports back. Pick the level that gets its work done in the least time and total inference cost. People turn this router on to spend less, so when two levels would both get the work done, pick the cheaper one. If the brief says how hard to think, follow it. Too little effort is not cheaper when its work is wrong or has to be redone. Too much pays for thinking the work won't use.
 
-How a subagent differs from a session with a user:
-- No user is in the loop. The subagent works alone from its brief until it reports back; nobody answers its questions or checks its steps.
-- There is no undecided. If the brief is short or vague, pick the level the work it describes most likely needs.
-
-Principles for choosing. They were written for whole sessions; read them for a subagent, which has no user in the loop. Later rules override earlier ones where they conflict:`
+Principles for choosing. They were written for whole sessions, so read them for a subagent. Later rules override earlier ones where they conflict:`
 
 export const SUBAGENT_FRAME = subagentFrame()
 
-export const subagentContract = (levels: readonly Level[] = levelsUpTo()): string => `Reply with exactly one JSON object and nothing else:
-{"level":"<${levels.join('|')}>","reason":"<what the subagent's task is, 3-8 words, e.g. codebase search>"}`
+export const subagentContract = (levels: readonly Level[] = levelsUpTo()): string => `Reply with one JSON object and nothing else:
+{"level":"<${levels.join('|')}>","reason":"<what the subagent's task is, 3-8 words>"}`
 
 export const SUBAGENT_CONTRACT = subagentContract()
 
 /** The subagent read's whole system prompt around the composed rules, with the notes on the model it runs on. */
 export const subagentSystem = (rules: string, model?: ModelNotes, levels: readonly Level[] = levelsUpTo()): string =>
-  `${subagentFrame(levels)}\n\n<rules>\n${rules.trim()}\n</rules>${modelBlock(model, 'The subagent runs on')}\n\n${subagentContract(levels)}`
+  `${subagentFrame(levels)}\n\n<rules>\n${rules.trim()}\n</rules>${modelBlock(model, 'The subagent runs on', levels)}\n\n${subagentContract(levels)}`
 
 /** What `agent.spawn` says about the subagent, as far as its read needs it. */
 export type SubagentBrief = { subagentType: string; description: string; prompt: string }
@@ -851,10 +769,10 @@ export const isCheckKind = (value: unknown): value is CheckKind =>
 export type ReadRow = { day: string; kind?: CheckKind; calls: number; output: number; input: number }
 
 /**
- * One assessment and what came of it, kept to calibrate confidence later: the
- * spread, the level it was judged against, and `outcome` (`stayed`, `moved to
- * high`, `no clear task`, `judged at the first request`; older ledgers hold
- * the ask-era outcomes too).
+ * One assessment and what came of it, kept for calibration: its level, the
+ * level the session was on, and `outcome` (`stayed`, `moved to high`, `no
+ * clear task`, `judged at the first request`). Rows before 0.18 also hold the
+ * check's spread and confidence, and older ones the ask-era outcomes.
  */
 export type VerdictRow = {
   at: number
@@ -866,9 +784,9 @@ export type VerdictRow = {
   /** The check's short task summary and its why, for calibration. */
   reason?: string
   why?: string
-  /** The check's probability for each level, when it gave one. */
+  /** Before 0.18: the check's probability for each level. */
   spread?: Spread
-  /** The level in force the spread was judged against. */
+  /** The level the session was on when the check ran. */
   against?: Level
   outcome: string
   /** A first check that carried the session's instructions (CLAUDE.md, rules, memory), to learn whether they help. */
@@ -880,9 +798,28 @@ export type VerdictRow = {
 /** Verdicts kept per session. */
 export const MAX_VERDICTS = 200
 
+/** A subagent's level as set at its spawn, against the level it would have inherited, for calibration. */
+export type SubagentRow = {
+  at: number
+  /** The model it runs on: the Agent call's, else its parent's. */
+  model: string
+  subagentType: string
+  description: string
+  /** The level its parent was running at, which it would otherwise have run at. */
+  parent?: Level
+  level: Level | number
+  reason: string
+  /** Its definition set its effort, so the router left it alone. */
+  byDefinition?: true
+  /** How long the spawn waited for its level, in ms. */
+  ms: number
+}
+
 /** One session's ledger: its requests, the router's reads, its assessments and, since 0.17, its state. */
 export type SpendLedger = {
   version: 1; session: string; repo: string; rows: SpendRow[]; reads: ReadRow[]; verdicts?: VerdictRow[]; state?: SavedState
+  /** Each routed subagent's level and why (since 0.17.3). */
+  subagents?: SubagentRow[]
   /** Your effort setting as the last main-thread request showed it, so a picker change is still seen after a reload, restart or resume. */
   setting?: Level
 }
@@ -933,11 +870,15 @@ export function withVerdictRow(ledger: SpendLedger, row: VerdictRow): SpendLedge
   return { ...ledger, verdicts: [...(ledger.verdicts ?? []), row].slice(-MAX_VERDICTS) }
 }
 
+export function withSubagentRow(ledger: SpendLedger, row: SubagentRow): SpendLedger {
+  return { ...ledger, subagents: [...(ledger.subagents ?? []), row].slice(-MAX_VERDICTS) }
+}
+
 /**
- * Sets what came of a verdict (the answer to its question): the one checked at `at`, else the newest. A spread
- * judged later (at the first request) also sets the level and confidence it was judged to.
+ * Sets what came of a verdict (the answer to its question): the one checked at `at`, else the newest. A check
+ * judged later (at the first request) also sets the level the session was on then.
  */
-export function withVerdictOutcome(ledger: SpendLedger, outcome: string, at?: number, judged?: { level: Level; confidence?: number; against?: Level }): SpendLedger {
+export function withVerdictOutcome(ledger: SpendLedger, outcome: string, at?: number, judged?: { level: Level; against?: Level }): SpendLedger {
   const verdicts = ledger.verdicts ?? []
   let index = at === undefined ? -1 : verdicts.findLastIndex(v => v.at === at)
   if (index < 0) index = verdicts.length - 1
@@ -945,7 +886,6 @@ export function withVerdictOutcome(ledger: SpendLedger, outcome: string, at?: nu
   const update = {
     outcome,
     ...(judged ? { level: judged.level } : {}),
-    ...(judged?.confidence !== undefined ? { confidence: judged.confidence } : {}),
     ...(judged?.against ? { against: judged.against } : {}),
   }
   return row ? { ...ledger, verdicts: verdicts.map((v, i) => (i === index ? { ...row, ...update } : v)) } : ledger
@@ -983,10 +923,17 @@ export function parseLedger(text: string): SpendLedger | undefined {
       (r.level === undefined || isLevel(r.level)) && (r.confidence === undefined || isCount(r.confidence)) && typeof r.outcome === 'string' &&
       (r.withInstructions === undefined || typeof r.withInstructions === 'boolean'),
   )
+  const subagents = (Array.isArray(value.subagents) ? value.subagents : []).filter(
+    (r): r is SubagentRow =>
+      typeof r === 'object' && r !== null && isCount(r.at) && typeof r.model === 'string' && typeof r.subagentType === 'string' &&
+      typeof r.description === 'string' && (isLevel(r.level) || isCount(r.level)) && typeof r.reason === 'string' && isCount(r.ms) &&
+      (r.parent === undefined || isLevel(r.parent)),
+  )
   const state = restored(value.state)
   return {
     version: 1, session: value.session, repo: typeof value.repo === 'string' ? value.repo : 'unknown', rows, reads,
     ...(verdicts.length > 0 ? { verdicts } : {}),
+    ...(subagents.length > 0 ? { subagents } : {}),
     ...(state ? { state: savedOf(state) } : {}),
     ...(isLevel(value.setting) ? { setting: value.setting } : {}),
   }
@@ -1112,11 +1059,11 @@ export function spendReport(ledgers: readonly SpendLedger[], period: SpendPeriod
 export type Spread = Partial<Record<Level, number>>
 
 /**
- * An assessment's level. `against`: the level in force the spread was judged
- * against, which `confidence` is relative to. `checkedAt` (when it ran, never
+ * An assessment's level. `against`: the level the session was on when it ran.
+ * `checkedAt` (when it ran, never
  * saved) ties a later judgement back to its ledger row.
  */
-export type Proposal = { level: Level; reason: string; why?: string; confidence?: number; spread?: Spread; against?: Level; checkedAt?: number }
+export type Proposal = { level: Level; reason: string; why?: string; against?: Level; checkedAt?: number }
 
 /**
  * The router's three statuses, as the footer's glyph shows them: `unlocked`
@@ -1151,7 +1098,7 @@ export type RouterState = {
   hint?: string
   /**
    * A first assessment made before any request showed the level in force: its
-   * spread is judged at the next main-thread request. Never saved.
+   * level is compared with the one the next main-thread request shows. Never saved.
    */
   pending?: Proposal
   /** Shown only, never saved: the session's model, which the router does not support, so it stands aside. */
@@ -1210,47 +1157,30 @@ export function offeredLevels(highest: Level, setting?: Level): readonly Level[]
   return levelsUpTo(setting && rank(setting) > rank(highest) ? setting : highest)
 }
 
-/**
- * How sure the last assessment was that `level` is right: one minus the
- * larger share of the spread on either side of it. The footer's word strength
- * and the band's confidence.
- */
-export function certaintyOf(spread: Spread, level: Level, offered: readonly Level[] = levelsUpTo()): number {
-  const mass = offered.map(() => 0)
-  for (const l of LEVELS) {
-    const p = spread[l]
-    if (p !== undefined) {
-      const at = offered.indexOf(clampLevel(l, offered))
-      mass[at] = (mass[at] ?? 0) + p
-    }
-  }
-  const ref = offered.indexOf(clampLevel(level, offered))
-  const up = mass.slice(ref + 1).reduce((a, b) => a + b, 0)
-  const down = mass.slice(0, ref).reduce((a, b) => a + b, 0)
-  return Math.round((1 - Math.max(up, down)) * 1000) / 1000
-}
-
 /** What one assessment did, for the messages and the ledger. */
 export type Settled = { state: RouterState; moved?: { from?: Level; to: Level }; locked?: Level; outcome: string }
 
 /**
- * Applies a judged assessment. It moves to the spread's median when it is at
- * least `threshold` sure the level running is wrong in that direction;
- * otherwise it stays. Counted assessments use up the window, and the last one
- * locks whatever is running. A manual assessment while locked moves the locked
- * level and stays locked. `running` is the level in force (the router's own,
- * else your setting); undefined when no request has shown it yet.
+ * Applies an assessment: the session goes to the level it picked. Tommy,
+ * 2026-10-05: switching costs the user nothing now (no approval, no review),
+ * so the router does what the check says rather than second-guessing it with
+ * a confidence bar in code. The check is asked for the level that gets the
+ * work done in the least time and total cost, and weighs the risk itself.
+ * Counted assessments use up the window, and the last one locks whatever is
+ * running. A manual assessment while locked moves the locked level and stays
+ * locked. `running` is the level in force (the router's own, else your
+ * setting); undefined when no request has shown it yet.
  */
 export function settle(
   state: RouterState,
   judged: Proposal | undefined,
-  options: { threshold: number; limit: number; running?: Level; counted: boolean },
+  options: { limit: number; running?: Level; counted: boolean },
 ): Settled {
   let next: RouterState = { ...state, pending: undefined, hint: undefined }
   if (options.counted) next.assessed = Math.min(options.limit, state.assessed + 1)
   let moved: Settled['moved']
   let outcome = judged ? 'stayed' : 'no clear task'
-  if (judged && options.running !== undefined && judged.level !== options.running && isConfident(judged, options.threshold)) {
+  if (judged && options.running !== undefined && judged.level !== options.running) {
     moved = { from: options.running, to: judged.level }
     next = { ...next, level: judged.level, lastLevel: judged.level }
     outcome = `moved to ${judged.level}`
@@ -1291,7 +1221,6 @@ export const turnedOnLocked = (state: RouterState): RouterState =>
 /** The last assessment, as the band and `/er status` show it (from the ledger, so it survives a resume). */
 export type LastAssessment = {
   at: number
-  spread?: Spread
   level?: Level
   against?: Level
   reason?: string
@@ -1334,8 +1263,6 @@ export type View = {
   last?: LastAssessment
   /** The window: prompts to assess before locking. */
   limit: number
-  /** The move bar, 0 to 1. */
-  threshold: number
   offered: readonly Level[]
   /** An assessment is running now. */
   assessing?: boolean
@@ -1346,13 +1273,6 @@ export type View = {
 /** The level running now: the router's own, else your setting (undefined until a request shows it). */
 export const runningLevel = (state: RouterState, setting?: Level): Level | undefined =>
   state.status === 'off' || state.unsupported ? setting : state.level ?? setting
-
-/** How sure the last assessment is that the level running now is right; undefined without a spread. */
-export function confidenceNow(state: RouterState, view: View): number | undefined {
-  const running = runningLevel(state, view.setting)
-  if (!view.last?.spread || !running) return undefined
-  return certaintyOf(view.last.spread, running, view.offered)
-}
 
 /** `○ ◔ ◑ ◕`: the share of the window assessed. It never fills: at the end the padlock closes instead. */
 export function progressGlyph(assessed: number, limit: number): string {
@@ -1367,8 +1287,7 @@ export const GLYPH: Record<Status, string> = { unlocked: '🔓', locked: '🔒',
 
 /**
  * The footer, beside the native effort picker: the status glyph, the level
- * running, and while unlocked how much of the window is used. The word is dim
- * while the last assessment is less than 50% sure of the level running.
+ * running, and while unlocked how much of the window is used. Dim while off.
  */
 export function footerLabel(state: RouterState, view: View): { text: string; dim: boolean } {
   // In capitals: the level running, as against the picker's "Medium" (your setting). Capitals also have no
@@ -1383,17 +1302,15 @@ function footerWords(state: RouterState, view: View): { text: string; dim: boole
   const glyph = GLYPH[state.status]
   if (view.assessing) return { text: `${glyph} assessing…`, dim: false }
   const running = runningLevel(state, setting)
-  const sure = confidenceNow(state, view)
-  const dim = state.status === 'unlocked' && sure !== undefined && sure < 0.5
   if (state.status === 'locked') return { text: `${glyph} ${running ?? ''}`.trim(), dim: false }
-  return { text: `${glyph}${running ? ` ${running}` : ''} ${progressGlyph(state.assessed, view.limit)}`, dim }
+  return { text: `${glyph}${running ? ` ${running}` : ''} ${progressGlyph(state.assessed, view.limit)}`, dim: false }
 }
 
 const morePrompts = (n: number): string => `${n} more prompt${n === 1 ? '' : 's'}`
 
 /**
  * The band's first line: the footer in words, in the same order. Status,
- * the level running and where it came from, confidence, what changes next.
+ * the level running and where it came from, what changes next.
  */
 export function bandHeadline(state: RouterState, view: View): string {
   if (state.unsupported) return `Effort router: off on ${state.unsupported}. It works with ${SUPPORTED_NAMES}.`
@@ -1404,53 +1321,35 @@ export function bandHeadline(state: RouterState, view: View): string {
     return `Effort router: off. ${level}.${why}`
   }
   const running = runningLevel(state, setting)
-  const sure = confidenceNow(state, view)
-  const confidence = sure === undefined ? '' : `, ${percent(sure)} confidence`
   if (state.status === 'locked') {
     const after = state.lockedAfter ? ` after ${state.lockedAfter} prompt${state.lockedAfter === 1 ? '' : 's'}` : ''
     const who = state.lockedBy === 'you' ? `locked by you${after}` : `chosen by the router${after}`
-    return `Effort router: locked. ${capital(running ?? 'your level')} (${who})${confidence}.`
+    return `Effort router: locked. ${capital(running ?? 'your level')} (${who}).`
   }
   const source = state.level ? 'chosen by the router' : 'your effort setting'
-  const level = running ? `${capital(running)} (${source})${confidence}.` : 'Your effort setting applies.'
+  const level = running ? `${capital(running)} (${source}).` : 'Your effort setting applies.'
   const left = Math.max(0, view.limit - state.assessed)
   return `Effort router: unlocked. ${level} Locks after ${morePrompts(left)}.`
 }
 
-/** `low 5%, medium 55%, high 35%, xhigh 5%`: levels with 1% or more. */
-export const spreadText = (spread: Spread): string =>
-  LEVELS.filter(level => (spread[level] ?? 0) >= 0.005)
-    .map(level => `${level} ${Math.round((spread[level] as number) * 100)}%`)
-    .join(', ')
-
-/**
- * The band's second line: the last assessment's spread, its larger side
- * against the level it was judged against, and what it did. `60% sure medium
- * is too low, so it stayed. It moves at 70%.`
- */
-export function lastAssessmentLine(last: LastAssessment | undefined, threshold: number, offered: readonly Level[], locked: boolean): string | undefined {
-  if (!last) return undefined
-  if (!last.spread || !last.level) return `Last assessment: no clear task yet, so it stayed.`
-  const reason = last.reason ? ` (${last.reason})` : ''
-  const parts = [`Last assessment: ${spreadText(last.spread)}${reason}.`]
-  const verdict = verdictSentence(last, threshold, offered)
-  if (verdict) parts.push(verdict)
-  if (locked && last.why) parts.push(last.why)
-  return parts.join(' ')
+/** What an assessment did, after its level: `so it moved from high`, `the level it was already on`, `so it stayed`. */
+function outcomeWords(last: LastAssessment): string {
+  if (last.outcome.startsWith('moved')) return last.against ? `so it moved from ${last.against}` : 'so it moved'
+  if (last.outcome === 'stayed' && last.against === last.level) return 'the level it was already on'
+  return last.outcome === 'failed' ? 'but the assessment failed, so it stayed' : 'so it stayed'
 }
 
-/** `40% sure medium is too low, so it stayed. It moves at 70%.`: the larger side against the level it was judged against. */
-function verdictSentence(last: LastAssessment, threshold: number, offered: readonly Level[]): string | undefined {
-  if (!last.spread || !last.level || !last.against) return undefined
-  const against = last.against
-  const mass = (above: boolean) =>
-    offered.filter(l => (above ? rank(l) > rank(against) : rank(l) < rank(against))).reduce((n, l) => n + (last.spread?.[l] ?? 0), 0)
-  const up = mass(true)
-  const down = mass(false)
-  const side = up >= down ? { share: up, way: 'low' } : { share: down, way: 'high' }
-  const moved = last.outcome.startsWith('moved')
-  const did = moved ? `so it moved to ${last.level}` : 'so it stayed'
-  return `${percent(side.share)} sure ${against} ${moved ? 'was' : 'is'} too ${side.way}, ${did}.${moved ? '' : ` It moves at ${percent(threshold)}.`}`
+/**
+ * The band's second line: the last assessment's level and task, and what it
+ * did. `Last assessment: medium (bug fix in existing code), so it moved from high.`
+ */
+export function lastAssessmentLine(last: LastAssessment | undefined, locked: boolean): string | undefined {
+  if (!last) return undefined
+  if (!last.level) return `Last assessment: no clear task yet, so it stayed.`
+  const reason = last.reason ? ` (${last.reason})` : ''
+  const parts = [`Last assessment: ${last.level}${reason}, ${outcomeWords(last)}.`]
+  if (locked && last.why) parts.push(last.why)
+  return parts.join(' ')
 }
 
 /** A band line without its `Effort router: ` prefix, for command output that Claude Code already labels. */
@@ -1558,7 +1457,7 @@ export function parseRoute(args: string): RouteCommand {
 
 /**
  * What `/er status` prints, in short blocks: where the router stands, the
- * last assessment (how it was made, its spread and verdict, the task and
+ * last assessment (how it was made, its level and what it did, the task and
  * why), the session's counts and errors, then the routed subagents. The raw
  * reply appears only when it couldn't be read as a level.
  */
@@ -1579,14 +1478,13 @@ export function routeReport(state: RouterState, view: View, diagnostics?: ReadDi
       details.push(ago(diagnostics?.now ?? last.at, verdict.at))
       if (diagnostics?.lastReadMs !== undefined) details.push(`took ${(diagnostics.lastReadMs / 1000).toFixed(1)}s`)
     }
-    if (last.against) details.push(`judged against ${last.against}`)
+    if (last.against) details.push(`the session was on ${last.against}`)
     const block = [`Last assessment${details.length > 0 ? ` (${details.join(', ')})` : ''}:`]
-    if (!last.spread || !last.level) {
+    if (!last.level) {
       block.push('No clear task yet, so it stayed.')
       if (verdict && !/"undecided"/.test(verdict.raw)) block.push(`Its reply: ${cut(verdict.raw.replace(/\s+/g, ' ').trim(), 300)}`)
     } else {
-      const sentence = verdictSentence(last, view.threshold, view.offered)
-      block.push(`${spreadText(last.spread)}.${sentence ? ` ${sentence}` : ''}`)
+      block.push(`${capital(last.level)}, ${outcomeWords(last)}.`)
       if (last.reason) block.push(`Task: ${last.reason}`)
       if (last.why) block.push(`Why: ${last.why}`)
     }
@@ -1594,7 +1492,7 @@ export function routeReport(state: RouterState, view: View, diagnostics?: ReadDi
   }
 
   if (diagnostics) {
-    const counts = [`Assessments this session: ${diagnostics.calls}. It moves at ${percent(view.threshold)}.`]
+    const counts = [`Assessments this session: ${diagnostics.calls}.`]
     const sent = diagnostics.sent
     if (sent && sent.omitted > 0) counts.push(`The separate call read ${sent.sentChars} of the conversation's ${sent.fullChars} characters (limit ${sent.maxChars}).`)
     if (diagnostics.error) counts.push(`Last error (${ago(diagnostics.now, diagnostics.error.at)}): ${cut(diagnostics.error.text, 200)}`)

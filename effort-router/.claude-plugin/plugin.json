@@ -1,7 +1,7 @@
 {
   "name": "effort-router",
-  "version": "0.17.3",
-  "description": "Picks the reasoning effort each task needs. Your session's own model assesses each of your first prompts, knowing what each level can do on that model, and moves the level only when it's confident. Then it locks. Subagents get their own level, chosen by the agent that starts them. The footer shows what it's doing, and /er report shows where your effort went.",
+  "version": "0.18.0",
+  "description": "Saves time and money by running each task at the lowest reasoning effort that does it well. Your session's own model assesses each of your first prompts, knowing what each level can do on that model, and the session goes to the level that gets the work done fastest and cheapest. Then it locks. Subagents get their own level, chosen by the agent that starts them. The footer shows what it's doing, and /er report shows where your effort went.",
   "author": {
     "name": "Tommy Long"
   },
@@ -15,13 +15,6 @@
       "description": "How many of a session's first prompts the router assesses before it locks the level. Unlock in the band starts a fresh set.",
       "required": false,
       "default": 5
-    },
-    "confidence": {
-      "type": "number",
-      "title": "How sure it must be to move",
-      "description": "From 0 to 1. The router changes the level only when an assessment is at least this sure the current level is wrong. Otherwise it stays.",
-      "required": false,
-      "default": 0.7
     },
     "highestLevel": {
       "type": "string",

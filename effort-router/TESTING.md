@@ -101,7 +101,7 @@ against medium, Fable against high: Claude Code's default for each.
 - Sonnet and Fable put edge-case tests at medium with high close behind (for example medium 45%, high 40%), expected high or
   xhigh. Below the bar, so the router would stay on the setting and check again.
 
-### Consistency and anchoring (2026-10-05, `bun eval/anchor.ts --model <m> --runs 5`)
+### Consistency and anchoring (2026-10-05, `bun eval/anchor.ts --model <m> --runs 5`; the script read spreads and went with them in 0.18, see git 21b9529)
 
 Each session fixture with a task, 5 runs under 5 conditions: no level stated, and "The session is at X effort now" for
 low, medium, high and xhigh. The run hit the account's weekly limit partway, so it has 334 reads on Opus, 350 on

@@ -32,7 +32,6 @@ import {
   classifierPrompt,
   classifierSystem,
   composeRules,
-  confidenceOf,
   dayOf,
   definitionFor,
   emptyLedger,
@@ -42,7 +41,6 @@ import {
   freshState,
   humanPromptCount,
   isLevel,
-  judgeSpread,
   lastAssessmentLine,
   lockedByYou,
   message,
@@ -79,19 +77,19 @@ import {
   withRead,
   withSpend,
   withVerdictOutcome,
+  withSubagentRow,
   withVerdictRow,
 } from './policy'
 
 /**
- * effort-router 0.17. On each of a session's first prompts (`promptsToAssess`,
+ * effort-router 0.18. On each of a session's first prompts (`promptsToAssess`,
  * 5 by default) the router assesses the conversation before the turn runs:
  * a fork of the conversation on the session's own model (`$.model.fork`,
  * served from its prompt cache), or, when there is nothing to fork yet, one
  * separate call carrying the session's instructions (CLAUDE.md, rules,
- * memory). It moves the level when it is at least `confidence` (70%) sure the
- * level running is wrong in one direction, to the middle of its spread, and
- * otherwise stays. After the last prompt of the window it locks whatever is
- * running. A move never locks.
+ * memory). It asks which level gets the work done in the least time and total
+ * inference cost, and the session goes to that level. After the last prompt
+ * of the window it locks whatever is running. A move never locks.
  *
  * Statuses: unlocked (it may still move the level), locked, off. The footer
  * shows the status glyph, the level running and the share of the window
@@ -116,8 +114,6 @@ import {
 type Settings = {
   /** Prompts assessed before the router locks. */
   promptsToAssess: number
-  /** How sure (0 to 1) an assessment must be that the level running is wrong before it moves. */
-  confidence: number
   /** The highest level the router picks, unless your own setting is higher. */
   highestLevel: Level
   /** Route each subagent from its own brief at spawn. */
@@ -203,14 +199,13 @@ const FALLBACK_RULES =
 
 const HUMAN_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
 /** Sent with each telemetry record, so a collector can tell versions apart. Keep in step with plugin.json. */
-const VERSION = '0.17.3'
+const VERSION = '0.18.0'
 const COMMANDS = ['effort-router', 'er']
 
 function settingsOf(options: PluginOptions): Settings {
   const n = Number(options.promptsToAssess)
   return {
     promptsToAssess: Number.isFinite(n) && n >= 1 ? Math.floor(n) : 5,
-    confidence: confidenceOf(options.confidence) ?? 0.7,
     highestLevel: isLevel(options.highestLevel) && options.highestLevel !== 'low' ? options.highestLevel : DEFAULT_HIGHEST,
     routeSubagents: options.routeSubagents !== false && options.routeSubagents !== 'false',
   }
@@ -314,7 +309,6 @@ function lastOf(session: Session): LastAssessment | undefined {
   if (!row) return undefined
   return {
     at: row.at,
-    ...(row.spread ? { spread: row.spread } : {}),
     ...(row.level ? { level: row.level } : {}),
     ...(row.against ? { against: row.against } : {}),
     ...(row.reason ? { reason: row.reason } : {}),
@@ -329,7 +323,6 @@ function viewOf(session: Session, settings: Settings): View {
     setting: shownSetting(session),
     last: lastOf(session),
     limit: settings.promptsToAssess,
-    threshold: settings.confidence,
     offered: levelsFor(settings, session),
     assessing: session.assessing,
     subagents: routed,
@@ -566,8 +559,7 @@ async function classifyNow($: EngineInterface, settings: Settings, session: Sess
     const decision = parseDecision(reply.text)
     if (decision.decision !== 'lock') return { ...check, checkedAt }
     const { decision: _, ...found } = decision
-    const judged = found.spread && inForce ? { ...found, ...judgeSpread(found.spread, inForce, levels) } : found
-    return { ...check, checkedAt, proposal: { ...judged, level: clampLevel(judged.level, levels), checkedAt } }
+    return { ...check, checkedAt, proposal: { ...found, level: clampLevel(found.level, levels), ...(inForce ? { against: inForce } : {}), checkedAt } }
   } catch (error) {
     session.error = { at: await now(), text: String(error) }
     throw error
@@ -585,9 +577,7 @@ function recordVerdict(session: Session, check: Check, outcome: string, manual: 
       model: check.model,
       prompt,
       ...(proposal ? { level: proposal.level, reason: proposal.reason } : {}),
-      ...(proposal?.confidence !== undefined ? { confidence: proposal.confidence } : {}),
       ...(proposal?.why ? { why: proposal.why } : {}),
-      ...(proposal?.spread ? { spread: proposal.spread } : {}),
       ...(proposal?.against ? { against: proposal.against } : {}),
       outcome,
       ...(check.withInstructions !== undefined ? { withInstructions: check.withInstructions } : {}),
@@ -608,8 +598,8 @@ function sayChanges($: EngineInterface, settled: ReturnType<typeof settle>, reas
 /**
  * One assessment, applied. `counted` uses up one prompt of the window (the
  * automatic ones, and Turn on and assess); a manual one while locked moves the
- * locked level and stays locked. A spread with no level in force known yet is
- * judged at the next main-thread request (judgeWaiting).
+ * locked level and stays locked. A level picked with no level in force known
+ * yet is applied at the next main-thread request (judgeWaiting).
  */
 async function assess($: EngineInterface, id: string, session: Session, settings: Settings, input: ReadInput, counted: boolean): Promise<string> {
   if (session.reading) return 'Already assessing. Try again in a moment.'
@@ -626,8 +616,8 @@ async function assess($: EngineInterface, id: string, session: Session, settings
     const check = result.ok ? result.value : undefined
     if (!result.ok) session.error = { at: await $.clock.now().catch(() => Date.now()), text: `the assessment timed out after ${TIMEOUT_MS / 1000} s, so the prompt ran at the level it had` }
     const proposal = check?.proposal
-    if (check && proposal?.spread && proposal.confidence === undefined) {
-      // No level in force known yet: judged at the next request.
+    if (check && proposal && !proposal.against) {
+      // No level in force known yet: applied at the next request, which shows it.
       const state = { ...session.state, pending: proposal, hint: undefined, assessed: prompt }
       recordVerdict(session, check, 'judged at the first request', !counted, prompt)
       await commit($, session, state)
@@ -635,11 +625,11 @@ async function assess($: EngineInterface, id: string, session: Session, settings
       return summary
     }
     const failed = !check || check.failed !== undefined
-    const settled = settle(session.state, proposal, { threshold: settings.confidence, limit: settings.promptsToAssess, running: levelInForce(session), counted })
+    const settled = settle(session.state, proposal, { limit: settings.promptsToAssess, running: levelInForce(session), counted })
     if (check) recordVerdict(session, check, failed ? 'failed' : settled.outcome, !counted, prompt)
     await commit($, session, settled.state)
     const said = sayChanges($, settled, proposal?.reason)
-    summary = said.length > 0 ? said.join(' ') : failed ? summary : (lastAssessmentLine(lastOf(session), settings.confidence, levelsFor(settings, session), session.state.status === 'locked') ?? 'Nothing changed.')
+    summary = said.length > 0 ? said.join(' ') : failed ? summary : (lastAssessmentLine(lastOf(session), session.state.status === 'locked') ?? 'Nothing changed.')
     return summary
   } catch (error) {
     $.ui.log(`effort-router: assessment failed: ${String(error)}`, { to: 'debug' })
@@ -656,10 +646,9 @@ async function assess($: EngineInterface, id: string, session: Session, settings
 /** A first assessment made before the level in force was known: judged now, against the level this request shows. */
 async function judgeWaiting($: EngineInterface, session: Session, settings: Settings, setting: Level): Promise<void> {
   const waiting = session.state.pending
-  if (!waiting?.spread) return
-  const levels = levelsFor(settings, session)
-  const judged: Proposal = { ...waiting, ...judgeSpread(waiting.spread, setting, levels) }
-  const settled = settle(session.state, judged, { threshold: settings.confidence, limit: settings.promptsToAssess, running: setting, counted: false })
+  if (!waiting) return
+  const judged: Proposal = { ...waiting, against: setting }
+  const settled = settle(session.state, judged, { limit: settings.promptsToAssess, running: setting, counted: false })
   record(session, ledger => withVerdictOutcome(ledger, settled.outcome, waiting.checkedAt, judged))
   await commit($, session, settled.state)
   sayChanges($, settled, judged.reason)
@@ -808,7 +797,7 @@ async function route($: EngineInterface, args: string, settings: Settings): Prom
       }
       const view = viewOf(session, settings)
       const state = stateOf(session)
-      const last = lastAssessmentLine(view.last, view.threshold, view.offered, state.status === 'locked')
+      const last = lastAssessmentLine(view.last, state.status === 'locked')
       return { text: [bandHeadline(state, view), last, ROUTE_USAGE].filter(Boolean).join('\n') }
     }
     case 'lock':
@@ -1110,13 +1099,14 @@ export function register(on: On, options: PluginOptions): void {
   // level to its agentId. next(e) resolves with the id before the agent's first turn.step (verified live), so its
   // first request already carries it.
   on('agent.spawn', async ($, e, next) => {
-    let routed: { session: Session; proposal: Pick<RoutedAgent, 'level' | 'reason' | 'byDefinition'>; took: number } | undefined
+    let routed: { session: Session; proposal: Pick<RoutedAgent, 'level' | 'reason' | 'byDefinition'>; took: number; at: number; parent?: Level } | undefined
     try {
       const { session } = await sessionOf($)
       if (subagentRouting(settings, session) === 'on') {
         const started = await $.clock.now().catch(() => Date.now())
+        const parent = parentLevel(session.state, session.agents, e.parentAgentId) ?? seenSetting(session)
         const proposal = await routeSpawn($, settings, session, e)
-        if (proposal) routed = { session, proposal, took: (await $.clock.now().catch(() => Date.now())) - started }
+        if (proposal) routed = { session, proposal, took: (await $.clock.now().catch(() => Date.now())) - started, at: started, parent }
       }
     } catch (error) {
       $.ui.log(`effort-router: agent.spawn failed: ${String(error)}`, { to: 'debug' })
@@ -1124,8 +1114,21 @@ export function register(on: On, options: PluginOptions): void {
     const result = await next(e)
     try {
       if (routed && result.agentId !== undefined) {
-        const { session, proposal, took } = routed
+        const { session, proposal, took, at, parent } = routed
         remember(session, result.agentId, { ...proposal, subagentType: e.subagentType, description: e.description })
+        record(session, ledger =>
+          withSubagentRow(ledger, {
+            at,
+            model: e.model ?? e.parentModel ?? 'unknown',
+            subagentType: e.subagentType,
+            description: e.description,
+            ...(parent ? { parent } : {}),
+            level: proposal.level,
+            reason: proposal.reason,
+            ...(proposal.byDefinition ? { byDefinition: true as const } : {}),
+            ms: took,
+          }),
+        )
         $.ui.log(
           `effort-router: subagent ${result.agentId} (${e.subagentType}${e.fork ? ', fork' : ''}: ${e.description}) -> ${proposal.level}${proposal.byDefinition ? ' set by its definition, left alone' : ''} (${proposal.reason}) in ${took} ms`,
           { to: 'debug' },
@@ -1170,7 +1173,7 @@ export function register(on: On, options: PluginOptions): void {
             await judgeWaiting($, session, settings, e.effort)
           } else if (supported && session.state.status === 'unlocked' && session.state.assessed >= settings.promptsToAssess) {
             const running = session.state.level ?? e.effort
-            const settled = settle(session.state, undefined, { threshold: settings.confidence, limit: settings.promptsToAssess, running, counted: false })
+            const settled = settle(session.state, undefined, { limit: settings.promptsToAssess, running, counted: false })
             if (settled.locked) {
               await commit($, session, settled.state)
               say($, message.locked(settled.locked))
@@ -1239,7 +1242,7 @@ export function register(on: On, options: PluginOptions): void {
     const view = viewOf(session, settings)
     const lines = [
       bandHeadline(state, view),
-      session.assessing ? 'Assessing now…' : lastAssessmentLine(view.last, view.threshold, view.offered, state.status === 'locked'),
+      session.assessing ? 'Assessing now…' : lastAssessmentLine(view.last, state.status === 'locked'),
       subagentLine(view.subagents),
       session.note,
     ].filter((line): line is string => line !== undefined && line !== '')

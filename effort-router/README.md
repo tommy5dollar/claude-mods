@@ -1,8 +1,8 @@
 # effort-router
 
-A Claude Code mod that picks the reasoning effort each task needs. Your session's own model assesses each of your first
-five prompts and steps the level up or down when it's confident the current one is wrong. Then the level locks for the
-rest of the session. Each subagent gets its own level, chosen by the agent that launches it.
+A Claude Code mod that saves time and money by running each task at the lowest reasoning effort that does it well. Your
+session's own model assesses each of your first five prompts and moves the level to whichever gets the work done fastest
+and cheapest, up or down. Then the level locks for the rest of the session. Each subagent gets its own level, chosen by the agent that launches it.
 
 <img src="docs/demo.gif" width="560" alt="A Claude Code session in the Desktop app with the effort picker on Medium. A rename is assessed and moved to low, then a production coupon bug is assessed and moved from low to high, and the band shows the last assessment">
 
@@ -33,10 +33,10 @@ depends on the task. The router gives your session's model those principles and 
 do on that model, then lets it judge. It never maps a kind of task to a fixed level, because level names mean
 different things on Opus, Sonnet and Fable.
 
-**Does it save money and time?** Often, but not by always going lower. Where it moves depends on where you start.
-If you run everything at high, it moves easy work down, and those turns come back much faster as well as cheaper. If
-you run at medium, it moves hard work up, and getting a hard task right first time often costs less overall than the
-rework, in tokens and in your own time.
+**Does it save money and time?** That's what it's for. When two levels would both do the work, it picks the cheaper
+one. If you run everything at high or xhigh, easy work moves down, and those turns come back much faster as well as
+cheaper. It still steps up when the work clearly needs it, because a hard task done right first time costs less than
+the rework, in tokens and in your own time.
 `/er report` shows what ran at each level, so you can see what it did to your own work.
 
 **What routing costs.** Each of the first five prompts waits about 1.5 seconds for an assessment. The first is a
@@ -59,6 +59,10 @@ Mods run inside Claude Code without a sandbox, so here's exactly what this one d
 ## Common questions
 
 - **Does it change my model?** No. It only changes effort, and stands aside on models it doesn't support.
+- **Can I ask for more or less effort in my prompt?** Yes, while the level is unlocked: name a level ("use low effort")
+  or say "think really hard about this" or "quick one", and the assessment follows it. Asking for max gets xhigh unless
+  `highestLevel` is max. Once the level has locked, prompts aren't assessed, so use the band or `/er assess`. Without the router, words like that only nudge how much the model
+  thinks within the level you set.
 - **What if I disagree with it?** Change the effort picker and routing turns off for that session, with your level in
   force. Or press Lock, Unlock or Assess in the band.
 - **What if an assessment fails or is slow?** The prompt runs at the level it already had. Nothing waits longer than
@@ -73,21 +77,23 @@ Mods run inside Claude Code without a sandbox, so here's exactly what this one d
 
 ```mermaid
 flowchart LR
-    P["Prompts 1 to 5"] --> R["Your model rates<br>each level"]
-    R --> C{"70%+ sure<br>it's wrong?"}
+    P["Prompts 1 to 5"] --> R["Your model picks<br>the level"]
+    R --> C{"Different from<br>the level running?"}
     C -- "yes" --> M["Step up<br>or down"]
     C -- "no" --> K["Stay"]
     M --> L["After prompt 5,<br>lock"]
     K --> L
 ```
 
-1. **It starts from your effort setting.** Nothing changes until an assessment is sure.
-2. **Each of your first five prompts is assessed before its turn runs.** The model gives every level a probability of being right, for example `medium 10%, high 50%, xhigh 40%`.
-3. **It moves when it's at least 70% sure the level running is wrong in one direction.** Here it's 90% sure medium is too low, so it moves to the middle of the spread: the lowest level at least as likely as not to be enough, which is high. Otherwise it stays.
+1. **It starts from your effort setting.** Nothing changes until an assessment picks another level.
+2. **Each of your first five prompts is assessed before its turn runs.** Your session's model is asked one question: which level gets this session's work done in the least time and total inference cost, counting the rework that too little effort causes? It's told that people use the router to spend less, so when two levels would both do the work it picks the cheaper one, and that your own words about effort ("think really hard about this", "quick one") are your call. It answers with a level and a reason, or says no task has been stated yet.
+3. **The session goes to the level it picked.** Switching costs you nothing (no approval, no review), so the router doesn't second-guess the answer. If it picks the level already running, nothing changes.
 4. **After the fifth assessment it locks** whatever level is running. A move never locks early.
 5. **Only an assessment changes the level**, or a button whose label names the level.
 
-Locking after a fixed number of prompts is deliberate. The model's percentages aren't calibrated, so a second bar for locking early would be a guess on a guess. A fixed window always ends, still catches a task that grows over the first few prompts, and has one number to tune (`promptsToAssess`).
+Locking after a fixed number of prompts is deliberate. A fixed window always ends, still catches a task that grows over the first few prompts, and has one number to tune (`promptsToAssess`).
+
+Before 0.18 the model gave every level a probability and the router moved only when 70% of it sat on one side of the level running. That made the outcome depend on where you started: a spec'd feature that read as medium went to medium from xhigh but stayed on high from high. Asking the model for the level and doing what it says gives the same answer from any setting.
 
 ## The footer
 
@@ -105,15 +111,15 @@ The footer sits beside the native model and effort pickers. It shows the router'
 
 The circle never fills. When the window ends the padlock closes instead. The level is in capitals, to tell it apart from the picker's own label, which shows your setting.
 
-The level word is dim while the last assessment was less than 50% sure the level running is right. Levels have no colours, because a scale from green to red would suggest that low effort is good.
+Levels have no colours, because a scale from green to red would suggest that low effort is good.
 
 ## The band
 
 Clicking the footer opens the band above the prompt. `/er` does the same. It never opens by itself.
 
 ```
-Effort router: unlocked. High (chosen by the router), 60% confidence. Locks after 1 more prompt.
-Last assessment: medium 10%, high 50%, xhigh 40% (bug fix touching three services). 90% sure medium was too low, so it moved to high.
+Effort router: unlocked. High (chosen by the router). Locks after 1 more prompt.
+Last assessment: high (bug fix touching three services), so it moved from medium.
 Subagents get their own level: 4 routed this session.
 1 Hide   2 Lock at high   3 Turn off   4 Assess
 ```
@@ -185,13 +191,13 @@ In the Desktop app the picker keeps showing your setting while the router runs a
 - **On your session's own model.** The model you chose to work in judges the task, because it judges better than a small model and the savings from getting the level right scale with it. When the conversation has a request to fork, an assessment is a fork of it: the session's own request (system prompt, tools, CLAUDE.md, memory and the whole conversation) with one question added, served from the prompt cache. Measured on Opus 5.5 with a 72k-token conversation: 1.6 seconds, about 2.8k fresh input tokens and 40 output tokens.
 - **The first prompt is a separate call.** Before the session has sent anything there is no request to fork, and a mod can't build one with Claude Code's system prompt and tools. So the first assessment is one call to the same model with your CLAUDE.md files, rules and memory (up to 80,000 characters, about 20k tokens) and your prompt. The same happens after `/clear`, or after a resume that starts afresh.
 - **What a separate call reads.** Your prompts and answers in full, Claude's replies shortened and tool calls as names only, up to 24,000 characters. Tool results, file contents and thinking never go in. Over the cap it keeps your first prompt (the original task), then the newest lines. The prompt being assessed always goes in whole, outside the cap, because a long dictated brief is the prompt that matters most.
-- **Judged against the level running.** That's the router's own level after a move, or your effort setting. The router learns your setting from the first request (nothing else shows it), so the first assessment's spread waits for that request and is judged there.
+- **Told the level running.** That's the router's own level after a move, or your effort setting. The router learns your setting from the first request (nothing else shows it), so the first assessment's level is applied when that request arrives.
 - **Up to xhigh.** Assessments are offered levels up to `highestLevel` (xhigh by default): on all three models max rarely beats xhigh and can overthink. If your own setting is higher (max, say), they're offered levels up to yours, so a session you set to max can stay there.
 - **Your answers count too.** Answers to Claude's multiple-choice questions on the main thread are a human turn as well. They're assessed before they go back to Claude, by a fork that carries them. They count toward the window like a prompt.
 - **No clear task yet.** The model answers that only for opening filler: greetings, housekeeping such as "pull the latest code", or questions asked before any work. Once you've stated a real task it picks the level that task most likely needs, even while the details are open. The assessment still uses up its prompt.
 - **The latest exchange counts most.** A later clarification overrides an earlier ask, and a short reply is read against the question it answers.
 - **A prompt sent while a turn is running** isn't assessed. The next one is.
-- **Every assessment is kept.** Each one's spread, the level it was judged against and what it did go into the session's ledger. That's the data for setting the 70% bar from how often confident moves were kept or overruled.
+- **Every assessment is kept.** Each one's level, reason, the level the session was on and what it did go into the session's ledger, for calibrating the model notes.
 
 ## Sessions that started before the router
 
@@ -209,7 +215,7 @@ Claude can't set a subagent's effort itself: the Agent tool takes a model but no
 - **An agent's own `effort:` wins.** If the agent's definition sets an effort, the router leaves its requests alone and the engine applies that level. The router finds the definition by its `name:` in the project's `.claude/agents/*.md`, then your `~/.claude/agents/*.md`, and in the `agents` key of policy, project and user settings. The first definition with that name decides, as it does for the engine.
 - **Forks and failures take the parent's level.** A fork shares its parent's context, so it isn't assessed. If an assessment fails, times out or gives no level, the subagent takes its parent's level too.
 - **Turning the router off** sends subagents back to your effort setting. Turning it on brings their routed levels back.
-- **Seeing it.** The band counts the subagents routed this session. `/er status` lists the last ten, newest first, with each one's level and why.
+- **Seeing it.** The band counts the subagents routed this session. `/er status` lists the last ten, newest first, with each one's level and why. Every routed subagent is also kept in the session's ledger, with the level it would have inherited from its parent, the level it got and why.
 
 Set `routeSubagents` to `false` to leave subagents at the session's level.
 
@@ -217,7 +223,7 @@ Set `routeSubagents` to `false` to leave subagents at the session's level.
 
 The router supports Fable 5.1, Opus 5.5 and Sonnet 5.5. Level names don't mean the same amount of thinking on each, and each responds to effort differently. In Claude Code, Opus 5.5 and Sonnet 5.5 default to medium and Fable 5.1 to high. Opus 5.5 gains most from low to medium and little above high, while Sonnet 5.5 gains a lot at every step. Routing one like another would be a mistake.
 
-Each has a notes file in [`rules/models/`](rules/models/) on what each level can do there: what it's good for, what it misses and its measured gains and costs. Every assessment carries the notes for the model it's about, after the routing rules, as the main guide to the level. `/er rules` prints them. The evidence behind each note, with sources, is in [`rules/models/research-2026-10.md`](rules/models/research-2026-10.md).
+Each has a notes file in [`rules/models/`](rules/models/) on how its levels behave, in the same shape for every model: one table of three coding benchmarks with the same columns at every level (CursorBench 4.0 with cost per task, Terminal-Bench 4.0 with cost and time per task, and FrontierCode, which marks down changes nobody asked for), then the behaviours Anthropic reports that change which level to pick. Every assessment carries the notes for the model it's about, after the routing rules. Lines about max are left out unless max is on offer. `/er rules` prints them. The evidence behind each line, with sources, is in [`rules/models/research-2026-10.md`](rules/models/research-2026-10.md) and its [addendum](rules/models/research-2026-10-addendum.md). The router's own eval runs are not in the notes: they are too few, on too small a codebase.
 
 The notes guide the level instead of fixed rules because of an eval on 4 October 2026. With rules that tied kinds of task to levels, all three models gave almost the same answers and ignored their notes. Without those rules, each model's answers moved the way its evidence predicts (`TESTING.md`, "Prompt variants").
 
@@ -252,7 +258,6 @@ Set them in `/plugin configure`, or under `pluginConfigs["effort-router@tommy5do
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `promptsToAssess` | 5 | How many of a session's first prompts are assessed before the level locks |
-| `confidence` | 0.7 | How sure (0 to 1) an assessment must be that the level running is wrong before it moves |
 | `highestLevel` | `xhigh` | The highest level the router picks, unless your own setting is higher. `max` allows max |
 | `routeSubagents` | true | Give each subagent its own level. `false`: subagents run at the session's level |
 | `rules` | empty | Your routing rules in plain words (see below). A rules file takes precedence |
@@ -265,7 +270,6 @@ The shipped rules ([`rules/default.md`](rules/default.md)) are principles, not a
 
 - Effort buys verification, edge-case testing and independent judgement, not a better approach.
 - Weigh how much is hidden (edge cases, existing code, money, several external systems, concurrency, security), whether you're in the loop, how well specified the task is, and how big it is.
-- Pick the level that does the work well on this model without paying for thinking it won't use.
 
 You can add to them or replace them. Rules are plain markdown, layered from the bottom up:
 
@@ -282,7 +286,7 @@ $defaults
 - This is a payments codebase. Never pick below high: money movement needs verification.
 ```
 
-The files are re-read on every assessment, so edits apply without a reload. Missing, empty or unreadable files change nothing, and HTML comments are ignored. The frame around the rules (when to answer "no clear task", worked examples, reply in JSON) is fixed, so no rules file can break the parser.
+The files are re-read on every assessment, so edits apply without a reload. Missing, empty or unreadable files change nothing, and HTML comments are ignored. The frame around the rules (the levels on offer, what to optimise, when to answer "no clear task" and the JSON reply) is fixed, so no rules file can break the parser.
 
 ## For organisations
 
@@ -343,7 +347,6 @@ and a general-purpose subagent was `agent:builtin:general-purpose`. Check the va
 - **The first assessment can't share the prompt cache.** The engine offers no way to fork before the first response, and a separate call can't carry Claude Code's system prompt or tools. It pays for your instructions and the prompt once per session.
 - **A fork thinks at the session's effort.** The router can't change that. On Fable 5.1 at xhigh a fork took 7 and 15 seconds in testing, against about 2 on Opus 5.5 at medium, so a prompt can wait that long. Past 30 seconds the prompt runs at the level it had and the tokens are still spent.
 - **On Bedrock, Google Cloud or an LLM gateway** Claude Code clears the cached conversation when effort changes (Anthropic's docs). Expect one uncached request after each move there. With an API key or a subscription the cache is kept.
-- **The 70% bar is a starting guess**, not calibrated yet. The ledger keeps every assessment for that.
 - **Once locked, the router doesn't notice a change of phase on its own** (for example "now verify it" after an implementation). Press Assess, or Unlock before steering somewhere new.
 - **A picker level that's a number** rather than a named level can't be compared, so a first assessment waits for a request that shows a named level.
 - **Effort only.** The router never changes the model.
@@ -364,7 +367,7 @@ claude plugin validate . --strict
 bun run eval                        # opt-in: the real model over eval/fixtures.ts (see below)
 ```
 
-`bun run eval` sends each fixture to the real model through `claude -p --safe-mode` (no plugins, hooks or tools), with the system prompt and input the router builds from `rules/default.md`. It covers the first assessment on the session's model (`--model`, default opus) with that model's notes, and a subagent's assessment from its brief. It can't reproduce forks. It parses each reply with the router's own parser and prints each verdict, the pass rate and every miss. `--runs 3` repeats each fixture (the model isn't deterministic), `--setting` sets the level a spread is judged against, `--confidence` the bar, `--set session` or `--set subagent` one set and `--only <text>` filters fixtures by name. It uses your Claude Code login, and each fixture costs one small model call.
+`bun run eval` sends each fixture to the real model through `claude -p --safe-mode` (no plugins, hooks or tools), with the system prompt and input the router builds from `rules/default.md`. It covers the first assessment on the session's model (`--model`, default opus) with that model's notes, and a subagent's assessment from its brief. It can't reproduce forks. It parses each reply with the router's own parser and prints each verdict, the pass rate and every miss. `--runs 3` repeats each fixture (the model isn't deterministic), `--setting` sets the level the check is told the session is on, `--set session` or `--set subagent` one set and `--only <text>` filters fixtures by name. It uses your Claude Code login, and each fixture costs one small model call.
 
 [TESTING.md](TESTING.md) lists what has been verified live. [CHANGELOG.md](../CHANGELOG.md) lists the versions.
 

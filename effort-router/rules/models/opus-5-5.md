@@ -1,12 +1,25 @@
 <!--
-What each effort level can do on Claude Opus 5.5. The router sends these notes with every check while the session (or
-a subagent) runs on this model; they are the main guide to the level. Evidence for each line, with sources and
-quotes, is in research-2026-10.md (Opus 5.5 sections). Add only what evidence supports.
+What each effort level does on Claude Opus 5.5. The router sends these notes with every check while the session (or a
+subagent) runs on this model. Every model's notes have the same shape: one table of coding benchmarks with the same
+columns at every level, then the behaviours Anthropic reports that change which level to pick. A line that starts with
+a level the check can't pick (max, unless offered) is left out of the prompt. Evidence for each number and line, with
+sources and quotes, is in research-2026-10.md and research-2026-10-addendum.md. Add only what published evidence
+supports: the plugin's own eval runs are too small and too artificial to go in here.
 -->
-Claude Code's default here is medium. Most of what this model gains from effort comes between low and medium. Above medium the gains are small and the cost climbs.
+Three coding benchmarks, measured at every level. CursorBench 4.0 (run by Cursor): ambiguous multi-file tasks taken from real Cursor sessions. Terminal-Bench 4.0 (run by Artificial Analysis): agentic tasks in a terminal, with time per task. FrontierCode (run by Cognition): graded for a clean, mergeable diff, so changes nobody asked for count against it. These are hard tasks, chosen because the levels score differently on them. On everyday work the gaps are smaller: Anthropic reports nearly flat curves on research and knowledge work, and the levels behave more alike when a task is tightly specified.
 
-- low: quick exchanges and mechanical work, such as renames or applying a known pattern across files. It keeps its thinking short and makes fewer, shorter tool calls. On several coding evaluations it comes close to Claude Opus 5 at high at much lower cost. It fails on edge-case-heavy work: it edits before reproducing the problem and stops early (0 of 5 on a storage-engine task where xhigh passed 4).
-- medium: day-to-day engineering with a clear scope, such as a new feature. It matches or beats Claude Opus 5 at high on coding and knowledge work. It scores best of all levels on coding graded for a clean, mergeable diff, because above medium it makes more changes nobody asked for.
-- high: work where verification matters or edge cases are likely, such as fixing a bug in existing code, debugging, tests and review. It tests more edge cases and checks more of its own work. On SWE-bench Pro it scored about 2.5 points above medium for about 40% more cost. On CursorBench it scored the same as xhigh.
-- xhigh: hard, edge-case-heavy problems (storage engines, concurrency, security) and long work done alone. On SWE-bench Pro it scored about 1.4 points above high for 2.5 times the cost. It thinks noticeably more per turn than Claude Opus 5 did at the same level.
-- max: matched by xhigh on knowledge work with about half the output tokens. Prone to overthinking.
+| level | CursorBench | cost per task | Terminal-Bench | cost per task | time per task | FrontierCode |
+|---|---|---|---|---|---|---|
+| low | 44% | $1.17 | 31% | $2.08 | 5.3 min | 47% |
+| medium | 53% | $2.91 | 53% | $4.04 | 10.8 min | 55% |
+| high | 56% | $3.97 | 57% | $5.12 | 13.7 min | 54% |
+| xhigh | 56% | $6.98 | 60% | $8.78 | 22.1 min | 51% |
+| max | 58% | $13.43 | 60% | $13.11 | 28.4 min | 54% |
+
+Other findings:
+- Anthropic's advice: start at medium, and keep xhigh for work where a gain has been measured.
+- On SWE-bench Pro (fixes in real repositories) it solved 87.4% at low for $0.12 per solved task, 92.8% at medium for $0.22 and about 95% at high for $0.29. xhigh added about 1.4 points over high for 2.5 times the cost.
+- low: on edge-case-heavy work it edits before reproducing the problem and stops early (0 of 5 on a storage-engine task where xhigh passed 4).
+- medium: its best FrontierCode score. Above medium it makes more changes nobody asked for.
+- xhigh: no better than high on CursorBench and below it on FrontierCode, for about 1.7 times the cost.
+- max: prone to overthinking.

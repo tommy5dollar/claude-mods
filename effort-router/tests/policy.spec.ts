@@ -13,13 +13,10 @@ import {
   bandActions,
   bandHeadline,
   capLines,
-  certaintyOf,
   clampLevel,
   classifierPrompt,
   classifierSystem,
   composeRules,
-  confidenceNow,
-  confidenceOf,
   dayOf,
   definitionEffort,
   definitionFor,
@@ -30,8 +27,6 @@ import {
   freshState,
   frontmatterOf,
   humanPromptCount,
-  isConfident,
-  judgeSpread,
   lastAssessmentLine,
   levelsUpTo,
   lockedByYou,
@@ -42,6 +37,7 @@ import {
   parentLevel,
   parseDecision,
   parseLedger,
+  withSubagentRow,
   parseRoute,
   parseSubagentReply,
   progressGlyph,
@@ -56,8 +52,6 @@ import {
   settingsRulesOf,
   settle,
   spendReport,
-  spreadOf,
-  spreadText,
   subagentForkPrompt,
   subagentLine,
   subagentPrompt,
@@ -81,6 +75,8 @@ import {
   capBrief,
   SUBAGENT_CONTRACT,
   SUBAGENT_FRAME,
+  QUESTION,
+  notesFor,
   type RouterState,
   type SpendLedger,
   type TranscriptMessage,
@@ -216,6 +212,9 @@ describe('AskUserQuestion in the transcript', () => {
 describe('parseDecision', () => {
   const cases: [string | undefined, ReturnType<typeof parseDecision>][] = [
     ['{"decision":"undecided"}', { decision: 'undecided' }],
+    // 0.18's reply format: undecided is a value of level.
+    ['{"level":"undecided","reason":"greeting","why":"No task yet."}', { decision: 'undecided' }],
+    ['{"level":"low","reason":"typo fix","why":"Mechanical."}', { decision: 'lock', level: 'low', reason: 'typo fix', why: 'Mechanical.' }],
     ['{"decision":"lock","level":"high","reason":"bug fix in existing code"}', { decision: 'lock', level: 'high', reason: 'bug fix in existing code' }],
     ['Sure! ```json\n{"decision":"lock","level":"MAX","reason":"autonomous build"}\n```', { decision: 'lock', level: 'max', reason: 'autonomous build' }],
     ['{"decision":"lock","level":"ultra","reason":"x"}', { decision: 'undecided' }],
@@ -276,33 +275,29 @@ describe('composeRules ($defaults layering)', () => {
   test('the system prompt wraps the rules between the fixed frame and contract', () => {
     const system = classifierSystem('MY RULES')
     expect(system).toContain('<rules>\nMY RULES\n</rules>')
-    expect(system).toContain('{"decision":"undecided"}')
+    expect(system).toContain('"level":"<undecided|low|medium|high|xhigh>"')
   })
 })
 
 describe('the classifier prompt', () => {
-  test('recency rules live in the fixed frame', () => {
+  test('undecided only before any task; an underspecified task still gets a level; no worked examples', () => {
     const system = classifierSystem('RULES')
-    expect(system).toContain('Weigh the latest exchange most')
-    expect(system).toContain('A later clarification of scope overrides an earlier ask')
-    expect(system).toContain('replied "2"')
-  })
-
-  test('undecided only before any task; an underspecified task still gets a level; worked examples', () => {
-    const system = classifierSystem('RULES')
-    expect(system).toContain('Answer undecided ONLY when no actionable task has been stated yet')
-    expect(system).toContain('suggest the best level for it NOW, even if the details are still unclear')
+    expect(system).toContain('If no task has been stated yet')
+    expect(system).toContain('pick a level for it even if details are still unclear')
     expect(system).not.toContain('When unsure, answer undecided')
-    expect(system).toContain('implement for me a new finance solution pulling from multiple accountancy platforms → a level for the finance build.')
-    expect(system).toContain('USER: pull the latest code → {"decision":"undecided"}')
-    expect(system).toContain('2, keep it simple → a level for extracting one constant.')
-    expect(system).toContain('USER answered:')
-    expect((system.match(/^\d+\. USER:/gm) ?? []).length).toBeGreaterThanOrEqual(6)
-    // 0.11: no example or rule names the level a kind of task gets; the model notes say what each level can do
+    // 0.18: no worked examples. The checks run on Opus 5.5 and Fable 5.1, which read a conversation unaided.
+    expect(system).not.toMatch(/^\d+\. USER:/m)
+    // 0.11: nothing names the level a kind of task gets; the model notes say what each level can do
     expect(system).not.toMatch(/"level":"(low|medium|high|xhigh|max)"/)
-    expect(classifierPrompt('USER: hi')).toContain('answer undecided only if no actionable task has been stated yet')
+    expect(classifierPrompt('USER: hi')).toEndWith(QUESTION)
   })
 
+  test('people use the router to spend less, and their own words about effort win', () => {
+    const system = classifierSystem('RULES')
+    expect(system).toContain('People turn this router on to spend less, so when two levels would both get the work done, pick the cheaper one')
+    expect(system).toContain('If the user says how hard to think or how quickly to go')
+    expect(SUBAGENT_FRAME).toContain('If the brief says how hard to think, follow it.')
+  })
   test('a manual hint is passed and weighted', () => {
     const prompt = classifierPrompt('USER: hi', 'this is a security review')
     expect(prompt).toContain('<user_hint>\nthis is a security review\n</user_hint>')
@@ -311,47 +306,28 @@ describe('the classifier prompt', () => {
   })
 })
 
-describe('spreads and replies', () => {
-  test('a spread: the median level, and how sure the check is that the level in force is wrong in that direction', () => {
-    // Torn between high and xhigh on medium: 90% sure medium is too low, so high.
-    const torn = spreadOf({ low: 0.02, medium: 0.08, high: 0.5, xhigh: 0.4 }) as NonNullable<ReturnType<typeof spreadOf>>
-    expect(judgeSpread(torn, 'medium')).toEqual({ level: 'high', confidence: 0.9, against: 'medium' })
-    // Leaning further up: xhigh.
-    expect(judgeSpread({ medium: 0.1, high: 0.3, xhigh: 0.6 }, 'medium')).toEqual({ level: 'xhigh', confidence: 0.9, against: 'medium' })
-    // Mostly right where it is: stay, sure as far as neither side is likely.
-    expect(judgeSpread({ low: 0.15, medium: 0.7, high: 0.15 }, 'medium')).toEqual({ level: 'medium', confidence: 0.85, against: 'medium' })
-    // Down from a kept xhigh.
-    expect(judgeSpread({ low: 0.3, medium: 0.5, high: 0.2 }, 'xhigh')).toEqual({ level: 'medium', confidence: 1, against: 'xhigh' })
-    // Mass on max folds into the highest level offered.
-    expect(judgeSpread({ high: 0.3, max: 0.7 }, 'medium')).toEqual({ level: 'xhigh', confidence: 1, against: 'medium' })
-    // No level in force known: the median and its own probability.
-    expect(judgeSpread(torn, undefined)).toEqual({ level: 'high', confidence: 0.5 })
-    // Seen live on the Mac (2026-10-05): the same spread is a sure move from low and below the bar from medium,
-    // so a check must say which level it was judged against.
-    const mac = { low: 0.03, medium: 0.37, high: 0.45, xhigh: 0.15 }
-    expect(judgeSpread(mac, 'low')).toEqual({ level: 'high', confidence: 0.97, against: 'low' })
-    expect(judgeSpread(mac, 'medium')).toEqual({ level: 'high', confidence: 0.6, against: 'medium' })
-    // Percentages and odd keys normalise; nothing usable is undefined.
-    expect(spreadOf({ High: 60, medium: 40, bogus: 5 })).toEqual({ high: 0.6, medium: 0.4 })
-    expect(spreadOf({ high: 0 })).toBeUndefined()
-    expect(spreadOf('high')).toBeUndefined()
-    expect(spreadText(torn)).toBe('low 2%, medium 8%, high 50%, xhigh 40%')
-
-    const parsed = parseDecision('{"decision":"level","levels":{"medium":0.1,"high":0.5,"xhigh":0.4},"reason":"race condition fix"}')
-    expect(parsed).toMatchObject({ decision: 'lock', level: 'high', reason: 'race condition fix', spread: { medium: 0.1, high: 0.5, xhigh: 0.4 } })
-    expect(parsed.decision === 'lock' ? parsed.confidence : 'n/a').toBeUndefined() // judged later, against the level in force
+describe('replies', () => {
+  test('a check names one level: the one that gets the work done in the least time and total cost', () => {
+    expect(classifierSystem('RULES')).toContain('least time and total inference cost')
+    expect(classifierSystem('RULES')).toContain('"level":"<undecided|low|medium|high|xhigh>"')
+    expect(classifierSystem('RULES')).not.toContain('probability')
+    expect(parseDecision('{"decision":"level","level":"high","reason":"race condition fix"}')).toEqual({ decision: 'lock', level: 'high', reason: 'race condition fix' })
+    // A level with no decision field is still a level.
+    expect(parseDecision('{"level":"Medium","reason":"spec feature"}')).toEqual({ decision: 'lock', level: 'medium', reason: 'spec feature' })
+    // A spread or a confidence from an older prompt is ignored: only the level counts.
+    expect(parseDecision('{"decision":"level","level":"low","confidence":0.4,"levels":{"low":0.4,"medium":0.6},"reason":"rename"}')).toEqual({ decision: 'lock', level: 'low', reason: 'rename' })
   })
 
   test('a reply that stops before its last brace, or runs on after the object, still parses', () => {
     // Seen from Fable 5.1 in the eval: the reply ends after the why, with no closing brace.
-    expect(parseDecision('{"decision":"level","levels":{"medium":0.35,"high":0.5,"xhigh":0.15},"reason":"edge-case tests","why":"hidden cases {DST}"\n')).toMatchObject({ level: 'high' })
+    expect(parseDecision('{"decision":"level","level":"high","reason":"edge-case tests","why":"hidden cases {DST}"\n')).toMatchObject({ level: 'high' })
     expect(parseDecision('{"decision":"level","level":"low","reason":"typo"} and {"note":"extra"}')).toMatchObject({ level: 'low' })
     expect(parseDecision('{"decision":"level","level":"low","reason":"cut off mid-str')).toEqual({ decision: 'undecided' })
   })
 
   test('a check can say why, in a sentence or two, and the reply keeps it', () => {
-    expect(parseDecision('{"decision":"level","level":"high","confidence":0.8,"reason":"bug fix","why":"Tracing  the crash\\nneeds care."}')).toEqual({
-      decision: 'lock', level: 'high', reason: 'bug fix', why: 'Tracing the crash needs care.', confidence: 0.8,
+    expect(parseDecision('{"decision":"level","level":"high","reason":"bug fix","why":"Tracing  the crash\\nneeds care."}')).toEqual({
+      decision: 'lock', level: 'high', reason: 'bug fix', why: 'Tracing the crash needs care.',
     })
     expect(classifierSystem('RULES')).toContain('"why":"<one or two sentences')
   })
@@ -386,7 +362,6 @@ describe('subagent reads', () => {
     expect(system).toEndWith(SUBAGENT_CONTRACT)
     expect(SUBAGENT_CONTRACT).not.toContain('undecided')
     expect(SUBAGENT_FRAME).toContain('No user is in the loop')
-    expect(SUBAGENT_FRAME).toContain('There is no undecided')
   })
 
   test('the user prompt: type, description and the brief', () => {
@@ -409,7 +384,7 @@ describe('subagent reads', () => {
 
   test('the subagent read knows the model the subagent runs on, and a fork of the parent is asked with the brief', () => {
     const notes = { name: 'Sonnet 5.5', notes: '- low: chat and lookups.' }
-    expect(subagentSystem('RULES', notes)).toContain('The subagent runs on Sonnet 5.5. What each level can do on this model (the main guide to the level):\n<model_notes>\n- low: chat and lookups.\n</model_notes>')
+    expect(subagentSystem('RULES', notes)).toContain('The subagent runs on Sonnet 5.5. Level names buy different amounts of thinking on different models. On this one:\n<model_notes>\n- low: chat and lookups.\n</model_notes>')
     const fork = subagentForkPrompt({ rules: 'RULES', brief: BRIEF, runsOn: 'Sonnet 5.5', model: notes })
     expect(fork).toStartWith('Pause the task for a moment. Do not use any tools and do not start the subagent yourself')
     expect(fork).toContain('You are about to start a Explore subagent on Sonnet 5.5 ("Find webhook handlers") with the brief below. You know the task and why you are delegating this part of it: use that.')
@@ -431,7 +406,7 @@ describe('subagent reads', () => {
     // Sonnet 5.5 live, 2026-10-04: the level named as the decision.
     expect(parseSubagentReply('{"decision":"medium","reason":"thorough read-only codebase search for call sites"}')).toEqual({ level: 'medium', reason: 'thorough read-only codebase search for call sites' })
     expect(parseSubagentReply('{"decision":"level","level":"low"}')).toEqual({ level: 'low', reason: 'classifier' })
-    expect(parseDecision('{"decision":"High","confidence":0.8,"reason":"bug fix"}')).toEqual({ decision: 'lock', level: 'high', reason: 'bug fix', confidence: 0.8 })
+    expect(parseDecision('{"decision":"High","reason":"bug fix"}')).toEqual({ decision: 'lock', level: 'high', reason: 'bug fix' })
     expect(parseSubagentReply('{"decision":"undecided"}')).toBeUndefined()
     expect(parseSubagentReply('{"decision":"undecided","level":"low"}')).toBeUndefined()
     expect(parseSubagentReply('{"level":"extreme","reason":"x"}')).toBeUndefined()
@@ -617,22 +592,11 @@ describe('the spend ledger', () => {
   })
 })
 
-describe('0.10: confidence, models, size, verdicts', () => {
-  test('a reply carries its confidence; "level", "lock" and "suggest" all read as a level', () => {
-    expect(parseDecision('{"decision":"level","level":"high","confidence":0.72,"reason":"bug fix"}')).toEqual({ decision: 'lock', level: 'high', reason: 'bug fix', confidence: 0.72 })
-    expect(parseDecision('{"decision":"lock","level":"low","confidence":"85%","reason":"rename"}')).toEqual({ decision: 'lock', level: 'low', reason: 'rename', confidence: 0.85 })
+describe('0.10: models, size, verdicts', () => {
+  test('"level", "lock" and "suggest" all read as a level', () => {
+    expect(parseDecision('{"decision":"level","level":"high","reason":"bug fix"}')).toEqual({ decision: 'lock', level: 'high', reason: 'bug fix' })
+    expect(parseDecision('{"decision":"lock","level":"low","reason":"rename"}')).toEqual({ decision: 'lock', level: 'low', reason: 'rename' })
     expect(parseDecision('{"decision":"suggest","level":"low","reason":"rename"}')).toEqual({ decision: 'lock', level: 'low', reason: 'rename' })
-  })
-
-  test('confidence values: 0 to 1, percentages, nonsense', () => {
-    expect([0, 0.5, 1, 80, '0.9', '70%', -1, 150, 'sure', undefined].map(confidenceOf)).toEqual([0, 0.5, 1, 0.8, 0.9, 0.7, undefined, undefined, undefined, undefined])
-  })
-
-  test('the bar: a level with no confidence never clears it, unless the bar is 0', () => {
-    expect(isConfident({ level: 'high', reason: 'x', confidence: 0.8 }, 0.8)).toBe(true)
-    expect(isConfident({ level: 'high', reason: 'x', confidence: 0.79 }, 0.8)).toBe(false)
-    expect(isConfident({ level: 'high', reason: 'x' }, 0.8)).toBe(false)
-    expect(isConfident({ level: 'high', reason: 'x' }, 0)).toBe(true)
   })
 
   test('supported models: ids, aliases, context-window suffixes and cloud ids; others are named', () => {
@@ -674,10 +638,19 @@ describe('0.10: confidence, models, size, verdicts', () => {
     expect(clampLevel('low', ['medium', 'high', 'xhigh'])).toBe('medium')
     expect(clampLevel('medium', ['low', 'medium', 'high'])).toBe('medium')
     expect(classifierSystem('RULES')).toContain('Levels you may pick, lowest to highest: low, medium, high, xhigh.')
-    expect(classifierSystem('RULES')).toContain('"levels":{"low":<0 to 1>,"medium":<0 to 1>,"high":<0 to 1>,"xhigh":<0 to 1>}')
-    expect(classifierSystem('RULES', undefined, ['low', 'medium', 'high'])).toContain('"levels":{"low":<0 to 1>,"medium":<0 to 1>,"high":<0 to 1>}')
+    expect(classifierSystem('RULES')).toContain('"level":"<undecided|low|medium|high|xhigh>"')
+    expect(classifierSystem('RULES', undefined, ['low', 'medium', 'high'])).toContain('"level":"<undecided|low|medium|high>"')
     expect(subagentSystem('RULES', undefined, ['low', 'medium', 'high'])).toContain('Levels you may pick, lowest to highest: low, medium, high.')
     expect(subagentSystem('RULES')).toContain('"level":"<low|medium|high|xhigh>"')
+  })
+
+  test('model notes leave out the lines about a level the check cannot pick', () => {
+    const notes = '| level | score |\n|---|---|\n| high | 2 |\n| xhigh | 3 |\n| max | 4 |\n\n- xhigh: thorough.\n- max: prone to overthinking.\n- Effort pays from low to max on edge cases.'
+    expect(notesFor(notes, levelsUpTo())).toBe('| level | score |\n|---|---|\n| high | 2 |\n| xhigh | 3 |\n\n- xhigh: thorough.\n- Effort pays from low to max on edge cases.')
+    expect(notesFor(notes, levelsUpTo('max'))).toBe(notes)
+    expect(notesFor(notes, levelsUpTo('high'))).not.toContain('xhigh')
+    expect(classifierSystem('RULES', { name: 'Opus 5.5', notes })).not.toContain('overthinking')
+    expect(classifierSystem('RULES', { name: 'Opus 5.5', notes }, levelsUpTo('max'))).toContain('overthinking')
   })
 
   test('the separate check carries the instructions first when given', () => {
@@ -692,9 +665,10 @@ describe('0.10: confidence, models, size, verdicts', () => {
     ledger = withRead(ledger, '2026-10-04', usage, 'fork')
     ledger = withRead(ledger, '2026-10-04', usage, 'fork')
     ledger = withRead(ledger, '2026-10-04', usage, 'subagent')
-    ledger = withVerdictRow(ledger, { at: 1, kind: 'first', model: 'claude-opus-5-5', prompt: 1, level: 'high', confidence: 0.6, outcome: 'below the bar', withInstructions: true })
-    ledger = withVerdictRow(ledger, { at: 2, kind: 'fork', model: 'claude-opus-5-5', prompt: 2, level: 'high', confidence: 0.9, outcome: 'waiting' })
-    ledger = withVerdictRow(ledger, { at: 3, kind: 'fork', model: 'claude-opus-5-5', prompt: 2, level: 'medium', confidence: 0.9, outcome: 'manual' })
+    // Rows from before 0.18 carry a confidence and a spread; they still read back.
+    ledger = withVerdictRow(ledger, { at: 1, kind: 'first', model: 'claude-opus-5-5', prompt: 1, level: 'high', confidence: 0.6, spread: { medium: 0.4, high: 0.6 }, outcome: 'below the bar', withInstructions: true })
+    ledger = withVerdictRow(ledger, { at: 2, kind: 'fork', model: 'claude-opus-5-5', prompt: 2, level: 'high', against: 'medium', outcome: 'waiting' })
+    ledger = withVerdictRow(ledger, { at: 3, kind: 'fork', model: 'claude-opus-5-5', prompt: 2, level: 'medium', outcome: 'manual' })
     ledger = withVerdictOutcome(ledger, 'asked: use', 2) // a manual check came in while the question was open
     expect(ledger.reads.map(r => `${r.kind} ${r.calls}`)).toEqual(['first 1', 'fork 2', 'subagent 1'])
     expect(ledger.verdicts?.map(v => v.outcome)).toEqual(['below the bar', 'asked: use', 'manual'])
@@ -708,41 +682,50 @@ describe('0.10: confidence, models, size, verdicts', () => {
   })
 })
 
-const VIEW: View = { setting: 'medium', limit: 5, threshold: 0.7, offered: levelsUpTo() }
+const VIEW: View = { setting: 'medium', limit: 5, offered: levelsUpTo() }
 const at = (state: Partial<RouterState>): RouterState => ({ ...freshState(), ...state })
 
-describe('0.17: assess the first prompts, move when sure, then lock', () => {
-  const sure = (level: 'low' | 'medium' | 'high' | 'xhigh', confidence: number) => ({ level, reason: 'bug fix', confidence, against: 'medium' as const })
+describe('0.18: assess the first prompts, go where the check says, then lock', () => {
+  const pick = (level: 'low' | 'medium' | 'high' | 'xhigh') => ({ level, reason: 'bug fix', against: 'medium' as const })
 
-  test('a sure assessment moves to the median and stays unlocked; an unsure one stays', () => {
-    const moved = settle(freshState(), sure('high', 0.9), { threshold: 0.7, limit: 5, running: 'medium', counted: true })
+  test('an assessment moves to the level it picked and stays unlocked; picking the level running stays', () => {
+    const moved = settle(freshState(), pick('high'), { limit: 5, running: 'medium', counted: true })
     expect(moved.state).toMatchObject({ status: 'unlocked', level: 'high', lastLevel: 'high', assessed: 1 })
     expect(moved.moved).toEqual({ from: 'medium', to: 'high' })
     expect(moved.outcome).toBe('moved to high')
     expect(moved.locked).toBeUndefined() // a move never locks
-    const stayed = settle(freshState(), sure('high', 0.6), { threshold: 0.7, limit: 5, running: 'medium', counted: true })
+    // Two levels in one go, with no bar to clear: the check weighed it.
+    expect(settle(freshState(), pick('low'), { limit: 5, running: 'xhigh', counted: true }).moved).toEqual({ from: 'xhigh', to: 'low' })
+    const stayed = settle(freshState(), pick('medium'), { limit: 5, running: 'medium', counted: true })
     expect(stayed.state).toMatchObject({ status: 'unlocked', assessed: 1 })
     expect(stayed.state.level).toBeUndefined()
     expect(stayed.outcome).toBe('stayed')
-    expect(settle(freshState(), undefined, { threshold: 0.7, limit: 5, running: 'medium', counted: true }).outcome).toBe('no clear task')
+    expect(settle(freshState(), undefined, { limit: 5, running: 'medium', counted: true }).outcome).toBe('no clear task')
+  })
+
+  test('the same pick lands on the same level from any setting', () => {
+    for (const running of ['low', 'medium', 'high', 'xhigh'] as const) {
+      const settled = settle(freshState(), pick('medium'), { limit: 5, running, counted: true })
+      expect(settled.state.level ?? running).toBe('medium')
+    }
   })
 
   test('the last prompt of the window locks whatever is running; a move on it moves first', () => {
-    const last = settle(at({ assessed: 4, level: 'high' }), sure('high', 0.5), { threshold: 0.7, limit: 5, running: 'high', counted: true })
+    const last = settle(at({ assessed: 4, level: 'high' }), pick('high'), { limit: 5, running: 'high', counted: true })
     expect(last.state).toMatchObject({ status: 'locked', level: 'high', lockedBy: 'router', lockedAfter: 5 })
     expect(last.locked).toBe('high')
-    const moveThenLock = settle(at({ assessed: 4 }), sure('xhigh', 0.95), { threshold: 0.7, limit: 5, running: 'medium', counted: true })
+    const moveThenLock = settle(at({ assessed: 4 }), pick('xhigh'), { limit: 5, running: 'medium', counted: true })
     expect(moveThenLock.moved).toEqual({ from: 'medium', to: 'xhigh' })
     expect(moveThenLock.locked).toBe('xhigh')
     // Your setting runs: the lock takes it.
-    expect(settle(at({ assessed: 4 }), undefined, { threshold: 0.7, limit: 5, running: 'medium', counted: true }).state).toMatchObject({ status: 'locked', level: 'medium' })
+    expect(settle(at({ assessed: 4 }), undefined, { limit: 5, running: 'medium', counted: true }).state).toMatchObject({ status: 'locked', level: 'medium' })
     // No level known yet: nothing to lock until a request shows it.
-    expect(settle(at({ assessed: 4 }), undefined, { threshold: 0.7, limit: 5, counted: true }).state.status).toBe('unlocked')
+    expect(settle(at({ assessed: 4 }), undefined, { limit: 5, counted: true }).state.status).toBe('unlocked')
   })
 
   test('a manual assessment while locked moves the locked level and stays locked, without counting', () => {
     const locked = at({ status: 'locked', level: 'medium', assessed: 5, lockedBy: 'router' })
-    const done = settle(locked, sure('high', 0.9), { threshold: 0.7, limit: 5, running: 'medium', counted: false })
+    const done = settle(locked, pick('high'), { limit: 5, running: 'medium', counted: false })
     expect(done.state).toMatchObject({ status: 'locked', level: 'high', assessed: 5 })
     expect(done.moved).toEqual({ from: 'medium', to: 'high' })
     expect(done.locked).toBeUndefined()
@@ -781,24 +764,10 @@ describe('0.17: assess the first prompts, move when sure, then lock', () => {
     expect(offeredLevels('xhigh')).toEqual(['low', 'medium', 'high', 'xhigh'])
     expect(offeredLevels('xhigh', 'max')).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
     expect(offeredLevels('high', 'medium')).toEqual(['low', 'medium', 'high'])
-    // Offered max, a spread leaning to max keeps max instead of always reading as too high.
-    expect(judgeSpread({ high: 0.1, xhigh: 0.9 }, 'max', offeredLevels('xhigh', 'max'))).toEqual({ level: 'xhigh', confidence: 1, against: 'max' })
-    expect(judgeSpread({ high: 0.05, xhigh: 0.15, max: 0.8 }, 'max', offeredLevels('xhigh', 'max'))).toMatchObject({ level: 'max', against: 'max' })
-  })
-
-  test('confidence now: one minus the larger side, against the level running', () => {
-    const spread = { low: 0.05, medium: 0.55, high: 0.35, xhigh: 0.05 }
-    expect(certaintyOf(spread, 'medium')).toBe(0.6)
-    expect(certaintyOf(spread, 'high')).toBe(0.4)
-    expect(confidenceNow(freshState(), { ...VIEW, last: { at: 1, spread, level: 'medium', against: 'medium', outcome: 'stayed' } })).toBe(0.6)
-    expect(confidenceNow(freshState(), VIEW)).toBeUndefined()
   })
 })
 
 describe('0.17: the footer', () => {
-  const spread = { low: 0.05, medium: 0.55, high: 0.35, xhigh: 0.05 }
-  const last = { at: 1, spread, level: 'medium' as const, against: 'medium' as const, outcome: 'stayed' }
-
   test('the status glyph, the level running, and the window as a circle that never fills', () => {
     expect(footerLabel(freshState(), VIEW)).toEqual({ text: '🔓 MEDIUM ○', dim: false })
     expect(footerLabel(at({ assessed: 1 }), VIEW).text).toBe('🔓 MEDIUM ◔')
@@ -812,24 +781,16 @@ describe('0.17: the footer', () => {
     expect([0, 1, 2, 3, 4].map(n => progressGlyph(n, 5))).toEqual(['○', '◔', '◑', '◑', '◕'])
     expect(GLYPH).toEqual({ unlocked: '🔓', locked: '🔒', off: '⏸️' })
   })
-
-  test('the word is dim while the last assessment is less than 50% sure of the level running', () => {
-    expect(footerLabel(freshState(), { ...VIEW, last }).dim).toBe(false) // 60% sure of medium
-    expect(footerLabel(at({ level: 'high' }), { ...VIEW, last }).dim).toBe(true) // 40% sure of high
-    expect(footerLabel(at({ status: 'locked', level: 'high' }), { ...VIEW, last }).dim).toBe(false) // locked: settled
-  })
 })
 
 describe('0.17: the band', () => {
-  const stayedSpread = { low: 0.05, medium: 0.55, high: 0.35, xhigh: 0.05 }
-  const stayed = { at: 1, spread: stayedSpread, level: 'medium' as const, against: 'medium' as const, reason: 'notes summary', outcome: 'stayed' }
-  const movedSpread = { medium: 0.1, high: 0.5, xhigh: 0.4 }
-  const moved = { at: 1, spread: movedSpread, level: 'high' as const, against: 'medium' as const, reason: 'bug fix touching three services', why: 'A crash fix needs the code traced.', outcome: 'moved to high' }
+  const stayed = { at: 1, level: 'medium' as const, against: 'medium' as const, reason: 'notes summary', outcome: 'stayed' }
+  const moved = { at: 1, level: 'high' as const, against: 'medium' as const, reason: 'bug fix touching three services', why: 'A crash fix needs the code traced.', outcome: 'moved to high' }
 
-  test('line 1 is the footer in words: status, the level and where it came from, confidence, what changes next', () => {
-    expect(bandHeadline(at({ assessed: 2 }), { ...VIEW, last: stayed })).toBe('Effort router: unlocked. Medium (your effort setting), 60% confidence. Locks after 3 more prompts.')
-    expect(bandHeadline(at({ assessed: 4, level: 'high' }), { ...VIEW, last: moved })).toBe('Effort router: unlocked. High (chosen by the router), 60% confidence. Locks after 1 more prompt.')
-    expect(bandHeadline(at({ status: 'locked', level: 'high', lockedBy: 'router', lockedAfter: 5 }), { ...VIEW, last: moved })).toBe('Effort router: locked. High (chosen by the router after 5 prompts), 60% confidence.')
+  test('line 1 is the footer in words: status, the level and where it came from, what changes next', () => {
+    expect(bandHeadline(at({ assessed: 2 }), { ...VIEW, last: stayed })).toBe('Effort router: unlocked. Medium (your effort setting). Locks after 3 more prompts.')
+    expect(bandHeadline(at({ assessed: 4, level: 'high' }), { ...VIEW, last: moved })).toBe('Effort router: unlocked. High (chosen by the router). Locks after 1 more prompt.')
+    expect(bandHeadline(at({ status: 'locked', level: 'high', lockedBy: 'router', lockedAfter: 5 }), { ...VIEW, last: moved })).toBe('Effort router: locked. High (chosen by the router after 5 prompts).')
     expect(bandHeadline(lockedByYou(at({ assessed: 2 }), 'medium'), VIEW)).toBe('Effort router: locked. Medium (locked by you after 2 prompts).')
     expect(bandHeadline(turnedOff(freshState(), 'picker'), { ...VIEW, setting: 'xhigh' })).toBe('Effort router: off. Xhigh (your effort setting). You changed the effort picker.')
     expect(bandHeadline(firstSighting(9, 5), VIEW)).toBe('Effort router: off. Medium (your effort setting). This session started before the router.')
@@ -837,17 +798,14 @@ describe('0.17: the band', () => {
     expect(bandHeadline(freshState(), { ...VIEW, setting: undefined })).toBe('Effort router: unlocked. Your effort setting applies. Locks after 5 more prompts.')
   })
 
-  test('line 2 is the last assessment: its spread, its larger side against the level it was judged against, what it did', () => {
-    expect(lastAssessmentLine(stayed, 0.7, levelsUpTo(), false)).toBe(
-      'Last assessment: low 5%, medium 55%, high 35%, xhigh 5% (notes summary). 40% sure medium is too low, so it stayed. It moves at 70%.',
-    )
-    expect(lastAssessmentLine(moved, 0.7, levelsUpTo(), false)).toBe(
-      'Last assessment: medium 10%, high 50%, xhigh 40% (bug fix touching three services). 90% sure medium was too low, so it moved to high.',
-    )
-    expect(lastAssessmentLine(moved, 0.7, levelsUpTo(), true)).toEndWith('so it moved to high. A crash fix needs the code traced.') // the why, when locked
-    expect(lastAssessmentLine({ at: 1, spread: { low: 0.8, medium: 0.2 }, level: 'low', against: 'high', outcome: 'moved to low' }, 0.7, levelsUpTo(), false)).toContain('100% sure high was too high, so it moved to low.')
-    expect(lastAssessmentLine({ at: 1, outcome: 'no clear task' }, 0.7, levelsUpTo(), false)).toBe('Last assessment: no clear task yet, so it stayed.')
-    expect(lastAssessmentLine(undefined, 0.7, levelsUpTo(), false)).toBeUndefined()
+  test('line 2 is the last assessment: its level and task, and what it did', () => {
+    expect(lastAssessmentLine(stayed, false)).toBe('Last assessment: medium (notes summary), the level it was already on.')
+    expect(lastAssessmentLine(moved, false)).toBe('Last assessment: high (bug fix touching three services), so it moved from medium.')
+    expect(lastAssessmentLine(moved, true)).toEndWith('so it moved from medium. A crash fix needs the code traced.') // the why, when locked
+    expect(lastAssessmentLine({ at: 1, level: 'low', against: 'high', outcome: 'moved to low' }, false)).toBe('Last assessment: low, so it moved from high.')
+    expect(lastAssessmentLine({ at: 1, level: 'low', against: 'high', outcome: 'failed' }, false)).toBe('Last assessment: low, but the assessment failed, so it stayed.')
+    expect(lastAssessmentLine({ at: 1, outcome: 'no clear task' }, false)).toBe('Last assessment: no clear task yet, so it stayed.')
+    expect(lastAssessmentLine(undefined, false)).toBeUndefined()
     expect(subagentLine(4)).toBe('Subagents get their own level: 4 routed this session.')
     expect(subagentLine(0)).toBeUndefined()
   })
@@ -890,22 +848,22 @@ describe('0.17: messages, /er and saved state', () => {
   })
 
   test('/er status: short blocks (where it stands, the last assessment, counts, subagents), no raw reply when it parsed', () => {
-    const last = { at: 5_000, spread: { medium: 0.6, high: 0.4 }, level: 'medium' as const, against: 'medium' as const, reason: 'small fix', why: 'One function.', outcome: 'stayed' }
+    const last = { at: 5_000, level: 'medium' as const, against: 'medium' as const, reason: 'small fix', why: 'One function.', outcome: 'stayed' }
     const report = routeReport(at({ assessed: 2, hint: 'security review' }), { ...VIEW, last }, {
       now: 10_000, calls: 2, verdict: { at: 5_000, trigger: 'after a prompt', raw: '{"decision":"level"}', kind: 'fork' }, lastReadMs: 1500,
       subagents: { routing: 'on', agents: [] },
     })
     expect(report).toBe([
-      'Unlocked. Medium (your effort setting), 60% confidence. Locks after 3 more prompts.',
+      'Unlocked. Medium (your effort setting). Locks after 3 more prompts.',
       'Assessed 2 of 5 prompts.',
       'Your hint for the next assessment: security review',
       '',
-      'Last assessment (after a prompt, a fork of the conversation, 5s ago, took 1.5s, judged against medium):',
-      'medium 60%, high 40%. 40% sure medium is too low, so it stayed. It moves at 70%.',
+      'Last assessment (after a prompt, a fork of the conversation, 5s ago, took 1.5s, the session was on medium):',
+      'Medium, the level it was already on.',
       'Task: small fix',
       'Why: One function.',
       '',
-      'Assessments this session: 2. It moves at 70%.',
+      'Assessments this session: 2.',
       '',
       'Subagents: each gets its own level from its task.',
     ].join('\n'))
@@ -933,6 +891,14 @@ describe('0.17: messages, /er and saved state', () => {
     expect(parseLedger(JSON.stringify({ ...ledger, state: { status: 'bogus' } }))?.state).toBeUndefined()
     expect(parseLedger(JSON.stringify({ ...ledger, setting: 'xhigh' }))?.setting).toBe('xhigh')
     expect(parseLedger(JSON.stringify({ ...ledger, setting: 'huge' }))?.setting).toBeUndefined()
+  })
+
+  test('routed subagents are kept in the ledger, and malformed rows dropped', () => {
+    const row = { at: 1, model: 'opus', subagentType: 'general-purpose', description: 'Find usages', parent: 'xhigh' as const, level: 'low' as const, reason: 'a search', ms: 2300 }
+    const ledger = withSubagentRow(emptyLedger('s1', 'repo'), row)
+    expect(parseLedger(JSON.stringify(ledger))?.subagents).toEqual([row])
+    expect(parseLedger(JSON.stringify({ ...ledger, subagents: [row, { ...row, level: 'huge' }, null] }))?.subagents).toEqual([row])
+    expect(parseLedger(JSON.stringify(emptyLedger('s1', 'repo')))?.subagents).toBeUndefined()
   })
 })
 

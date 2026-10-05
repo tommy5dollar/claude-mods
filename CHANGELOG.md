@@ -2,11 +2,37 @@
 
 ## effort-router
 
+### 0.18.0 (2026-10-05)
+
+- **The check names a level, and the session goes to it.** Each assessment now asks your session's model one
+  question: which level gets this session's work done in the least time and total inference cost, counting the rework
+  that too little effort causes? Before, it gave every level a probability and the router moved only when 70% of it
+  sat on one side of the level running. That made the result depend on where you started. A spec'd feature that read
+  as medium went to medium from xhigh but stayed on high from high. Now the same answer lands on the same level from
+  any setting. Switching costs you nothing, so the router does what the answer says.
+- **The `confidence` option is gone**, and the band and `/er status` show the level the check picked and what it did
+  (`Last assessment: medium (spec'd feature), so it moved from high.`) instead of a spread and a percentage.
+- Subagent checks are asked the same question about the subagent's work.
+- **Built for spending less.** The check is told that people use the router to save time and money, so when two levels
+  would both do the work it picks the cheaper one, and steps up only when the work clearly needs it.
+- **Your own words about effort count.** "Think really hard about this" or "quick one" in a prompt now moves the level
+  while it's unlocked. Without the router, words like that only nudge thinking within the level you set.
+- **A shorter prompt.** What a check adds after the conversation went from about 1,200 words to about 800. The
+  worked examples and the advice on reading a conversation are gone: the checks run on Opus 5.5 and Fable 5.1, which
+  don't need either. Undecided is now just another answer in the one reply format.
+- **Model notes in one shape for every model.** One table of three coding benchmarks with the same columns at every
+  level (CursorBench 4.0, Terminal-Bench 4.0 and FrontierCode, with cost and time per task), then the behaviours that
+  change which level to pick. The notes say the benchmarks are hard by design and the gaps are smaller on everyday
+  work, and carry Anthropic's own advice on when to reach for xhigh. The advice that tied kinds of task to levels is
+  gone. Lines about max only reach the check when max is on offer.
+
 ### 0.17.3 (2026-10-05)
 
 - **The footer shows the level in capitals** (`🔓 HIGH ◑`), which tells the level running apart from the picker's own
   label (your setting). It also fixes the Desktop app cutting off the bottom of "high": the app's footer button clips
   descenders, and capitals have none.
+- **Routed subagents are kept in the ledger.** Each one's level, the level it would have inherited from its parent,
+  why, and how long its spawn waited. Before, only the last ten were kept, in memory, for `/er status`.
 
 ### 0.17.2 (2026-10-05)
 

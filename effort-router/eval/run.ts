@@ -21,8 +21,7 @@
 //   bun run eval -- --set subagent     # one set: session | subagent
 //   bun run eval -- --only finance     # fixtures whose name contains "finance"
 //   bun run eval -- --runs 3           # each fixture 3 times (the model is not deterministic)
-//   bun run eval -- --confidence 0.7   # the bar a pass must clear to count as acted on (default 0.7)
-//   bun run eval -- --setting high     # the level the session is on, which a spread is judged against (default medium)
+//   bun run eval -- --setting high     # the level the session is on, as the check is told (default medium)
 import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -30,12 +29,9 @@ import { join } from 'node:path'
 import {
   classifierPrompt,
   classifierSystem,
-  isConfident,
   isLevel,
-  judgeSpread,
   parseDecision,
   parseSubagentReply,
-  percent,
   subagentPrompt,
   subagentSystem,
   supportedModel,
@@ -50,7 +46,6 @@ const flag = (name: string): string | undefined => {
 }
 const model = flag('model') ?? 'opus'
 const effort = flag('effort')
-const bar = Number(flag('confidence') ?? 0.7)
 const settingFlag = flag('setting') ?? 'medium'
 if (!isLevel(settingFlag)) throw new Error(`--setting must be a level, got ${settingFlag}`)
 const setting = settingFlag
@@ -91,7 +86,7 @@ type Case = {
   name: string
   system: string
   prompt: string
-  read: (raw: string) => { got: Got; reason?: string; confidence?: number }
+  read: (raw: string) => { got: Got; reason?: string }
   expect: readonly Expected[]
   on: { model: string; effort?: string }
 }
@@ -107,10 +102,8 @@ const cases: Case[] = [
     system: sessionSystem,
     prompt: classifierPrompt(trimTranscript(fixture.messages, fixture.current), undefined, undefined, setting),
     read: raw => {
-      const parsed = parseDecision(raw)
-      // As the router does: a spread is judged against the level the session is on.
-      const decision = parsed.decision === 'lock' && parsed.spread ? { ...parsed, ...judgeSpread(parsed.spread, setting) } : parsed
-      return decision.decision === 'lock' ? { got: decision.level, reason: decision.reason, confidence: decision.confidence } : { got: 'undecided' }
+      const decision = parseDecision(raw)
+      return decision.decision === 'lock' ? { got: decision.level, reason: decision.reason } : { got: 'undecided' }
     },
     expect: (modelKey && fixture.expectOn?.[modelKey]) || fixture.expect,
     on: { model, effort },
@@ -129,7 +122,7 @@ const cases: Case[] = [
   })),
 ].filter(c => (!set || c.set === set) && (!only || c.name.includes(only)))
 
-type Outcome = { case: Case; got: Got; reason?: string; confidence?: number; raw: string; pass: boolean }
+type Outcome = { case: Case; got: Got; reason?: string; raw: string; pass: boolean }
 
 async function run(c: Case): Promise<Outcome> {
   let raw: string
@@ -138,12 +131,9 @@ async function run(c: Case): Promise<Outcome> {
   } catch (error) {
     raw = `ERROR ${String(error)}`
   }
-  const { got, reason, confidence } = c.read(raw)
-  return { case: c, got, reason, confidence, raw: raw.trim(), pass: (c.expect as readonly Got[]).includes(got) }
+  const { got, reason } = c.read(raw)
+  return { case: c, got, reason, raw: raw.trim(), pass: (c.expect as readonly Got[]).includes(got) }
 }
-
-/** Whether the router would act on a session read: a level at or above the bar. */
-const acted = (o: Outcome): boolean => o.case.set === 'session' && o.got !== 'undecided' && isConfident({ level: o.got as never, reason: '', confidence: o.confidence }, bar)
 
 const jobs = cases.flatMap(c => Array.from({ length: runs }, () => c))
 const outcomes: Outcome[] = new Array(jobs.length)
@@ -164,7 +154,7 @@ const score = (mine: readonly Case[]): string => {
   return `${passed}/${reads.length} reads passed (${Math.round((100 * passed) / Math.max(1, reads.length))}%); ${clean}/${mine.length} fixtures passed every run`
 }
 
-console.log(`effort-router classifier eval: session set as a ${notes?.name ?? model} session${effort ? ` at ${effort}` : ' at its default effort'}${notes ? ' with its notes' : ' (no notes: not a supported model)'}, subagent set as subagents on it; ${cases.length} fixtures x ${runs} run(s), bar ${percent(bar)}`)
+console.log(`effort-router classifier eval: session set as a ${notes?.name ?? model} session${effort ? ` at ${effort}` : ' at its default effort'}${notes ? ' with its notes' : ' (no notes: not a supported model)'}, subagent set as subagents on it; ${cases.length} fixtures x ${runs} run(s)`)
 for (const which of ['session', 'subagent'] as const) {
   const mine = cases.filter(c => c.set === which)
   if (mine.length === 0) continue
@@ -172,16 +162,11 @@ for (const which of ['session', 'subagent'] as const) {
   for (const c of mine) {
     const own = outcomes.filter(o => o.case === c)
     const ok = own.filter(o => o.pass).length
-    const said = own.map(o => (o.reason ? `${o.got}${o.confidence === undefined ? '' : ` ${percent(o.confidence)}`} (${o.reason})` : o.got)).join('; ')
+    const said = own.map(o => (o.reason ? `${o.got} (${o.reason})` : o.got)).join('; ')
     const tally = runs > 1 ? ` ${ok}/${runs}` : ''
     console.log(`${ok === own.length ? 'PASS' : 'MISS'}${tally}  ${c.name}: ${said}${ok === own.length ? '' : `  expected ${c.expect.join(' | ')}`}`)
   }
   console.log(`${which}: ${score(mine)}`)
-  if (which === 'session') {
-    const reads = outcomes.filter(o => mine.includes(o.case))
-    const sure = reads.filter(acted)
-    console.log(`  over the ${percent(bar)} bar (the router would act): ${sure.length}/${reads.length}, of which right ${sure.filter(o => o.pass).length}/${sure.length}`)
-  }
 }
 console.log(`\nall: ${score(cases)}`)
 const misses = outcomes.filter(o => !o.pass)
