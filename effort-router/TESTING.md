@@ -251,6 +251,26 @@ grep "effort-router: \|effort locked" r*.log
 
 Expected: r1 `classifier said {"decision":"undecided"}` and `medium -> medium`. r2 `classifier said {"decision":"lock","level":"high",...}` and `effort locked: high 🔒 (router: ...)`; under 0.6.0 its `step index=0` already logs `medium -> high`. r3 (a resumed session) `step index=0 ... medium -> high` with no classifier call.
 
+### 0.17.0: assessment timing on Fable 5.1 at xhigh (2026-10-05, CLI 2.1.289)
+
+Headless, with the router loaded from the working tree. Separate calls: three `-p --resume` turns of text-only
+planning prompts (each resumed `-p` process has nothing to fork, so every turn was a separate call). Forks: three
+prompts fed into one process with `--input-format stream-json`, a minute or more apart, in a folder holding a
+16-line `checkout.js`.
+
+| Assessment | Time | Notes |
+| --- | --- | --- |
+| Separate call, turn 1 (planning) | 5.2 s | moved xhigh to medium |
+| Separate call, turn 2 | 5.3 s | stayed |
+| Separate call, turn 3 | 2.5 s | stayed |
+| Separate call, coupon bug fix | 9.0 s | moved xhigh to high |
+| Fork, prompt 2 (61k-token conversation, 167 output tokens) | 7.0 s | moved high to medium |
+| Fork, prompt 3 | 15.0 s | **timed out**: the answer arrived after the limit and was discarded, the prompt ran at medium |
+
+Opus 5.5 at medium for comparison: a separate call took 2.8 s. A fork thinks at the session's effort and
+`$.model.fork` takes only a prompt, so the router can't cap it. On Fable at xhigh, one fork in two hit the
+15-second limit in this run.
+
 ## Live, Desktop: verified
 
 ### 0.16.2: changing the picker yourself stops routing (2026-10-05, Desktop 2.1.286, Fable 5.1)
