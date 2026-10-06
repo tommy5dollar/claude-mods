@@ -10,9 +10,8 @@ It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the terminal and in the Des
 Claude Code 2.1.287 or later in the terminal, or the Desktop app with Claude Code 2.1.286 or later.
 
 In the Desktop app, first add the marketplace: go to Customize, then Plugins, Add marketplace, Add from a repository,
-and enter `tommy5dollar/effort-router`. Then install the plugin, because adding the marketplace alone doesn't: still in
-Plugins, open Discover, scroll to the bottom where the new marketplace is listed, and click **Add** on effort-router. In the
-terminal:
+and enter `tommy5dollar/effort-router`. The app then opens the new marketplace: click **Add** on effort-router (if you've left
+that screen, it's under effort-router at the bottom of Plugins, Discover). In the terminal:
 
 ```
 claude plugin marketplace add tommy5dollar/effort-router

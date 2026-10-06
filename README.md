@@ -38,8 +38,8 @@ It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the Desktop app's Code tab 
 
 1. **Add the marketplace.** Go to Customize, then Plugins, Add marketplace, Add from a repository, and enter
    `tommy5dollar/effort-router`.
-2. **Install the plugin.** Still in Plugins, open Discover and scroll to the bottom, where the marketplace you just
-   added is listed. Click **Add** on effort-router. Adding the marketplace alone doesn't install it.
+2. **Install the plugin.** The app opens the new marketplace for you. Click **Add** on effort-router. If you've left
+   that screen, it's under effort-router at the bottom of Plugins, Discover.
 
 **In the terminal:**
 
