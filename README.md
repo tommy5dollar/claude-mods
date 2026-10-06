@@ -11,8 +11,8 @@ deep thinking as a migration across three services. And every subagent it launch
 helper that only searches your files thinks as hard as you asked it to on the hardest problem.
 
 effort-router picks the right effort for every prompt and every subagent. Easy work moves down, so your usage goes
-further and answers come back up to 3.5x faster. Hard work moves up and gets done right first time, with no time or usage lost
-to rework.
+further and answers come back up to 3.5x faster. Hard work moves up and gets done right first time, with no time or
+usage lost to rework.
 
 Free, 30 seconds to install, built on Anthropic's own advice in
 [Spending your effort](https://claude.dev/blog/spending-your-effort/). By [Tommy Long](https://www.tommylong.com).
@@ -71,8 +71,8 @@ What a step down saves, roughly, in both cost and time:
 | medium → low | 33% | 20% |
 
 That's from our runs and Artificial Analysis's Intelligence Index (v4.3.2). The smaller the task, the less it saves,
-because reading the conversation costs the same at every level. Over a long session it adds up, because high takes more turns and reads more, and every later request pays to
-re-read all of it. In a 20-prompt session on Opus at high, the router finished 2:18 sooner and 63 cents cheaper.
+because reading the conversation costs the same at every level. Over a long session it adds up, because high takes
+more turns and reads more, and every later request pays to re-read all of it. In a 20-prompt session on Opus at high, the router finished 2:18 sooner and 63 cents cheaper.
 
 On Opus 5.5's default of medium there's less to step down from, so it mostly picks off the small tasks. It still steps
 up when the work clearly needs it, because a hard task done right first time costs less than the rework. Routing costs

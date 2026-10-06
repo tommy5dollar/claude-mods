@@ -100,8 +100,6 @@ flowchart LR
 
 Locking after a fixed number of prompts is deliberate. A fixed window always ends, still catches a task that grows over the first few prompts, and has one number to tune (`promptsToAssess`).
 
-Before 0.18 the model gave every level a probability and the router moved only when 70% of it sat on one side of the level running. That made the outcome depend on where you started: a spec'd feature that read as medium went to medium from xhigh but stayed on high from high. Asking the model for the level and doing what it says gives the same answer from any setting.
-
 ## The footer
 
 The footer sits beside the native model and effort pickers. It shows the router's status, the level running and, while unlocked, how much of the window is used.
@@ -153,7 +151,7 @@ The four buttons always sit in the same slots, so the digit keys are learnable. 
 - **Turn on, locked at high** brings back the router's last level in one press. It's greyed out when the router never had a level of its own.
 - **Turn on, unlocked** starts a fresh window from your own setting.
 
-A greyed-out button stays in its slot. Pressing it says why it's greyed out. In the Desktop app, Hide is drawn as the panel's own close control.
+A greyed-out button stays in its slot. Pressing it says why it's greyed out.
 
 ![The band in the Desktop app after a move to high, with its four buttons](https://raw.githubusercontent.com/tommy5dollar/effort-router/main/docs/band-unlocked.png)
 
@@ -271,8 +269,6 @@ Set them in `/plugin configure`, or under `pluginConfigs["effort-router@effort-r
 | `routeSubagents` | true | Give each subagent its own level. `false`: subagents run at the session's level |
 | `rules` | empty | Your routing rules in plain words (see below). A rules file takes precedence |
 
-Options from earlier versions (`consent`, `decideWithin`, `showChecks` and the rest) are ignored.
-
 ## Customising the rules
 
 The shipped rules ([`rules/default.md`](rules/default.md)) are principles, not a table of levels:
@@ -363,7 +359,7 @@ and a general-purpose subagent was `agent:builtin:general-purpose`. Check the va
 - **Workflow agents that don't launch through the Agent tool** keep the main thread's level.
 - **Subagent levels are kept in memory.** After a restart, a subagent still running from before takes the main thread's level.
 - **The model isn't told its level.** Adding a note to the system prompt would break the prompt cache.
-- **The spend report starts at 0.9.0**, so sessions from before it aren't in it. A request with no reported usage isn't counted. Days are UTC.
+- **The spend report** leaves out a request with no reported usage. Days are UTC.
 - **In the Desktop app a new session loads plugins with its first message.** Until you send something there is no footer and `/er` isn't available. That first message is assessed like any other.
 - **The footer and band draw in the terminal and the Desktop app.** VS Code and `-p` run the router without them, and `/er` is the control there.
 
