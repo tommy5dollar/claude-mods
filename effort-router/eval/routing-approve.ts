@@ -4,8 +4,8 @@
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const EVAL = 'D:/code/mods/effort-router/eval'
-const RES = 'D:/code/misc/claude-mods/evals/routing'
+const EVAL = import.meta.dir
+const RES = join(process.env.EVALS ?? '.evals', 'routing')
 type Row = { set: string; name: string; picks: string[] }
 const rowsOf = (pattern: RegExp): Row[] =>
   readdirSync(RES).filter(f => pattern.test(f)).sort().flatMap(f => (JSON.parse(readFileSync(join(RES, f), 'utf8')).rows as Row[]))

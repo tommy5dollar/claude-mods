@@ -5,7 +5,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const root = process.env.EVALS ?? 'D:/code/misc/claude-mods/evals'
+const root = process.env.EVALS ?? '.evals'
 const only = process.argv.slice(2)
 for (const stamp of readdirSync(root).filter(s => /^\d{4}-/.test(s)))
   for (const scenario of readdirSync(join(root, stamp))) {

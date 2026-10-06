@@ -2,7 +2,7 @@
 // repo, once per arm (router on, router off at a fixed level), then grades the repo with tests the session never saw.
 //
 //   bun eval/scenarios/run.ts --scenario currency-bug [--arms fixed-medium,router-from-medium] [--repeats 3]
-//                             [--out D:/code/misc/claude-mods/evals] [--serial]
+//                             [--out <dir>, default $EVALS or .evals] [--serial]
 //
 // Each run keeps everything needed to rebuild it as footage: every stream-json event stamped with ms since start,
 // every OTel api_request record (model, effort, query_source, tokens, cost, duration), the router's ledger
@@ -32,7 +32,7 @@ if (!scenario) throw new Error(`--scenario must be one of ${scenarios.map(s => s
 const armNames = flag('arms')?.split(',')
 const arms = armNames ? scenario.arms.filter(a => armNames.includes(a.name)) : scenario.arms
 const repeats = Number(flag('repeats') ?? 1)
-const outRoot = resolve(flag('out') ?? 'D:/code/misc/claude-mods/evals')
+const outRoot = resolve(flag('out') ?? process.env.EVALS ?? '.evals')
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
 
 type Attr = { key: string; value: Record<string, unknown> }

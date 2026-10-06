@@ -7,7 +7,7 @@ and cheapest, up or down. Then the level locks for the rest of the session. Each
 <img src="docs/launch.gif" width="720" alt="Claude Code is overthinking your renames. Everyday prompts all run at high and usage drains fast. effort-router picks the effort for every prompt, easy ones drop to low, and usage lasts far longer. Up to 2x the usage, up to 3.5x faster, same results">
 
 It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the terminal and in the Desktop app's Code tab. It requires
-Claude Code 2.1.286 or later.
+Claude Code 2.1.287 or later in the terminal, or the Desktop app with Claude Code 2.1.286 or later.
 
 In the Desktop app, go to Customize, then Plugins, Add marketplace, Add from a repository, then enter
 `tommy5dollar/effort-router`. Then in a Code tab session, click **+** next to the prompt box, then Plugins, Add plugin,
@@ -198,7 +198,7 @@ In the Desktop app the picker keeps showing your setting while the router runs a
 
 - **Before your prompt runs.** Each of the first five prompts waits for one assessment, so the turn's first request already carries the level. If the assessment takes longer than 30 seconds or fails, the turn runs at the level it had, and `/er status` says why. A failed assessment still uses up its prompt, so the window ends when the footer says it will.
 - **On your session's own model.** The model you chose to work in judges the task, because it judges better than a small model and the savings from getting the level right scale with it. When the conversation has a request to fork, an assessment is a fork of it: the session's own request (system prompt, tools, CLAUDE.md, memory and the whole conversation) with one question added, served from the prompt cache. Measured on Opus 5.5 with a 72k-token conversation: 1.6 seconds, about 2.8k fresh input tokens and 40 output tokens.
-- **The first prompt is a separate call.** Before the session has sent anything there is no request to fork, and a mod can't build one with Claude Code's system prompt and tools. So the first assessment is one call to the same model with your CLAUDE.md files, rules and memory (up to 80,000 characters, about 20k tokens) and your prompt. The same happens after `/clear`, or after a resume that starts afresh.
+- **The first prompt is a separate call.** Before the session has sent anything there is no request to fork, and a plugin can't build one with Claude Code's system prompt and tools. So the first assessment is one call to the same model with your CLAUDE.md files, rules and memory (up to 80,000 characters, about 20k tokens) and your prompt. The same happens after `/clear`, or after a resume that starts afresh.
 - **What a separate call reads.** Your prompts and answers in full, Claude's replies shortened and tool calls as names only, up to 24,000 characters. Tool results, file contents and thinking never go in. Over the cap it keeps your first prompt (the original task), then the newest lines. The prompt being assessed always goes in whole, outside the cap, because a long dictated brief is the prompt that matters most.
 - **Told the level running.** That's the router's own level after a move, or your effort setting. The router learns your setting from the first request (nothing else shows it), so the first assessment's level is applied when that request arrives.
 - **Up to xhigh.** Assessments are offered levels up to `highestLevel` (xhigh by default): on all three models max rarely beats xhigh and can overthink. If your own setting is higher (max, say), they're offered levels up to yours, so a session you set to max can stay there.
@@ -334,7 +334,7 @@ and a general-purpose subagent was `agent:builtin:general-purpose`. Check the va
 
 - **What moved:** `effort` differs from `effort_router.setting`. On the main thread that's the router. On a subagent
   it's the router or the agent definition's own `effort:`.
-- **The values are the session's, not the request's.** The engine gives a mod no way to tie a record to one request,
+- **The values are the session's, not the request's.** Claude Code gives a plugin no way to tie a record to one request,
   so a subagent's record carries its session's status and setting.
 - **Nothing is sent anywhere new.** The attributes ride on records Claude Code was already sending to your collector.
   Without telemetry configured there are no records and nothing is added. Other records are left alone.
@@ -351,7 +351,7 @@ and a general-purpose subagent was `agent:builtin:general-purpose`. Check the va
 - **Claude Code's own "with medium effort" line shows your setting, not the routed level.** It's built from the
   effort setting, not from the request. The request still goes out at the routed level: Claude Code's own telemetry
   records it there (see [Telemetry](#telemetry-for-organisations)). Trust the footer.
-- **The Desktop app's effort picker never changes.** The app owns it and nothing a mod can call sets it. Requests still go out at the routed level, so trust the footer.
+- **The Desktop app's effort picker never changes.** The app owns it and nothing a plugin can call sets it. Requests still go out at the routed level, so trust the footer.
 - **The router doesn't run `/effort`**, because in the terminal that also saves the level as your default for new sessions.
 - **The first assessment can't share the prompt cache.** The engine offers no way to fork before the first response, and a separate call can't carry Claude Code's system prompt or tools. It pays for your instructions and the prompt once per session.
 - **A fork thinks at the session's effort.** The router can't change that. On Fable 5.1 at xhigh a fork took 7 and 15 seconds in testing, against about 2 on Opus 5.5 at medium, so a prompt can wait that long. Past 30 seconds the prompt runs at the level it had and the tokens are still spent.

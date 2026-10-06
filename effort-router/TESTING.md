@@ -186,7 +186,7 @@ your own, I'm away all day", with an Explore and a general-purpose subagent. Abo
 
 ### 0.10.0: checks on the session's model (verified 2026-10-04, CLI 2.1.289, Opus 5.5)
 
-One `claude -p --input-format stream-json` process in `D:/code/mods`, the dev folder as `--plugin-dir` with the
+One `claude -p --input-format stream-json` process in the repo root, the dev folder as `--plugin-dir` with the
 installed router disabled, `EFFORT_ROUTER_CONSENT=auto`, two prompts sent one after the other's result:
 
 - `prompt.context` fired before the first `prompt.submit` and carried the `claudeMd` block (31k characters here).
@@ -227,7 +227,7 @@ The transcript agrees: the main thread's two responses carry `perTurnEffort: hig
 ### 0.6.0: the read happens before the turn (verified 2026-10-04, CLI 2.1.289)
 
 ```
-claude -p --plugin-dir D:/code/mods/effort-router --model sonnet --tools "" --no-session-persistence --debug-file r.log "In two sentences: how would you fix an off-by-one bug in our invoice pagination loop that drops the last invoice on each page? No code."
+claude -p --plugin-dir ./effort-router --model sonnet --tools "" --no-session-persistence --debug-file r.log "In two sentences: how would you fix an off-by-one bug in our invoice pagination loop that drops the last invoice on each page? No code."
 grep "read settled\|prompt.submit settled\|effort-router: step" r.log
 ```
 
@@ -251,9 +251,9 @@ The router logs every request to the debug log as
 `effort-router: step index=N model=M effort <sent by engine> -> <sent by router>`.
 
 ```
-EFFORT_ROUTER_CONSENT=none claude --plugin-dir D:/code/mods/effort-router -p "hi, just getting set up. Reply with one word." --model sonnet --output-format json --debug-file r1.log
-claude --plugin-dir D:/code/mods/effort-router -p "There's a bug in calc.js: add() returns the wrong result when the first argument is negative. Fix it in place." --resume <session_id> --model sonnet --permission-mode acceptEdits --debug-file r2.log
-claude --plugin-dir D:/code/mods/effort-router -p "Thanks. What did you change?" --resume <session_id> --model sonnet --debug-file r3.log
+EFFORT_ROUTER_CONSENT=none claude --plugin-dir ./effort-router -p "hi, just getting set up. Reply with one word." --model sonnet --output-format json --debug-file r1.log
+claude --plugin-dir ./effort-router -p "There's a bug in calc.js: add() returns the wrong result when the first argument is negative. Fix it in place." --resume <session_id> --model sonnet --permission-mode acceptEdits --debug-file r2.log
+claude --plugin-dir ./effort-router -p "Thanks. What did you change?" --resume <session_id> --model sonnet --debug-file r3.log
 grep "effort-router: \|effort locked" r*.log
 ```
 

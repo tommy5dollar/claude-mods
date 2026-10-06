@@ -30,7 +30,7 @@ const runs = Math.max(1, Number(flag('runs') ?? 3))
 const only = flag('only')
 const set = flag('set')
 const concurrency = Number(flag('concurrency') ?? 6)
-const OUT = 'D:/code/misc/claude-mods/evals/routing'
+const OUT = join(process.env.EVALS ?? '.evals', 'routing')
 
 type Level = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 type Got = Level | 'undecided' | 'unusable'

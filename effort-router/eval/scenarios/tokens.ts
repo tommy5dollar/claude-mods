@@ -5,7 +5,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const root = process.env.EVALS ?? 'D:/code/misc/claude-mods/evals'
+const root = process.env.EVALS ?? '.evals'
 const filters = process.argv.slice(2).map(f => f.split(':') as [string, string?])
 const wanted = (scenario: string, arm: string) =>
   !filters.length || filters.some(([s, a]) => s === scenario && (!a || a === arm))

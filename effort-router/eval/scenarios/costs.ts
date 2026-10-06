@@ -5,7 +5,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const root = process.env.EVALS ?? 'D:/code/misc/claude-mods/evals'
+const root = process.env.EVALS ?? '.evals'
 const only = process.argv.slice(2)
 const kind = (source: string) =>
   source === 'sdk' ? 'main' : source.startsWith('agent:') ? 'subagents' : source === 'hook_prompt' ? 'router forks' : `helpers (${source})`

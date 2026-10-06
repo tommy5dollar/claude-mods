@@ -13,7 +13,7 @@ bun eval/scenarios/costs.ts [scenario...]                          # cost and re
 bun eval/scenarios/tokens.ts [scenario[:arm]...]                   # tokens by sender, model and effort, and <out>/tokens.json
 ```
 
-Output goes to `D:/code/misc/claude-mods/evals` unless `--out` says otherwise. Each run's folder holds:
+Output goes to `.evals` (or `EVALS` if it's set) unless `--out` says otherwise. Each run's folder holds:
 
 | File | What's in it |
 | --- | --- |

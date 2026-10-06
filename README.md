@@ -1,7 +1,7 @@
 # effort-router
 
 [![effort-router version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Ftommy5dollar%2Feffort-router%2Fmain%2Feffort-router%2F.claude-plugin%2Fplugin.json&query=%24.version&label=effort-router&color=blue)](CHANGELOG.md)
-[![Claude Code 2.1.286 or later](https://img.shields.io/badge/Claude%20Code-2.1.286%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
+[![Claude Code 2.1.287 or later](https://img.shields.io/badge/Claude%20Code-2.1.287%2B-d97757)](https://code.claude.com/docs/en/plugins/mods/overview)
 [![MIT licence](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 
 **Make your Claude Code usage go up to twice as far.**

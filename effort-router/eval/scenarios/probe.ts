@@ -18,7 +18,7 @@ const flag = (name: string) => {
 const model = flag('model') ?? 'claude-opus-5-5'
 const effort = flag('effort') ?? 'medium'
 const overlays = (flag('overlay') ?? 'fees').split(',').filter(Boolean)
-const out = join('D:/code/misc/claude-mods/evals/probes', new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19))
+const out = join(process.env.EVALS ?? '.evals', 'probes', new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19))
 
 const times = Number(flag('times') ?? 1)
 const prompts = readFileSync(flag('prompts') ?? join(HERE, 'probe-prompts.txt'), 'utf8').split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))

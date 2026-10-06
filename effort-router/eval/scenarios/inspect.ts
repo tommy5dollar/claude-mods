@@ -1,7 +1,7 @@
 // Prints what happened in each run under a folder: per step the wall time and cost, every model request from OTel
 // (who sent it, at what effort, tokens, cost, time) and the router's assessments from its ledger.
 //
-//   bun eval/scenarios/inspect.ts D:/code/misc/claude-mods/evals/<stamp>/<scenario>
+//   bun eval/scenarios/inspect.ts .evals/<stamp>/<scenario>
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 

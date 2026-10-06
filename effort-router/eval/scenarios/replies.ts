@@ -1,5 +1,5 @@
 // Prints each run's final reply per step, and the files its diff touched.
-//   bun eval/scenarios/replies.ts D:/code/misc/claude-mods/evals/<stamp>/<scenario>
+//   bun eval/scenarios/replies.ts .evals/<stamp>/<scenario>
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
