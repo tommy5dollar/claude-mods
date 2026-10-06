@@ -11,8 +11,8 @@ deep thinking as a migration across three services. And every subagent it launch
 helper that only searches your files thinks as hard as you asked it to on the hardest problem.
 
 effort-router picks the right effort for every prompt and every subagent. Easy work moves down, so your usage goes
-further and answers come back up to 3.5x faster. Hard work moves up, so it's right first time, and you don't spend
-your time and usage on rework.
+further and answers come back up to 3.5x faster. Hard work moves up and gets done right first time, with no time or usage lost
+to rework.
 
 Free, 30 seconds to install, built on Anthropic's own advice in
 [Spending your effort](https://claude.dev/blog/spending-your-effort/). By [Tommy Long](https://www.tommylong.com).
