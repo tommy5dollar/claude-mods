@@ -48,13 +48,14 @@ chores to hand to subagents. The router moved it to medium and its Opus subagent
 about 2 minutes for $1.10 to $1.65, against 6 to 8.5 minutes and $3.20 to $3.75 left on xhigh, and every test passed
 both ways. Those figures include the router's own assessments.
 
-What a step down saves on Opus 5.5, the everyday model:
+What a step down saves, roughly, in cost and time:
 
-| Moved from | to | Cost and time, roughly |
-| --- | --- | --- |
-| high | medium | a quarter less |
-| high | low | half |
-| medium | low | a third less |
+| Moved from | to | Opus 5.5 | Fable 5.1 |
+| --- | --- | --- | --- |
+| xhigh | medium | 60% less | half |
+| high | medium | a quarter less | a quarter less |
+| high | low | half | 40% less |
+| medium | low | a third less | a fifth less |
 
 That's from our runs and Artificial Analysis's Intelligence Index (v4.3.2). The smaller the task, the less it saves,
 because reading the conversation costs the same at every level. Over a long session the saving grows, because high
