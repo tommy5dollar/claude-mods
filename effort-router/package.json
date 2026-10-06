@@ -4,5 +4,8 @@
   "scripts": {
     "test": "bun test",
     "eval": "bun eval/run.ts"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
   }
 }

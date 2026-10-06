@@ -17,7 +17,7 @@ to rework.
 Free, 30 seconds to install, built on Anthropic's own advice in
 [Spending your effort](https://claude.dev/blog/spending-your-effort/). By [Tommy Long](https://www.tommylong.com).
 
-<img src="effort-router/docs/launch.gif" width="720" alt="Claude Code is overthinking your renames. Everyday prompts all run at high and usage drains fast. effort-router picks the effort for every prompt, easy ones drop to low, and usage lasts far longer. Up to 2x the usage, up to 3.5x faster, same results">
+<img src="docs/launch.gif" width="720" alt="Claude Code is overthinking your renames. Everyday prompts all run at high and usage drains fast. effort-router picks the effort for every prompt, easy ones drop to low, and usage lasts far longer. Up to 2x the usage, up to 3.5x faster, same results">
 
 - **Subagents.** Without the router, Claude Code launches every subagent at your effort level. With it, each
   subagent gets the level its own job needs, all session long: low for the file search, high for the tricky review.
@@ -28,7 +28,7 @@ Free, 30 seconds to install, built on Anthropic's own advice in
 - **Where it went.** `/er report` shows how much work ran at each level and what the router changed. (`/er` is
   short for `/effort-router`.)
 
-<img src="effort-router/docs/footer.gif" width="720" alt="The footer in the Desktop app. A rename is assessed and moves from medium to low, a production bug moves from low to high while the effort picker still says Medium, and clicking the footer opens the band">
+<img src="docs/footer.gif" width="720" alt="The footer in the Desktop app. A rename is assessed and moves from medium to low, a production bug moves from low to high while the effort picker still says Medium, and clicking the footer opens the band">
 
 It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the Desktop app's Code tab and in the terminal.
 

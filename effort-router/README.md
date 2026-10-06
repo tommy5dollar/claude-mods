@@ -4,7 +4,7 @@ A Claude Code plugin that saves time and money by running each task at the lowes
 session's own model assesses each of your first five prompts and moves the level to whichever gets the work done fastest
 and cheapest, up or down. Then the level locks for the rest of the session. Each subagent gets its own level, chosen by the agent that launches it.
 
-<img src="docs/launch.gif" width="720" alt="Claude Code is overthinking your renames. Everyday prompts all run at high and usage drains fast. effort-router picks the effort for every prompt, easy ones drop to low, and usage lasts far longer. Up to 2x the usage, up to 3.5x faster, same results">
+<img src="https://raw.githubusercontent.com/tommy5dollar/effort-router/main/docs/launch.gif" width="720" alt="Claude Code is overthinking your renames. Everyday prompts all run at high and usage drains fast. effort-router picks the effort for every prompt, easy ones drop to low, and usage lasts far longer. Up to 2x the usage, up to 3.5x faster, same results">
 
 It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the terminal and in the Desktop app's Code tab. It requires
 Claude Code 2.1.287 or later in the terminal, or the Desktop app with Claude Code 2.1.286 or later.
@@ -106,7 +106,7 @@ Before 0.18 the model gave every level a probability and the router moved only w
 
 The footer sits beside the native model and effort pickers. It shows the router's status, the level running and, while unlocked, how much of the window is used.
 
-<img src="docs/footer.gif" width="720" alt="The footer in the Desktop app. A rename is assessed and moves from medium to low, a production bug moves from low to high while the effort picker still says Medium, and clicking the footer opens the band">
+<img src="https://raw.githubusercontent.com/tommy5dollar/effort-router/main/docs/footer.gif" width="720" alt="The footer in the Desktop app. A rename is assessed and moves from medium to low, a production bug moves from low to high while the effort picker still says Medium, and clicking the footer opens the band">
 
 | Footer | What it means |
 | --- | --- |
@@ -144,7 +144,7 @@ The four buttons always sit in the same slots, so the digit keys are learnable. 
 | 3 | Turn off | Turn off | Turn on, unlocked |
 | 4 | Assess (greyed out) | Assess | Turn on and assess |
 
-![The band in the Desktop app after you locked it at high, with the last assessment and why](docs/band-locked.png)
+![The band in the Desktop app after you locked it at high, with the last assessment and why](https://raw.githubusercontent.com/tommy5dollar/effort-router/main/docs/band-locked.png)
 
 - **Lock** ends assessing early when the level is plainly right.
 - **Unlock** keeps the locked level running and assesses your next five prompts from there. Use it when you're about to steer the work somewhere new.
@@ -155,7 +155,7 @@ The four buttons always sit in the same slots, so the digit keys are learnable. 
 
 A greyed-out button stays in its slot. Pressing it says why it's greyed out. In the Desktop app, Hide is drawn as the panel's own close control.
 
-![The band in the Desktop app after a move to high, with its four buttons](docs/band-unlocked.png)
+![The band in the Desktop app after a move to high, with its four buttons](https://raw.githubusercontent.com/tommy5dollar/effort-router/main/docs/band-unlocked.png)
 
 ## Commands
 
