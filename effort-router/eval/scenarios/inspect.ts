@@ -17,7 +17,7 @@ for (const name of readdirSync(root).sort()) {
   const run = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'))
   console.log(`\n## ${name}  (${run.grade.passed ? 'PASS' : 'FAIL'}, ${(run.wallMs / 1000).toFixed(1)}s)`)
   for (const step of run.steps)
-    console.log(`step "${step.step.slice(0, 60)}": ${((step.wallMs ?? 0) / 1000).toFixed(1)}s wall, ${((step.result?.duration_api_ms ?? 0) / 1000).toFixed(1)}s api, $${Number(step.result?.total_cost_usd ?? 0).toFixed(3)}, ${step.result?.num_turns} turns`)
+    console.log(`step "${step.step.slice(0, 60)}": ${((step.wallMs ?? 0) / 1000).toFixed(1)}s wall, ${((step.result?.duration_api_ms ?? 0) / 1000).toFixed(1)}s api, $${Number(step.result?.total_cost_usd ?? 0).toFixed(3)} so far, ${step.result?.num_turns} turns`)
 
   const otel = jsonl(join(dir, 'otel.jsonl'))
   const kinds = new Map<string, number>()

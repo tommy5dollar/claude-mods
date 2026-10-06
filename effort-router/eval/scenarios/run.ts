@@ -198,7 +198,8 @@ async function runOne(s: Scenario, arm: Arm, repeat: number) {
 
   const record = { scenario: s.name, model: s.model, arm, repeat, ...session, grade: result }
   writeFileSync(join(dir, 'run.json'), JSON.stringify(record, null, 2))
-  const cost = session.steps.reduce((sum, step) => sum + Number(step.result?.total_cost_usd ?? 0), 0)
+  // total_cost_usd is the session's running total, so the last step's is the session's cost.
+  const cost = Number(session.steps.at(-1)?.result?.total_cost_usd ?? 0)
   console.log(`${s.name} ${arm.name}-${repeat}: exit ${session.code}, ${(session.wallMs / 1000).toFixed(1)}s, $${cost.toFixed(3)}, ${'passed' in result ? (result.passed ? 'PASS' : `FAIL ${result.hidden?.failed.join('; ')}`) : 'no hidden tests'}`)
 }
 
