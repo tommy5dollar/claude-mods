@@ -71,7 +71,7 @@ This plugin runs inside Claude Code without a sandbox, so here's exactly what it
   `highestLevel` is max. Once the level has locked, prompts aren't assessed, so use the band or `/er assess`. Without the router, words like that only nudge how much the model
   thinks within the level you set.
 - **What if I disagree with it?** Change the effort picker and routing turns off for that session, with your level in
-  force. Or press Lock, Unlock or Assess in the band.
+  force. Or use the band: Lock keeps the current level, Unlock lets it choose again and Assess has it look again.
 - **What if an assessment fails or is slow?** The prompt runs at the level it already had. Nothing waits longer than
   30 seconds.
 - **Does it work in VS Code or with `-p`?** It routes there too, but there's no footer or band. Use `/er` instead.

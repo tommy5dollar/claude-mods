@@ -7,21 +7,26 @@
 **Make your Claude Code usage go up to twice as far.**
 
 Claude Code is overthinking your renames. It runs every prompt at one effort level, so a one-line fix gets the same
-deep thinking as a migration across three services. effort-router picks the right effort for every prompt and every
-subagent. Your usage goes further, answers come back up to 3.5x faster, and the work is just as good.
+deep thinking as a migration across three services. And every subagent it launches runs at that level too, so the
+helper that only searches your files thinks as hard as you asked it to on the hardest problem.
+
+effort-router picks the right effort for every prompt and every subagent. Easy work moves down, so your usage goes
+further and answers come back up to 3.5x faster. Hard work moves up, so it's right first time, and you don't spend
+your time and usage on rework.
 
 Free, 30 seconds to install, built on Anthropic's own advice in
 [Spending your effort](https://claude.dev/blog/spending-your-effort/). By [Tommy Long](https://www.tommylong.com).
 
 <img src="effort-router/docs/launch.gif" width="720" alt="Claude Code is overthinking your renames. Everyday prompts all run at high and usage drains fast. effort-router picks the effort for every prompt, easy ones drop to low, and usage lasts far longer. Up to 2x the usage, up to 3.5x faster, same results">
 
-- **Your session.** Your session's own model assesses each of your first five prompts and moves the level to the one
-  that gets the work done fastest and cheapest, then locks. The footer shows the level in use, and clicking it gives
-  you Lock, Unlock, Turn off and Assess.
-- **Subagents.** Each subagent gets its own level, chosen by the agent launching it, for the whole session. Without
-  the router every subagent runs at your level.
+- **Subagents.** Without the router, Claude Code launches every subagent at your effort level. With it, each
+  subagent gets the level its own job needs, all session long: low for the file search, high for the tricky review.
+- **Your session.** Your first five prompts are each checked and the level moves to the one that gets the work done
+  fastest and cheapest, then it stays there. The footer shows the level in use. Click it to keep that level, switch
+  the router off or ask it to look again.
 - **Your rules.** Add to the routing rules in plain markdown, per user, per project or for a whole organisation.
-- **Where it went.** `/er report` shows the requests and output tokens at each level, and what the router changed.
+- **Where it went.** `/er report` shows how much work ran at each level and what the router changed. (`/er` is
+  short for `/effort-router`.)
 
 <img src="effort-router/docs/footer.gif" width="720" alt="The footer in the Desktop app. A rename is assessed and moves from medium to low, a production bug moves from low to high while the effort picker still says Medium, and clicking the footer opens the band">
 
@@ -51,14 +56,14 @@ chores to hand to subagents. The router moved it to medium and its Opus subagent
 about 2 minutes for $1.10 to $1.65, against 6 to 8.5 minutes and $3.20 to $3.75 left on xhigh, and every test passed
 both ways. Those figures include the router's own assessments.
 
-What a step down saves, roughly, in cost and time:
+What a step down saves, roughly, in both cost and time:
 
-| Moved from | to | Opus 5.5 | Fable 5.1 |
-| --- | --- | --- | --- |
-| xhigh | medium | 60% less | half |
-| high | medium | a quarter less | a quarter less |
-| high | low | half | 40% less |
-| medium | low | a third less | a fifth less |
+| Step down | Opus 5.5 saves | Fable 5.1 saves |
+| --- | ---: | ---: |
+| xhigh → medium | 60% | 50% |
+| high → medium | 25% | 25% |
+| high → low | 50% | 40% |
+| medium → low | 33% | 20% |
 
 That's from our runs and Artificial Analysis's Intelligence Index (v4.3.2). The smaller the task, the less it saves,
 because reading the conversation costs the same at every level. Over a long session it adds up, because high takes more turns and reads more, and every later request pays to
