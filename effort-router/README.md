@@ -40,7 +40,7 @@ different things on Opus, Sonnet and Fable.
 **Does it save money and time?** That's what it's for. When two levels would both do the work, it picks the cheaper
 one. The higher you run, the more it saves. In our test, Fable 5.1 on xhigh was given three small chores in a
 payments repo to hand to subagents. The router moved it to medium and its Opus subagents to medium or low. It finished
-in about 2 minutes for $1.10 to $1.65, against 6 to 8.5 minutes and $3.20 to $3.75 left on xhigh, and every hidden
+in about 2 minutes for $1.10 to $1.65, against 6 to 8.5 minutes and $3.20 to $3.75 left on xhigh, and every
 test passed both ways. Those figures include the router's own assessments. On Opus 5.5's default of medium there's
 less to step down from, so it mostly picks off the small tasks. It still steps up when the work clearly needs it,
 because a hard task done right first time costs less than the rework, in tokens and in your own time.

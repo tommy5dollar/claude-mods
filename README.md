@@ -45,8 +45,13 @@ Desktop app the footer appears once you've sent the first message. `/er off` tur
 
 That's what it's for. The higher you run, the more it saves. In our test, Fable 5.1 on xhigh was given three small
 chores to hand to subagents. The router moved it to medium and its Opus subagents to medium or low. It finished in
-about 2 minutes for $1.10 to $1.65, against 6 to 8.5 minutes and $3.20 to $3.75 left on xhigh, and every hidden test
-passed both ways. Those figures include the router's own assessments.
+about 2 minutes for $1.10 to $1.65, against 6 to 8.5 minutes and $3.20 to $3.75 left on xhigh, and every test passed
+both ways. Those figures include the router's own assessments.
+
+On Opus 5.5 at high, a 20-prompt session of everyday work came back 38% faster and 35% cheaper, every test passing.
+The gap grows the longer you go, because high takes more turns and reads more, and every later request pays to
+re-read all of it. Artificial Analysis's Intelligence Index (v4.3.2) shows the same pattern: on Opus 5.5, xhigh costs
+about 2.6 times medium.
 
 On Opus 5.5's default of medium there's less to step down from, so it mostly picks off the small tasks. It still steps
 up when the work clearly needs it, because a hard task done right first time costs less than the rework. Routing costs
