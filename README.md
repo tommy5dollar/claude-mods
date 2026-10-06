@@ -10,7 +10,7 @@ Claude Code runs every task at the effort level you picked, whether it's renamin
 touches three services. Anthropic's [Spending your effort](https://claude.dev/blog/spending-your-effort/) says the
 right level depends on the task. effort-router picks it for you, so easy work stops paying for thinking it doesn't need.
 
-<img src="effort-router/docs/race.gif" width="720" alt="A race between two Claude Code sessions on the same three chores, Fable 5.1 set to xhigh. Fixed at xhigh it takes 8:28 and $3.74. With effort-router the main thread moves to medium and its subagents to low, medium and low. It takes 2:24 and $1.64. All 7 hidden tests pass on both">
+<img src="effort-router/docs/race.gif" width="720" alt="A race between two Claude Code sessions on the same three chores, Fable 5.1 set to xhigh. Fixed at xhigh it takes 8:28 and $3.74. With effort-router the main thread moves to medium and its subagents to low, medium and low. It takes 2:24 and $1.64. All 7 tests pass on both">
 
 - **Your session.** Your session's own model assesses each of your first five prompts and moves the level to the one
   that gets the work done fastest and cheapest, then locks. The footer shows the level in use, and clicking it gives

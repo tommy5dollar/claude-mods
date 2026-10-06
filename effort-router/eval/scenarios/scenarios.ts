@@ -48,6 +48,21 @@ const anchoring =
 
 export const scenarios: Scenario[] = [
   {
+    name: 'opus-small-jobs',
+    claim: 'The daily driver: Opus on high through a run of ordinary small jobs in one session. Each prompt is assessed, so easy ones step down.',
+    model: OPUS,
+    fixture: 'payouts',
+    hidden: ['rename', 'pretty-flag', 'balance-command'],
+    steps: [
+      'Rename getTxns to listTransactions everywhere.',
+      'Add a --pretty flag to the export command that indents the JSON.',
+      "Add a balance command to the CLI that prints an account's closing balance.",
+      'Update the README so it documents the new flag and command.',
+      'Write me a commit message for all of this.',
+    ],
+    arms: [off('high'), on('high')],
+  },
+  {
     name: 'bigint',
     claim: 'A codebase-wide change that must not change any output steps up (probe: high at 72%): easy to miss a place, and JSON can\'t hold a bigint.',
     model: OPUS,

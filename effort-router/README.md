@@ -4,7 +4,7 @@ A Claude Code plugin that saves time and money by running each task at the lowes
 session's own model assesses each of your first five prompts and moves the level to whichever gets the work done fastest
 and cheapest, up or down. Then the level locks for the rest of the session. Each subagent gets its own level, chosen by the agent that launches it.
 
-<img src="docs/race.gif" width="720" alt="A race between two Claude Code sessions on the same three chores, Fable 5.1 set to xhigh. Fixed at xhigh it takes 8:28 and $3.74. With effort-router the main thread moves to medium and its subagents to low, medium and low. It takes 2:24 and $1.64. All 7 hidden tests pass on both">
+<img src="docs/race.gif" width="720" alt="A race between two Claude Code sessions on the same three chores, Fable 5.1 set to xhigh. Fixed at xhigh it takes 8:28 and $3.74. With effort-router the main thread moves to medium and its subagents to low, medium and low. It takes 2:24 and $1.64. All 7 tests pass on both">
 
 It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the terminal and in the Desktop app's Code tab. It requires
 Claude Code 2.1.286 or later.
