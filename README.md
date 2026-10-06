@@ -10,7 +10,7 @@ Claude Code runs every task at the effort level you picked, whether it's renamin
 touches three services. Anthropic's [Spending your effort](https://claude.dev/blog/spending-your-effort/) says the
 right level depends on the task. effort-router picks it for you, so easy work stops paying for thinking it doesn't need.
 
-<img src="effort-router/docs/race.gif" width="720" alt="A race between two Claude Code sessions on the same three chores, Fable 5.1 set to xhigh. Fixed at xhigh it takes 8:28 and $3.74. With effort-router the main thread moves to medium and its subagents to low, medium and low. It takes 2:24 and $1.64. All 7 tests pass on both">
+<img src="effort-router/docs/race.gif" width="720" alt="A race between two Claude Code sessions on Opus 5.5, both set to high, through the same 20 everyday prompts. Without the router it takes 6:05 and <img src="effort-router/docs/race.gif" width="720" alt=".80. effort-router puts every prompt on low and it takes 3:47 and <img src="effort-router/docs/race.gif" width="720" alt=".17. Tests pass on both">
 
 - **Your session.** Your session's own model assesses each of your first five prompts and moves the level to the one
   that gets the work done fastest and cheapest, then locks. The footer shows the level in use, and clicking it gives
@@ -58,8 +58,8 @@ What a step down saves, roughly, in cost and time:
 | medium | low | a third less | a fifth less |
 
 That's from our runs and Artificial Analysis's Intelligence Index (v4.3.2). The smaller the task, the less it saves,
-because reading the conversation costs the same at every level. Over a long session the saving grows, because high
-takes more turns and reads more, and every later request pays to re-read all of it.
+because reading the conversation costs the same at every level. Over a long session it adds up, because high takes more turns and reads more, and every later request pays to
+re-read all of it. In a 20-prompt session on Opus at high, the router finished 2:18 sooner and 63 cents cheaper.
 
 On Opus 5.5's default of medium there's less to step down from, so it mostly picks off the small tasks. It still steps
 up when the work clearly needs it, because a hard task done right first time costs less than the rework. Routing costs
