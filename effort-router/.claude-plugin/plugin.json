@@ -1,9 +1,10 @@
 {
   "name": "effort-router",
   "version": "0.18.0",
-  "description": "Saves time and money by running each task at the lowest reasoning effort that does it well. Your session's own model assesses each of your first prompts, knowing what each level can do on that model, and the session goes to the level that gets the work done fastest and cheapest. Then it locks. Subagents get their own level, chosen by the agent that starts them. The footer shows what it's doing, and /er report shows where your effort went.",
+  "description": "Make your Claude Code usage go up to twice as far. Picks the right reasoning effort for every prompt and every subagent, so easy work stops burning your limits and answers come back sooner.",
   "author": {
-    "name": "Tommy Long"
+    "name": "Tommy Long",
+    "url": "https://www.tommylong.com"
   },
   "license": "MIT",
   "homepage": "https://github.com/tommy5dollar/effort-router/tree/main/effort-router",
