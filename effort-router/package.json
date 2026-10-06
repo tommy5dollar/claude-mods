@@ -3,9 +3,7 @@
   "private": true,
   "scripts": {
     "test": "bun test",
-    "eval": "bun eval/run.ts"
-  },
-  "devDependencies": {
-    "typescript": "^7.0.2"
+    "eval": "bun eval/run.ts",
+    "typecheck": "bun x --package typescript@5 tsc --noEmit -p ."
   }
 }
