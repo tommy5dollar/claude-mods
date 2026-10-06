@@ -37,8 +37,7 @@ export function clampLevel(level: Level, levels: readonly Level[]): Level {
  * when there is nothing to judge yet. It never ties a kind of task to a
  * level: what a level can do differs by model, and the model notes say it.
  * (An eval on 2026-10-04 showed a frame whose examples named levels overrode
- * the notes.) It has no worked examples: Tommy, 2026-10-05, "The era of
- * multi-shot prompting is long dead", and the checks run on Opus 5.5 and
+ * the notes.) It has no worked examples: the checks run on Opus 5.5 and
  * Fable 5.1, which read a conversation without being shown how. The rules
  * (`rules/default.md` and the user's files) hold the principles for choosing.
  */
@@ -1161,8 +1160,8 @@ export function offeredLevels(highest: Level, setting?: Level): readonly Level[]
 export type Settled = { state: RouterState; moved?: { from?: Level; to: Level }; locked?: Level; outcome: string }
 
 /**
- * Applies an assessment: the session goes to the level it picked. Tommy,
- * 2026-10-05: switching costs the user nothing now (no approval, no review),
+ * Applies an assessment: the session goes to the level it picked. Switching
+ * costs the user nothing (no approval, no review),
  * so the router does what the check says rather than second-guessing it with
  * a confidence bar in code. The check is asked for the level that gets the
  * work done in the least time and total cost, and weighs the risk itself.
@@ -1376,7 +1375,7 @@ export type BandAction = {
 
 /**
  * The band's four slots, a gradient from doing nothing to taking action: 1
- * Hide, 2 the lock, 3 on and off, 4 assess. Tommy, 2026-10-05.
+ * Hide, 2 the lock, 3 on and off, 4 assess.
  */
 export function bandActions(state: RouterState, view: View): BandAction[] {
   const hide: BandAction = { value: 'hide', label: 'Hide' }

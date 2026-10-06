@@ -155,8 +155,8 @@ export const FIXTURES: Fixture[] = [
   { name: 'pay: security review', messages: [], current: "Do a security review of the CLI and the exporters: can anyone see or change another account's money?", expect: ['high'] },
   { name: 'pay: unattended bigint migration', messages: [], current: "I'm going offline for the evening. Change every amount from a number to a bigint without changing any output, and don't stop until the whole test suite passes.", expect: ['medium', 'high'] },
 
-  // --- added 2026-10-05: everyday work that should step down from the default (Opus medium or high, Fable high) --
-  // These are the router's bread and butter (Tommy, 2026-10-05): most of its value is moving routine sessions to a
+  // --- everyday work that should step down from the default (Opus medium or high, Fable high) ---------------------
+  // These are the router's bread and butter: most of its value is moving routine sessions to a
   // cheaper level, so the set needs plenty of them.
   { name: 'cheap: fix a lint error', messages: [], current: 'npm run lint is failing on an unused import in src/cli.ts. Fix it.', expect: ['low'] },
   { name: 'cheap: bump a dependency', messages: [], current: 'Bump zod to the latest 3.x and make sure the build still passes.', expect: ['low'] },

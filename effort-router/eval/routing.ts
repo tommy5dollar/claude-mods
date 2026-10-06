@@ -1,6 +1,6 @@
 // The routing eval: every prompt in the set (eval/fixtures.ts), what the router routes it to, the approved level
-// (eval/routing-approved.json, Tommy's sign-off) and a judge's view (eval/routing-rubric.md). Any change of prompt,
-// rules or notes runs this first: a prompt whose level moves off its approved level is a regression until Tommy
+// (eval/routing-approved.json, the maintainer's sign-off) and a judge's view (eval/routing-rubric.md). Any change of prompt,
+// rules or notes runs this first: a prompt whose level moves off its approved level is a regression until the maintainer
 // signs it off. It is independent of the end-to-end scenarios that show the savings.
 //
 // Each read is the first-prompt check (a separate call with the trimmed transcript), as `claude -p --safe-mode` with

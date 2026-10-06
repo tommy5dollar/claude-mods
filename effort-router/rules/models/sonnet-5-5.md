@@ -2,7 +2,7 @@
 How effort pays on Claude Sonnet 5.5. The router sends these notes with every check while the session (or a subagent) runs
 on this model. They are heuristics, not results: benchmark scores are left out because a few points more on a hard
 benchmark means a few more of the hardest tasks solved, not every task done better, and a model reads them as the
-latter (Tommy, 2026-10-05). Cost and time against medium do scale with the level, so they stay, rounded from the
+latter. Cost and time against medium do scale with the level, so they stay, rounded from the
 CursorBench 4.0 and Terminal-Bench 4.0 cost and time per task. Every model's notes have the same shape: how effort pays,
 Anthropic's advice, then each level with its cost, time and behaviours. A line that starts with a level the check
 can't pick (max, unless offered) is left out of the prompt. Evidence: research-2026-10.md and

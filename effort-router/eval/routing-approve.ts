@@ -73,8 +73,8 @@ const fableOverrides: Record<string, { fable: string | string[]; why: string }> 
   'session:pay: security review': { fable: 'high', why: 'Fable went to xhigh until its notes said high covers most edge-case-heavy work (2026-10-05).' },
 }
 
-// Accepted on 2026-10-05 when the rules were cut back to generic heuristics (Tommy: "I'd rather we don't land all 72
-// scenarios correctly than end up writing the scenarios themselves into the rules"). The judge still prefers medium.
+// Accepted when the rules were cut back to generic heuristics: better to miss a few of the set than to write its
+// prompts into the rules. The judge still prefers medium.
 // Fixing these took lines that named these very scenarios, so high stays acceptable here and the gate flags any
 // further change.
 const genericAccepted: Record<string, { opus?: string[]; fable?: string[]; why: string }> = {

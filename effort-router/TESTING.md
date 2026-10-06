@@ -39,7 +39,7 @@ claude plugin test .                # 60 tests in the engine's kit: the first pr
 claude plugin validate . --strict
 bun eval/routing.ts                 # the routing gate, real model: every fixture (73 sessions, 14 subagent briefs) read 3
                                     # times on Opus from medium, checked against eval/routing-approved.json. A prompt off
-                                    # its approved level on most runs is MOVED and needs Tommy's say-so before shipping, one
+                                    # its approved level on most runs is MOVED and needs the maintainer's sign-off before shipping, one
                                     # run in three off is a wobble. --model sonnet|fable, --setting high (approvals hold
                                     # from any start), --judge asks Opus at high with eval/routing-rubric.md, and the run
                                     # prints its cost (about $0.01 a read on Opus, $0.05 on Fable). Run it after any change
@@ -162,7 +162,7 @@ makes the model notes the main guide. `hybrid` keeps the shipped prompt and says
 
 What came back: every mechanical brief (web research and tabulating, an Explore search, summarising a given file, running tests and reporting, listing npm scripts, extracting action items from given text) was low in all 3 runs. Adding translation keys in the existing format was low twice and medium once (both pass). Implementing rate limiting from a spec, debugging a failing test, the design proposal and the PR review were high every time. The security review was xhigh every time. The autonomous port with property tests was high every time, never max (high, xhigh or max pass). The vague "now do the same for the invoices table" was medium every time.
 
-Read 100% with care. The fixtures were written alongside the subagent frame, several sit close to its worked examples (a codebase search, running a command, debugging, a security audit) and most expectations allow two levels. It shows the frame is followed and the mechanical/judgement split is stable, not general accuracy on real briefs. The live briefs in Tommy's transcripts are the next check.
+Read 100% with care. The fixtures were written alongside the subagent frame, several sit close to its worked examples (a codebase search, running a command, debugging, a security audit) and most expectations allow two levels. It shows the frame is followed and the mechanical/judgement split is stable, not general accuracy on real briefs. Live briefs from real sessions are the next check.
 
 The kit passes a `Select` in the SessionMode footer on both surfaces, but the real Desktop app (2.1.286) silently drops it, so the footer is a `Button`. Footer and band rendering has to be checked live (the 0.17 list below).
 
@@ -289,7 +289,7 @@ engine's `effort` is the level after a mod's rewrite (medium rewritten to high r
 
 ## Live, Desktop: verified
 
-### 0.17.0: the whole walkthrough (2026-10-05, Desktop 2.1.286, Opus 5.5 at Medium, by Tommy)
+### 0.17.0: the whole walkthrough (2026-10-05, Desktop 2.1.286, Opus 5.5 at Medium)
 
 One session in a scratch folder with a 16-line `checkout.js` holding a coupon-expiry bug, run through the list below
 (screenshots in `docs/`):
