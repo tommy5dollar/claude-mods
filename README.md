@@ -45,14 +45,14 @@ It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the Desktop app's Code tab 
 
 ```
 claude plugin marketplace add tommy5dollar/effort-router
-claude plugin install effort-router@tommy5dollar
+claude plugin install effort-router@effort-router
 ```
 
 If the terminal says some options aren't set yet, that's fine: they're optional and the defaults work.
 
 Then start a new session. The Desktop app and the terminal share plugins, so either way installs it for both. In the
 Desktop app the footer appears once you've sent the first message. `/er off` turns it off for a session, and
-`claude plugin uninstall effort-router@tommy5dollar` removes it.
+`claude plugin uninstall effort-router@effort-router` removes it.
 
 ## Does it save money and time?
 

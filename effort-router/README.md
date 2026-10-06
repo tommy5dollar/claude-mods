@@ -16,7 +16,7 @@ terminal:
 
 ```
 claude plugin marketplace add tommy5dollar/effort-router
-claude plugin install effort-router@tommy5dollar
+claude plugin install effort-router@effort-router
 ```
 
 Then start a new session. In the Desktop app the footer appears once you've sent the first message.
@@ -263,7 +263,7 @@ No "saved" figure: the router lowers easy tasks and raises hard ones, so these a
 
 ## Options
 
-Set them in `/plugin configure`, or under `pluginConfigs["effort-router@tommy5dollar"].options` in settings.json. Every option has a default, so there's nothing to set up.
+Set them in `/plugin configure`, or under `pluginConfigs["effort-router@effort-router"].options` in settings.json. Every option has a default, so there's nothing to set up.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
@@ -305,7 +305,7 @@ An organisation can add routing rules for everyone in managed settings (`managed
 ```json
 {
   "pluginConfigs": {
-    "effort-router@tommy5dollar": {
+    "effort-router@effort-router": {
       "options": {
         "rules": "$defaults\n\n- Code under payments/ or ledger/ is never routed below high.\n- Infrastructure changes (terraform/, k8s/) are high."
       }
@@ -343,8 +343,8 @@ and a general-purpose subagent was `agent:builtin:general-purpose`. Check the va
 ## Turning it off and uninstalling
 
 - **For one session:** `/er off`, or Turn off in the band. Changing the effort picker does the same.
-- **Everywhere, keeping it installed:** `claude plugin disable effort-router@tommy5dollar`.
-- **Removing it:** `claude plugin uninstall effort-router@tommy5dollar`. Then delete `~/.claude/effort-router/` to
+- **Everywhere, keeping it installed:** `claude plugin disable effort-router@effort-router`.
+- **Removing it:** `claude plugin uninstall effort-router@effort-router`. Then delete `~/.claude/effort-router/` to
   remove its ledgers, and `~/.claude/effort-router.md` if you wrote your own rules there.
 
 ## Known limits

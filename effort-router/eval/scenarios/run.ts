@@ -91,7 +91,7 @@ function runSession(s: Scenario, arm: Arm, repo: string, dir: string, port: numb
   if (arm.router) args.push('--plugin-dir', ROUTER)
   if (arm.options) {
     const config = { options: arm.options }
-    args.push('--settings', JSON.stringify({ pluginConfigs: { 'effort-router@inline': config, 'effort-router@tommy5dollar': config } }))
+    args.push('--settings', JSON.stringify({ pluginConfigs: { 'effort-router@inline': config, 'effort-router@effort-router': config } }))
   }
   const env = cleanEnv({
     CLAUDE_CODE_ENABLE_TELEMETRY: '1',

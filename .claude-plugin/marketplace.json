@@ -1,10 +1,10 @@
 {
-  "name": "tommy5dollar",
+  "name": "effort-router",
   "owner": {
     "name": "Tommy Long",
     "url": "https://www.tommylong.com"
   },
-  "description": "Claude Code plugins by Tommy Long. effort-router picks the reasoning effort for each task and each subagent.",
+  "description": "effort-router, by Tommy Long. Make your Claude Code usage go up to twice as far.",
   "plugins": [
     {
       "name": "effort-router",

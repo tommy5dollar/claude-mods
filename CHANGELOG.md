@@ -4,9 +4,9 @@
 
 ### 0.18.0 (2026-10-05)
 
-- **The repo is now `tommy5dollar/effort-router`** (it was `tommy5dollar/claude-plugins`). The marketplace keeps its
-  name, `tommy5dollar`, so `effort-router@tommy5dollar` doesn't change. If you added the old repo, run
-  `claude plugin marketplace remove tommy5dollar`, then the commands in Install in the README.
+- **The repo is now `tommy5dollar/effort-router`** (it was `tommy5dollar/claude-plugins`), and its marketplace is now
+  `effort-router` (it was `tommy5dollar`), so the plugin is `effort-router@effort-router`. If you added the old one,
+  run `claude plugin marketplace remove tommy5dollar`, then the commands in Install in the README.
 
 - **The check names a level, and the session goes to it.** Each assessment now asks your session's model one
   question: which level gets this session's work done in the least time and total inference cost, counting the rework

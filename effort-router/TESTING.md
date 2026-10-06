@@ -335,4 +335,4 @@ Load the build with `claude --plugin-dir <path>/effort-router` (terminal) or in 
 
 ## Org layer
 
-Verified live: a `--settings` file (the `flag` source) carrying `pluginConfigs["effort-router@tommy5dollar"].options`, and a custom top-level `effortRouter` key, both reach `$.settings.read({ source })` intact. The router reads the organisation's `rules` from the `policy` source. A real managed-settings file was not written (it needs admin rights). To check by hand, put the README's example in the managed-settings.json for your OS and run `/er rules`: it lists `managed settings` as a layer and shows the organisation's lines.
+Verified live: a `--settings` file (the `flag` source) carrying `pluginConfigs["effort-router@effort-router"].options`, and a custom top-level `effortRouter` key, both reach `$.settings.read({ source })` intact. The router reads the organisation's `rules` from the `policy` source. A real managed-settings file was not written (it needs admin rights). To check by hand, put the README's example in the managed-settings.json for your OS and run `/er rules`: it lists `managed settings` as a layer and shows the organisation's lines.
