@@ -45,6 +45,8 @@ claude plugin marketplace add tommy5dollar/effort-router
 claude plugin install effort-router@tommy5dollar
 ```
 
+If the terminal says some options aren't set yet, that's fine: they're optional and the defaults work.
+
 Then start a new session. The Desktop app and the terminal share plugins, so either way installs it for both. In the
 Desktop app the footer appears once you've sent the first message. `/er off` turns it off for a session, and
 `claude plugin uninstall effort-router@tommy5dollar` removes it.
