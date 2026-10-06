@@ -49,8 +49,6 @@ claude plugin install effort-router@tommy5dollar
 ```
 
 If the terminal says some options aren't set yet, that's fine: they're optional and the defaults work.
-If adding the marketplace fails, you have an older `tommy5dollar` marketplace from somewhere else. Run
-`claude plugin marketplace remove tommy5dollar`, then add it again.
 
 Then start a new session. The Desktop app and the terminal share plugins, so either way installs it for both. In the
 Desktop app the footer appears once you've sent the first message. `/er off` turns it off for a session, and
