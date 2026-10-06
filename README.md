@@ -13,7 +13,7 @@ subagent. Your usage goes further, answers come back up to 3.5x faster, and the 
 Free, 30 seconds to install, built on Anthropic's own advice in
 [Spending your effort](https://claude.dev/blog/spending-your-effort/). By [Tommy Long](https://www.tommylong.com).
 
-<img src="effort-router/docs/race.gif" width="720" alt="A race between two Claude Code sessions on Opus 5.5, both set to high, through the same 20 everyday prompts. effort-router puts every prompt on low and finishes far sooner and cheaper. Tests pass on both">
+<img src="effort-router/docs/launch.gif" width="720" alt="Claude Code is overthinking your renames. Everyday prompts all run at high and usage drains fast. effort-router picks the effort for every prompt, easy ones drop to low, and usage lasts far longer. Up to 2x the usage, up to 3.5x faster, same results">
 
 - **Your session.** Your session's own model assesses each of your first five prompts and moves the level to the one
   that gets the work done fastest and cheapest, then locks. The footer shows the level in use, and clicking it gives
