@@ -18,11 +18,13 @@ const now = {
   opus: picks(rowsOf(/-opus-(live|cheap|blind)\.json$/)),
   sonnet: picks(rowsOf(/-sonnet-(live|cheap)\.json$/)),
   fable: picks(rowsOf(/-fable-(live|blind)\.json$/)),
+  haiku: picks(rowsOf(/-haiku-live\.json$/)),
 }
 const judge = {
   opus: JSON.parse(readFileSync(join(EVAL, 'routing-judge-opus.json'), 'utf8')),
   sonnet: JSON.parse(readFileSync(join(EVAL, 'routing-judge-sonnet.json'), 'utf8')),
   fable: JSON.parse(readFileSync(join(EVAL, 'routing-judge-fable.json'), 'utf8')),
+  haiku: JSON.parse(readFileSync(join(EVAL, 'routing-judge-haiku.json'), 'utf8')),
 }
 
 const overrides: Record<string, { opus?: string | string[]; sonnet?: string | string[]; why: string }> = {
@@ -86,6 +88,14 @@ const genericAccepted: Record<string, { opus?: string[]; fable?: string[]; why: 
   'session:ask: quick one on a money bug': { fable: ['low', 'medium'], why: 'Reworded so it no longer repeats the frame\'s own example. Fable steps down to medium, which follows the user\'s direction if not all the way.' },
 }
 
+// Haiku 5.5, signed off 2026-10-07 from three runs at medium: its picks as they stand, every level it gave. It often
+// picks low where the judge wants medium, which fits people who turn the router on to spend less. Where the user names
+// a level, Haiku sessions override it for cost: approved at high (the most on offer) and recorded as a known miss.
+const haikuOverrides: Record<string, { haiku: string; why: string }> = {
+  'session:ask: xhigh on a typo': { haiku: 'high', why: 'Haiku: a known miss. Haiku sessions pick low and say cost overrides the request.' },
+  'session:ask: max on a rename': { haiku: 'high', why: 'Haiku: a known miss. Haiku sessions often pick medium against the request.' },
+}
+
 const keys = [...new Set([...Object.keys(now.opus), ...Object.keys(now.sonnet)])]
 const out: Record<string, Record<string, unknown>> = {}
 for (const key of keys) {
@@ -114,6 +124,10 @@ for (const key of keys) {
     if (ga.fable) entry.fable = ga.fable
     entry.why = entry.why ? `${entry.why} ${ga.why}` : ga.why
   }
+  const h = now.haiku[key]
+  if (h) entry.haiku = haikuOverrides[key]?.haiku ?? (new Set(h).size === 1 ? h[0] : [...new Set(h)])
+  const ho = haikuOverrides[key]
+  if (ho) entry.why = entry.why ? `${entry.why} ${ho.why}` : ho.why
   out[key] = entry
 }
 const missing = [...Object.keys(overrides), ...Object.keys(fableOverrides), ...Object.keys(genericAccepted)].filter(k => !out[k])

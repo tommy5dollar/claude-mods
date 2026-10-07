@@ -2,17 +2,23 @@
   "session:pay: README typo": {
     "opus": "low",
     "sonnet": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "session:greeting": {
     "opus": "undecided",
     "sonnet": "undecided",
-    "fable": "undecided"
+    "fable": "undecided",
+    "haiku": [
+      "low",
+      "undecided"
+    ]
   },
   "session:pull latest": {
     "opus": "undecided",
     "sonnet": "undecided",
-    "fable": "undecided"
+    "fable": "undecided",
+    "haiku": "low"
   },
   "session:repo question before work": {
     "opus": "undecided",
@@ -24,7 +30,8 @@
       "undecided",
       "low"
     ],
-    "why": "Before any task undecided is right. Low on a question is harmless and cheaper. Fable: Before any task undecided is right. Low on a question is harmless and cheaper."
+    "why": "Before any task undecided is right. Low on a question is harmless and cheaper. Fable: Before any task undecided is right. Low on a question is harmless and cheaper.",
+    "haiku": "low"
   },
   "session:pull, then what does it do": {
     "opus": "undecided",
@@ -36,7 +43,8 @@
       "undecided",
       "low"
     ],
-    "why": "As the repo question. Fable: As the repo question."
+    "why": "As the repo question. Fable: As the repo question.",
+    "haiku": "low"
   },
   "session:install and run (housekeeping)": {
     "opus": "undecided",
@@ -48,7 +56,8 @@
       "undecided",
       "low"
     ],
-    "why": "As the repo question. Fable: As the repo question."
+    "why": "As the repo question. Fable: As the repo question.",
+    "haiku": "low"
   },
   "session:finance build after filler (the live miss)": {
     "opus": "medium",
@@ -56,7 +65,8 @@
     "fable": [
       "medium",
       "high"
-    ]
+    ],
+    "haiku": "high"
   },
   "session:vague feature": {
     "opus": [
@@ -74,7 +84,11 @@
       "low",
       "undecided"
     ],
-    "why": "Borderline between no task yet and a vague one. Medium or low is cheaper for a session that starts on high, but undecided follows the frame. Fable: As on the other models."
+    "why": "Borderline between no task yet and a vague one. Medium or low is cheaper for a session that starts on high, but undecided follows the frame. Fable: As on the other models.",
+    "haiku": [
+      "low",
+      "medium"
+    ]
   },
   "session:ordinary feature": {
     "opus": "medium",
@@ -83,7 +97,8 @@
       "low",
       "medium"
     ],
-    "why": "Fable: Fable is strong at low and the judge picked it, but medium for a feature is a fine step down from high."
+    "why": "Fable: Fable is strong at low and the judge picked it, but medium for a feature is a fine step down from high.",
+    "haiku": "medium"
   },
   "session:brownfield bug fix": {
     "opus": [
@@ -92,7 +107,8 @@
     ],
     "sonnet": "high",
     "fable": "medium",
-    "why": "Timing and stale state in a bug fix. Goes to high in some runs."
+    "why": "Timing and stale state in a bug fix. Goes to high in some runs.",
+    "haiku": "medium"
   },
   "session:mechanical rename": {
     "opus": "low",
@@ -101,7 +117,8 @@
       "medium"
     ],
     "fable": "low",
-    "why": "Mechanical. The judge wanted medium on Sonnet because its notes say low checks in early, but low is fine for a rename."
+    "why": "Mechanical. The judge wanted medium on Sonnet because its notes say low checks in early, but low is fine for a rename.",
+    "haiku": "low"
   },
   "session:edge-case tests": {
     "opus": "medium",
@@ -109,12 +126,14 @@
       "medium",
       "high"
     ],
-    "fable": "medium"
+    "fable": "medium",
+    "haiku": "medium"
   },
   "session:storage engine concurrency": {
     "opus": "high",
     "sonnet": "high",
-    "fable": "high"
+    "fable": "high",
+    "haiku": "high"
   },
   "session:autonomous vulnerability hunt": {
     "opus": "high",
@@ -122,7 +141,8 @@
     "fable": [
       "high",
       "xhigh"
-    ]
+    ],
+    "haiku": "high"
   },
   "session:autonomous end-to-end build": {
     "opus": [
@@ -134,12 +154,17 @@
       "medium",
       "high"
     ],
-    "why": "Fable: Fable stayed on high for this until its notes said medium copes with long unattended builds (2026-10-05). A large loose build with nobody watching. High is what generic rules give, and on Fable it is Anthropic's own default."
+    "why": "Fable: Fable stayed on high for this until its notes said medium copes with long unattended builds (2026-10-05). A large loose build with nobody watching. High is what generic rules give, and on Fable it is Anthropic's own default.",
+    "haiku": "high"
   },
   "session:research on current tools": {
     "opus": "medium",
     "sonnet": "medium",
-    "fable": "medium"
+    "fable": "medium",
+    "haiku": [
+      "high",
+      "medium"
+    ]
   },
   "session:held out: morning + git status": {
     "opus": [
@@ -154,7 +179,8 @@
       "undecided",
       "low"
     ],
-    "why": "As the repo question. Fable: As the repo question."
+    "why": "As the repo question. Fable: As the repo question.",
+    "haiku": "low"
   },
   "session:held out: payout reconciliation webhook": {
     "opus": [
@@ -166,7 +192,8 @@
       "medium",
       "high"
     ],
-    "why": "Money moving through an outside system. High is what generic rules give."
+    "why": "Money moving through an outside system. High is what generic rules give.",
+    "haiku": "high"
   },
   "session:held out: bank statement importer, vague": {
     "opus": "medium",
@@ -175,7 +202,11 @@
       "low",
       "medium"
     ],
-    "why": "Fable: As the ordinary feature."
+    "why": "Fable: As the ordinary feature.",
+    "haiku": [
+      "low",
+      "undecided"
+    ]
   },
   "session:held out: pagination": {
     "opus": "medium",
@@ -184,7 +215,8 @@
       "low",
       "medium"
     ],
-    "why": "Fable: Both step down from high. Medium after the notes said medium checks its own work."
+    "why": "Fable: Both step down from high. Medium after the notes said medium checks its own work.",
+    "haiku": "medium"
   },
   "session:held out: \"b\" after a lettered question": {
     "opus": "low",
@@ -192,7 +224,8 @@
     "fable": [
       "low",
       "medium"
-    ]
+    ],
+    "haiku": "low"
   },
   "session:\"2, keep it simple\" after a numbered question": {
     "opus": "low",
@@ -201,12 +234,14 @@
       "medium"
     ],
     "fable": "low",
-    "why": "\"Keep it simple\" narrows the change, it does not ask for less thinking. Low or medium."
+    "why": "\"Keep it simple\" narrows the change, it does not ask for less thinking. Low or medium.",
+    "haiku": "low"
   },
   "session:scope narrowed by a later clarification": {
     "opus": "low",
     "sonnet": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "session:AskUserQuestion answers refine the task": {
     "opus": [
@@ -215,7 +250,8 @@
     ],
     "sonnet": "high",
     "fable": "medium",
-    "why": "A sync across two outside accounting systems. High is what generic rules give."
+    "why": "A sync across two outside accounting systems. High is what generic rules give.",
+    "haiku": "medium"
   },
   "session:pay: what does this repo do": {
     "opus": "undecided",
@@ -227,7 +263,8 @@
       "undecided",
       "low"
     ],
-    "why": "As the repo question. Fable: As the repo question."
+    "why": "As the repo question. Fable: As the repo question.",
+    "haiku": "low"
   },
   "session:pay: rename and run tests": {
     "opus": "low",
@@ -236,7 +273,11 @@
       "medium"
     ],
     "fable": "low",
-    "why": "As the mechanical rename."
+    "why": "As the mechanical rename.",
+    "haiku": [
+      "low",
+      "medium"
+    ]
   },
   "session:pay: explain fees, no changes": {
     "opus": [
@@ -254,7 +295,8 @@
       "low",
       "medium"
     ],
-    "why": "A question asked before any work, which the frame says is undecided. Low or medium are fine too, since it is read-only tracing. Fable: As on the other models."
+    "why": "A question asked before any work, which the frame says is undecided. Low or medium are fine too, since it is read-only tracing. Fable: As on the other models.",
+    "haiku": "low"
   },
   "session:pay: --json flag": {
     "opus": [
@@ -266,12 +308,20 @@
       "medium"
     ],
     "fable": "low",
-    "why": "A small feature in one command. Either cheap level."
+    "why": "A small feature in one command. Either cheap level.",
+    "haiku": [
+      "low",
+      "medium"
+    ]
   },
   "session:pay: CSV exporter": {
     "opus": "medium",
     "sonnet": "medium",
-    "fable": "low"
+    "fable": "low",
+    "haiku": [
+      "low",
+      "medium"
+    ]
   },
   "session:pay: fees from a spec": {
     "opus": "medium",
@@ -279,12 +329,14 @@
     "fable": [
       "low",
       "medium"
-    ]
+    ],
+    "haiku": "medium"
   },
   "session:pay: date edge-case tests": {
     "opus": "medium",
     "sonnet": "medium",
-    "fable": "medium"
+    "fable": "medium",
+    "haiku": "medium"
   },
   "session:pay: sketch designs, no code": {
     "opus": "medium",
@@ -292,23 +344,27 @@
     "fable": [
       "low",
       "medium"
-    ]
+    ],
+    "haiku": "low"
   },
   "session:pay: double debit bug": {
     "opus": "high",
     "sonnet": "high",
-    "fable": "high"
+    "fable": "high",
+    "haiku": "high"
   },
   "session:pay: concurrency-safe billing": {
     "opus": "high",
     "sonnet": "high",
-    "fable": "high"
+    "fable": "high",
+    "haiku": "high"
   },
   "session:pay: security review": {
     "opus": "high",
     "sonnet": "high",
     "fable": "high",
-    "why": "Fable: Fable went to xhigh until its notes said high covers most edge-case-heavy work (2026-10-05)."
+    "why": "Fable: Fable went to xhigh until its notes said high covers most edge-case-heavy work (2026-10-05).",
+    "haiku": "high"
   },
   "session:pay: unattended bigint migration": {
     "opus": "high",
@@ -316,7 +372,8 @@
     "fable": [
       "medium",
       "high"
-    ]
+    ],
+    "haiku": "high"
   },
   "session:ask: think hard on a small task": {
     "opus": [
@@ -324,7 +381,8 @@
       "xhigh"
     ],
     "sonnet": "xhigh",
-    "fable": "xhigh"
+    "fable": "xhigh",
+    "haiku": "high"
   },
   "session:ask: quick one on a money bug": {
     "opus": "low",
@@ -333,62 +391,79 @@
       "low",
       "medium"
     ],
-    "why": "Reworded so it no longer repeats the frame's own example. Fable steps down to medium, which follows the user's direction if not all the way."
+    "why": "Reworded so it no longer repeats the frame's own example. Fable steps down to medium, which follows the user's direction if not all the way.",
+    "haiku": [
+      "medium",
+      "low"
+    ]
   },
   "session:ask: low effort on a spec": {
     "opus": "low",
     "sonnet": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "session:ask: xhigh on a typo": {
     "opus": "xhigh",
     "sonnet": "xhigh",
-    "fable": "xhigh"
+    "fable": "xhigh",
+    "haiku": "high",
+    "why": "Haiku: a known miss. Haiku sessions pick low and say cost overrides the request."
   },
   "session:ask: medium on a security review": {
     "opus": "medium",
     "sonnet": "medium",
-    "fable": "medium"
+    "fable": "medium",
+    "haiku": "medium"
   },
   "session:ask: max on a rename": {
     "opus": "xhigh",
     "sonnet": "xhigh",
-    "fable": "xhigh"
+    "fable": "xhigh",
+    "haiku": "high",
+    "why": "Haiku: a known miss. Haiku sessions often pick medium against the request."
   },
   "subagent:web research, tabulate lender criteria": {
     "opus": "medium",
     "sonnet": "medium",
-    "fable": "medium"
+    "fable": "medium",
+    "haiku": "medium"
   },
   "subagent:Explore: where is the token refreshed": {
     "opus": "low",
     "sonnet": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "subagent:summarise a given doc": {
     "opus": "low",
     "sonnet": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "subagent:run the tests and report, no fixing": {
     "opus": "low",
     "sonnet": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "subagent:list npm scripts across the monorepo": {
     "opus": "low",
     "sonnet": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "subagent:extract action items from given text": {
     "opus": "low",
     "sonnet": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "subagent:add translation keys in the existing format": {
     "opus": "low",
     "sonnet": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "subagent:implement rate limiting from a spec, with tests": {
     "opus": [
@@ -400,7 +475,8 @@
       "high"
     ],
     "fable": "medium",
-    "why": "A specified feature, so medium should do, but Redis atomicity is a race and the Opus notes say high pays for races."
+    "why": "A specified feature, so medium should do, but Redis atomicity is a race and the Opus notes say high pays for races.",
+    "haiku": "medium"
   },
   "subagent:debug a failing test after a merge": {
     "opus": "medium",
@@ -411,7 +487,8 @@
     "fable": [
       "low",
       "medium"
-    ]
+    ],
+    "haiku": "medium"
   },
   "subagent:security review of a branch": {
     "opus": [
@@ -420,7 +497,8 @@
     ],
     "sonnet": "high",
     "fable": "high",
-    "why": "Security is one of the hidden-risk areas the rules name, and no user is there to catch a miss. High is acceptable here, but medium is enough for a small diff with a checklist."
+    "why": "Security is one of the hidden-risk areas the rules name, and no user is there to catch a miss. High is acceptable here, but medium is enough for a small diff with a checklist.",
+    "haiku": "high"
   },
   "subagent:Plan: design proposal for event-driven reconciliation": {
     "opus": [
@@ -432,12 +510,20 @@
       "medium",
       "high"
     ],
-    "why": "A design doc with no user in the loop. Medium is enough; high is tolerated rather than wanted. Fable: As on Opus: a design doc with no user in the loop. Medium is enough; high is tolerated."
+    "why": "A design doc with no user in the loop. Medium is enough; high is tolerated rather than wanted. Fable: As on Opus: a design doc with no user in the loop. Medium is enough; high is tolerated.",
+    "haiku": [
+      "medium",
+      "high"
+    ]
   },
   "subagent:review a PR for correctness": {
     "opus": "high",
     "sonnet": "high",
-    "fable": "high"
+    "fable": "high",
+    "haiku": [
+      "high",
+      "medium"
+    ]
   },
   "subagent:autonomous port with property tests": {
     "opus": [
@@ -449,7 +535,8 @@
       "medium",
       "high"
     ],
-    "why": "A long unattended port of payment logic. High is what generic rules give."
+    "why": "A long unattended port of payment logic. High is what generic rules give.",
+    "haiku": "high"
   },
   "subagent:vague: \"same for the invoices table\"": {
     "opus": "medium",
@@ -461,12 +548,17 @@
       "low",
       "medium"
     ],
-    "why": "The brief is vague, so the subagent has to work out the earlier change. Medium or high. Fable: Repeating earlier work on another table. Either cheap level."
+    "why": "The brief is vague, so the subagent has to work out the earlier change. Medium or high. Fable: Repeating earlier work on another table. Either cheap level.",
+    "haiku": [
+      "low",
+      "medium"
+    ]
   },
   "session:cheap: fix a lint error": {
     "opus": "low",
     "sonnet": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "session:cheap: bump a dependency": {
     "opus": [
@@ -481,22 +573,29 @@
       "low",
       "medium"
     ],
-    "why": "It is a task, so undecided is wrong. Low or medium."
+    "why": "It is a task, so undecided is wrong. Low or medium.",
+    "haiku": [
+      "medium",
+      "low"
+    ]
   },
   "session:cheap: add a log line": {
     "opus": "low",
     "sonnet": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "session:cheap: document a flag": {
     "opus": "low",
     "sonnet": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "session:cheap: commit message": {
     "opus": "low",
     "sonnet": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "session:cheap: explain an error": {
     "opus": [
@@ -508,12 +607,17 @@
       "undecided"
     ],
     "fable": "low",
-    "why": "Diagnosing one error message is a small task. Low is cheapest; undecided is fine too as it comes before other work."
+    "why": "Diagnosing one error message is a small task. Low is cheapest; undecided is fine too as it comes before other work.",
+    "haiku": "low"
   },
   "session:cheap: add a field following the pattern": {
     "opus": "low",
     "sonnet": "medium",
-    "fable": "low"
+    "fable": "low",
+    "haiku": [
+      "low",
+      "medium"
+    ]
   },
   "session:cheap: update snapshots": {
     "opus": [
@@ -525,12 +629,14 @@
       "low",
       "medium"
     ],
-    "why": "An intended format change: updating snapshots and running tests is mostly mechanical, so low is fine. Fable: As pagination, and low or medium on Opus too."
+    "why": "An intended format change: updating snapshots and running tests is mostly mechanical, so low is fine. Fable: As pagination, and low or medium on Opus too.",
+    "haiku": "medium"
   },
   "session:cheap: change a default": {
     "opus": "low",
     "sonnet": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "session:cheap: convert config": {
     "opus": [
@@ -539,27 +645,32 @@
     ],
     "sonnet": "medium",
     "fable": "low",
-    "why": "A known pattern with a small loader change. Low or medium."
+    "why": "A known pattern with a small loader change. Low or medium.",
+    "haiku": "medium"
   },
   "session:cheap: delete dead code": {
     "opus": "medium",
     "sonnet": "medium",
-    "fable": "medium"
+    "fable": "medium",
+    "haiku": "medium"
   },
   "session:cheap: small UI tweak": {
     "opus": "low",
     "sonnet": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "session:cheap: follow-up, same again": {
     "opus": "low",
     "sonnet": "medium",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "session:cheap: follow-up, run and fix the tests": {
     "opus": "low",
     "sonnet": "medium",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "medium"
   },
   "session:cheap: ordinary feature with tests": {
     "opus": "medium",
@@ -568,7 +679,11 @@
       "low",
       "medium"
     ],
-    "why": "Fable: As the ordinary feature."
+    "why": "Fable: As the ordinary feature.",
+    "haiku": [
+      "low",
+      "medium"
+    ]
   },
   "session:cheap: ordinary bug with a clear cause": {
     "opus": [
@@ -580,19 +695,26 @@
       "medium"
     ],
     "fable": "low",
-    "why": "The cause is stated in the prompt. Either cheap level does it."
+    "why": "The cause is stated in the prompt. Either cheap level does it.",
+    "haiku": "low"
   },
   "session:blind: change empty-state copy": {
     "opus": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "session:blind: DSN from an env var": {
     "opus": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "session:blind: bump Node in the Dockerfile": {
     "opus": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": [
+      "low",
+      "medium"
+    ]
   },
   "session:blind: add an index": {
     "opus": [
@@ -600,15 +722,24 @@
       "medium"
     ],
     "fable": "low",
-    "why": "One index in a new migration is mechanical. The judge preferred medium, low is fine."
+    "why": "One index in a new migration is mechanical. The judge preferred medium, low is fine.",
+    "haiku": [
+      "low",
+      "medium"
+    ]
   },
   "session:blind: sortable members table": {
     "opus": "medium",
-    "fable": "low"
+    "fable": "low",
+    "haiku": [
+      "medium",
+      "low"
+    ]
   },
   "session:blind: CSV user import": {
     "opus": "medium",
-    "fable": "medium"
+    "fable": "medium",
+    "haiku": "medium"
   },
   "session:blind: flaky test": {
     "opus": [
@@ -619,15 +750,21 @@
       "medium",
       "high"
     ],
-    "why": "Fable: Flaky tests usually hide timing. Medium or high."
+    "why": "Fable: Flaky tests usually hide timing. Medium or high.",
+    "haiku": "high"
   },
   "session:blind: stale permission cache": {
     "opus": "high",
-    "fable": "high"
+    "fable": "high",
+    "haiku": "high"
   },
   "session:blind: codebase tour first": {
     "opus": "undecided",
-    "fable": "undecided"
+    "fable": "undecided",
+    "haiku": [
+      "low",
+      "medium"
+    ]
   },
   "session:blind: morning, check CI": {
     "opus": [
@@ -635,19 +772,22 @@
       "low"
     ],
     "fable": "low",
-    "why": "As the repo question."
+    "why": "As the repo question.",
+    "haiku": "low"
   },
   "session:blind: class components to hooks": {
     "opus": "medium",
     "fable": [
       "low",
       "medium"
-    ]
+    ],
+    "haiku": "medium"
   },
   "session:blind: cross-tenant data audit": {
     "opus": "high",
     "fable": "high",
-    "why": "Fable: Hard security work, but high covers it. Fable went to xhigh on the blind run, a known miss."
+    "why": "Fable: Hard security work, but high covers it. Fable went to xhigh on the blind run, a known miss.",
+    "haiku": "high"
   },
   "session:blind: overnight framework upgrade": {
     "opus": [
@@ -658,17 +798,20 @@
       "medium",
       "high"
     ],
-    "why": "Fable: As the unattended build: high is the default Anthropic advises for Fable."
+    "why": "Fable: As the unattended build: high is the default Anthropic advises for Fable.",
+    "haiku": "high"
   },
   "session:blind: follow-up, move the toggle": {
     "opus": "low",
-    "fable": "low"
+    "fable": "low",
+    "haiku": "low"
   },
   "session:blind: user asks for care": {
     "opus": "high",
     "fable": [
       "high",
       "xhigh"
-    ]
+    ],
+    "haiku": "high"
   }
 }
