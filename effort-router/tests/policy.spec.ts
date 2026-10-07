@@ -577,7 +577,7 @@ describe('the spend ledger', () => {
       'Changed by the router: 12 requests',
       '- subagents, medium → low: 10 requests, 2.0k output tokens (avg 200, vs 1.0k for those left at medium)',
       '- main conversation, medium → high: 2 requests, 6.0k output tokens (avg 3.0k, vs 1.0k for those left at medium)',
-      'Set by agent definitions: 1 request (low 1).',
+      'Set by you or an agent definition: 1 request (low 1).',
       "The router's own assessments: 1, using 50 output and 4.0k input tokens.",
       'By repo (output tokens): mods 12k, employment 2.0k.',
       'No "saved" figure: the router lowers easy tasks and raises hard ones, so these averages can\'t show what a changed request would have cost.',

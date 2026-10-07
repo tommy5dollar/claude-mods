@@ -2,6 +2,13 @@
 
 ## effort-router
 
+### 0.18.1 (2026-10-07)
+
+- **A subagent you ask for at a level keeps it.** Claude Code 2.1.292 lets Claude launch a subagent at a level you
+  asked for. The router now leaves that subagent alone, as it does one whose agent definition sets an effort. Before,
+  it replaced your level with its own. `/er report` counts both under "Set by you or an agent definition".
+- **One install command** on Claude Code 2.1.292 or later: `claude plugin install effort-router --marketplace tommy5dollar/effort-router`.
+
 ### 0.18.0 (2026-10-05)
 
 - **The repo is now `tommy5dollar/effort-router`** (it was `tommy5dollar/claude-plugins`), and its marketplace is now

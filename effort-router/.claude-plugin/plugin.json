@@ -1,6 +1,6 @@
 {
   "name": "effort-router",
-  "version": "0.18.0",
+  "version": "0.18.1",
   "description": "Make your Claude Code usage go up to twice as far. Picks the right reasoning effort for every prompt and every subagent, so easy work stops burning your limits and answers come back sooner.",
   "author": {
     "name": "Tommy Long",
@@ -33,7 +33,7 @@
     "routeSubagents": {
       "type": "boolean",
       "title": "Route subagents",
-      "description": "Give each subagent its own effort level: the agent starting it says what the subagent needs on the model it runs on. An agent whose definition sets an effort keeps it, and Haiku agents are left alone. Off: subagents use the session level.",
+      "description": "Give each subagent its own effort level: the agent starting it says what the subagent needs on the model it runs on. An agent whose definition sets an effort keeps it, as does one you asked Claude to run at a level, and Haiku agents are left alone. Off: subagents use the session level.",
       "required": false,
       "default": true
     },

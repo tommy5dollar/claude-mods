@@ -722,7 +722,7 @@ export function subagentReport(status: SubagentStatus, shown = 10): string[] {
   for (const agent of recent) {
     const description = cut(agent.description.replace(/\s+/g, ' ').trim() || agent.subagentType || 'a subagent', 60).replace(/… \[\d+ more chars\]$/, '…')
     // A bullet, not an indent: the Desktop app drops leading spaces in command output.
-    lines.push(`- ${agent.level}: ${description} (${agent.byDefinition ? 'set by its agent definition' : agent.reason})`)
+    lines.push(`- ${agent.level}: ${description} (${agent.byDefinition && agent.reason.startsWith('from ') ? 'set by its agent definition' : agent.reason})`)
   }
   return lines
 }
@@ -1020,7 +1020,7 @@ export function spendReport(ledgers: readonly SpendLedger[], period: SpendPeriod
   const defined = rows.filter(r => r.byDefinition)
   if (defined.length > 0) {
     const levels = [...group(defined, r => r.to)].sort(([a], [b]) => byLevelOrder(a, b)).map(([level, list]) => `${level} ${sum(list).requests}`)
-    lines.push(`Set by agent definitions: ${plural(sum(defined).requests, 'request')} (${levels.join(', ')}).`)
+    lines.push(`Set by you or an agent definition: ${plural(sum(defined).requests, 'request')} (${levels.join(', ')}).`)
   }
 
   const reads = chosen.flatMap(l => l.reads)

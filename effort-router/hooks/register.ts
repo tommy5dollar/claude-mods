@@ -190,6 +190,12 @@ const MAX_INSTRUCTIONS_CHARS = 80_000
 const SESSION_CHECK_MAX_TOKENS = 4000
 /** Routed subagents kept per session, for turn.step and `/er status`. */
 const MAX_ROUTED_AGENTS = 200
+/** The tool that launches subagents. Since 2.1.292 its call can carry an `effort`, set only when someone asked for one. */
+const AGENT_TOOL = 'Agent'
+/** Efforts asked for in Agent calls, by tool_use_id, from the call until its spawn. */
+const ASKED_EFFORT = new Map<string, Level>()
+/** The reason recorded for a subagent whose Agent call set its effort. */
+const ASKED_REASON = 'asked for when it was launched'
 
 const FALLBACK_RULES =
   'Effort buys verification, edge-case testing and independent judgement, not a better approach. Weigh how much is ' +
@@ -901,7 +907,8 @@ function subagentRouting(settings: Settings, session: Session): SubagentStatus['
 }
 
 /**
- * The level for a spawn, decided before it starts. A fork takes the parent's
+ * The level for a spawn, decided before it starts. One whose Agent call asked
+ * for an effort keeps it, untouched like a definition's. A fork takes the parent's
  * level. An agent whose definition sets an effort keeps it: no read, and
  * `byDefinition` so its requests are left to the engine. Anything else waits
  * (at most 30 s) for one read: a fork of the parent plus the brief, else, with
@@ -912,6 +919,8 @@ function subagentRouting(settings: Settings, session: Session): SubagentStatus['
 async function routeSpawn($: EngineInterface, settings: Settings, session: Session, e: AgentSpawnInput): Promise<Pick<RoutedAgent, 'level' | 'reason' | 'byDefinition'> | undefined> {
   const inherited = parentLevel(session.state, session.agents, e.parentAgentId)
   const fallback = (why: string): Proposal | undefined => (inherited ? { level: inherited, reason: `same as its parent: ${why}` } : undefined)
+  const asked = ASKED_EFFORT.get(e.tool_use_id)
+  if (asked) return { level: asked, reason: ASKED_REASON, byDefinition: true }
   if (e.fork) return fallback("it's a fork")
   const definition = definitionFor(e.subagentType, await definitionsOf($, session))
   if (definition?.effort !== undefined) return { level: definition.effort, reason: `from ${definition.source}`, byDefinition: true }
@@ -1096,6 +1105,18 @@ export function register(on: On, options: PluginOptions): void {
     return result
   })
 
+  // An Agent call that asks for an effort (you, CLAUDE.md or a skill asked for one): its subagent keeps it.
+  on('tool.call', { tool: AGENT_TOOL }, async ($, e, next) => {
+    const effort = (e as { effort?: unknown }).effort
+    if (!isLevel(effort)) return next(e)
+    ASKED_EFFORT.set(e.tool_use_id, effort)
+    try {
+      return await next(e)
+    } finally {
+      ASKED_EFFORT.delete(e.tool_use_id)
+    }
+  })
+
   // A subagent is about to start: read its brief (a fork takes its parent's level) BEFORE it starts, and key the
   // level to its agentId. next(e) resolves with the id before the agent's first turn.step (verified live), so its
   // first request already carries it.
@@ -1131,7 +1152,7 @@ export function register(on: On, options: PluginOptions): void {
           }),
         )
         $.ui.log(
-          `effort-router: subagent ${result.agentId} (${e.subagentType}${e.fork ? ', fork' : ''}: ${e.description}) -> ${proposal.level}${proposal.byDefinition ? ' set by its definition, left alone' : ''} (${proposal.reason}) in ${took} ms`,
+          `effort-router: subagent ${result.agentId} (${e.subagentType}${e.fork ? ', fork' : ''}: ${e.description}) -> ${proposal.level}${proposal.byDefinition ? ', left alone' : ''} (${proposal.reason}) in ${took} ms`,
           { to: 'debug' },
         )
         show($)

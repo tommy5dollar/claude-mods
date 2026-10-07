@@ -19,7 +19,7 @@ Free, 30 seconds to install, built on Anthropic's own advice in
 
 <img src="docs/launch.gif" width="720" alt="Claude Code is overthinking your renames. Everyday prompts all run at high and usage drains fast. effort-router picks the effort for every prompt, easy ones drop to low, and usage lasts far longer. Up to 2x the usage, up to 3.5x faster, same results">
 
-- **Subagents.** Without the router, Claude Code launches every subagent at your effort level. With it, each
+- **Subagents.** Without the router, Claude Code launches every subagent at your effort level unless you ask for another. With it, each
   subagent gets the level its own job needs, all session long: low for the file search, high for the tricky review.
 - **Your session.** Your first five prompts are each checked and the level moves to the one that gets the work done
   fastest and cheapest, then it stays there. The footer shows the level in use. Click it to keep that level, switch
@@ -44,9 +44,11 @@ It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the Desktop app's Code tab 
 **In the terminal:**
 
 ```
-claude plugin marketplace add tommy5dollar/effort-router
-claude plugin install effort-router@effort-router
+claude plugin install effort-router --marketplace tommy5dollar/effort-router
 ```
+
+Before Claude Code 2.1.292 that's two commands: `claude plugin marketplace add tommy5dollar/effort-router`, then
+`claude plugin install effort-router@effort-router`.
 
 If the terminal says some options aren't set yet, that's fine: they're optional and the defaults work.
 

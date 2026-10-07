@@ -214,11 +214,12 @@ The router keeps each session's status in that session's ledger, so `claude --re
 
 ## Subagents
 
-Claude can't set a subagent's effort itself: the Agent tool takes a model but no effort. Without the router every subagent runs at the session's level unless its agent definition sets one.
+Without the router every subagent runs at the session's level, unless its agent definition sets one or you ask Claude for one. Since Claude Code 2.1.292 you can ask (`run the reviewer at high`), but Claude is told never to pick a level on its own judgement.
 
 - **Its parent decides.** When Claude launches a subagent, the launch waits for one fork of the parent's conversation, asked which level the subagent needs, with its brief. The parent knows the task and why it's delegating this part, which a brief alone often doesn't say. Then the subagent starts, and every request it makes carries that level. Measured on Opus 5.5: 2.3 to 3.3 seconds, the parent's conversation read from cache, about 2 cents. Before the parent's first reply there's nothing to fork, so it's a separate call that reads the brief alone.
 - **On its own model.** The assessment is told which model the subagent runs on (the Agent call's model, else its definition's, else the parent's) and gets that model's notes. Your rules and your organisation's apply here too.
 - **Haiku agents are left alone.** A subagent on Haiku (the built-in Explore agent runs there) or on another model the router doesn't support isn't assessed.
+- **A level you ask for wins.** If the Agent call sets an effort because you, a CLAUDE.md or a skill asked for one, the router leaves that subagent alone.
 - **An agent's own `effort:` wins.** If the agent's definition sets an effort, the router leaves its requests alone and the engine applies that level. The router finds the definition by its `name:` in the project's `.claude/agents/*.md`, then your `~/.claude/agents/*.md`, and in the `agents` key of policy, project and user settings. The first definition with that name decides, as it does for the engine.
 - **Forks and failures take the parent's level.** A fork shares its parent's context, so it isn't assessed. If an assessment fails, times out or gives no level, the subagent takes its parent's level too.
 - **Turning the router off** sends subagents back to your effort setting. Turning it on brings their routed levels back.
@@ -329,7 +330,7 @@ Claude Code's own `query_source` attribute says whose request it was. In testing
 and a general-purpose subagent was `agent:builtin:general-purpose`. Check the values your own sessions send.
 
 - **What moved:** `effort` differs from `effort_router.setting`. On the main thread that's the router. On a subagent
-  it's the router or the agent definition's own `effort:`.
+  it's the router, the agent definition's own `effort:` or a level you asked for.
 - **The values are the session's, not the request's.** Claude Code gives a plugin no way to tie a record to one request,
   so a subagent's record carries its session's status and setting.
 - **Nothing is sent anywhere new.** The attributes ride on records Claude Code was already sending to your collector.
