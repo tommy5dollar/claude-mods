@@ -25,7 +25,7 @@ const HERE = import.meta.dir
 const LIVE = resolve(HERE, '..')
 const routerDir = resolve(flag('router') ?? LIVE)
 const label = flag('label') ?? (routerDir === LIVE ? 'live' : routerDir.split(/[\\/]/).slice(-2).join('/'))
-const alias = (flag('model') ?? 'opus') as 'opus' | 'sonnet' | 'fable'
+const alias = (flag('model') ?? 'opus') as 'opus' | 'sonnet' | 'fable' | 'haiku'
 const runs = Math.max(1, Number(flag('runs') ?? 3))
 const only = flag('only')
 const set = flag('set')
@@ -38,10 +38,11 @@ type Got = Level | 'undecided' | 'unusable'
 const policy: any = await import(join(routerDir, 'hooks', 'policy.ts'))
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const live: any = await import(join(LIVE, 'hooks', 'policy.ts'))
-const known = live.supportedModel(alias) as { id: string; name: string; notesFile: string }
+const known = live.supportedModel(alias) as { id: string; name: string; notesFile: string; highest?: Level }
 /** Claude Code's default level per model: what a session is on before the router does anything. */
 const setting: Level = (flag('setting') as Level) ?? (alias === 'fable' ? 'high' : 'medium')
-const levels: readonly Level[] = policy.levelsUpTo()
+/** The levels on offer: up to the default highest, or the model's own lower cap (high on Haiku). */
+const levels: readonly Level[] = policy.levelsUpTo(known.highest)
 const strip = (text: string) => text.replace(/<!--[\s\S]*?-->/g, '').trim()
 const rules = readFileSync(join(routerDir, 'rules', 'default.md'), 'utf8')
 const notes = { name: known.name, notes: strip(readFileSync(join(routerDir, 'rules', 'models', known.notesFile), 'utf8')) }
