@@ -14,9 +14,11 @@ and enter `tommy5dollar/effort-router`. The app then opens the new marketplace: 
 that screen, it's under effort-router at the bottom of Plugins, Discover). In the terminal:
 
 ```
-claude plugin marketplace add tommy5dollar/effort-router
-claude plugin install effort-router@effort-router
+claude plugin install effort-router --marketplace tommy5dollar/effort-router
 ```
+
+Before Claude Code 2.1.292 that's two commands: `claude plugin marketplace add tommy5dollar/effort-router`, then
+`claude plugin install effort-router@effort-router`.
 
 Then start a new session. In the Desktop app the footer appears once you've sent the first message.
 
