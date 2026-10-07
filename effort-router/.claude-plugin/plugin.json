@@ -20,15 +20,9 @@
     "highestLevel": {
       "type": "string",
       "title": "Highest level",
-      "description": "The highest effort the router picks. xhigh (default): max rarely does better than xhigh on the current models and can overthink. Choose max to allow it. If your own effort setting is higher, the router can pick up to it.",
+      "description": "The highest effort the router picks: medium, high, xhigh or max. xhigh (default): max rarely does better than xhigh on the current models and can overthink. Set max to allow it. If your own effort setting is higher, the router can pick up to it.",
       "required": false,
-      "default": "xhigh",
-      "options": [
-        "medium",
-        "high",
-        "xhigh",
-        "max"
-      ]
+      "default": "xhigh"
     },
     "routeSubagents": {
       "type": "boolean",
