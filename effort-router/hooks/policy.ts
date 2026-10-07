@@ -4,7 +4,7 @@
  * the text the mod shows. No `$`, no engine: `bun test` runs it directly.
  *
  * Policy source: Anthropic, "Using Claude Code: Spending your effort",
- * Thariq Shihipar, 2026-09-25 (https://claude.dev/blog/spending-your-effort/).
+ * Thariq Shihipar, 2026-09-25 (Anthropic's blog).
  */
 
 export type Level = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -628,7 +628,7 @@ export function definitionEffort(value: unknown): Level | number | undefined {
  * `name` and `effort`).
  */
 export function frontmatterOf(text: string): Record<string, string> | undefined {
-  const match = text.replace(/^﻿/, '').match(/^---\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)/)
+  const match = text.replace(/^\uFEFF/, '').match(/^---\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)/)
   if (!match) return undefined
   const fields: Record<string, string> = {}
   for (const line of (match[1] as string).split(/\r?\n/)) {
