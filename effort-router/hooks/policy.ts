@@ -492,15 +492,27 @@ function proposalOf(record: Record<string, unknown>): Proposal | undefined {
  * router stands aside, because its rules and notes were written for these
  * levels. A new model needs a new version of the plugin.
  */
-export type SupportedModel = { id: string; alias: string; name: string; notesFile: string }
+export type SupportedModel = {
+  id: string
+  alias: string
+  name: string
+  notesFile: string
+  /** The highest level the router picks on this model, below the highestLevel option. */
+  highest?: Level
+  /** Its subagents are checked by a call on this model with their brief alone, not a fork of the parent. */
+  checksOwnBrief?: boolean
+}
 
 export const SUPPORTED_MODELS: readonly SupportedModel[] = [
   { id: 'claude-fable-5-1', alias: 'fable', name: 'Fable 5.1', notesFile: 'fable-5-1.md' },
   { id: 'claude-opus-5-5', alias: 'opus', name: 'Opus 5.5', notesFile: 'opus-5-5.md' },
   { id: 'claude-sonnet-5-5', alias: 'sonnet', name: 'Sonnet 5.5', notesFile: 'sonnet-5-5.md' },
+  // A subagent model in practice: short, scoped jobs that a fork of a bigger parent would cost as much to judge as they
+  // save, and where each step above high buys little for many more steps (Haiku 5.5 needs Claude Code 2.1.293).
+  { id: 'claude-haiku-5-5', alias: 'haiku', name: 'Haiku 5.5', notesFile: 'haiku-5-5.md', highest: 'high', checksOwnBrief: true },
 ]
 
-/** `Fable 5.1, Opus 5.5 and Sonnet 5.5`. */
+/** `Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5`. */
 export const SUPPORTED_NAMES = SUPPORTED_MODELS.map(m => m.name).join(', ').replace(/, ([^,]*)$/, ' and $1')
 
 /** The supported model a model id or alias names (`claude-opus-5-5`, `claude-opus-5-5[1m]`, `opus`, a cloud provider's id), or undefined. */

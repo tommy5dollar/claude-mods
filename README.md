@@ -30,7 +30,7 @@ Free, 30 seconds to install, built on Anthropic's own advice in
 
 <img src="docs/footer.gif" width="720" alt="The footer in the Desktop app. A rename is assessed and moves from medium to low, a production bug moves from low to high while the effort picker still says Medium, and clicking the footer opens the band">
 
-It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the Desktop app's Code tab and in the terminal.
+It works with Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5, in the Desktop app's Code tab and in the terminal.
 
 ## Install
 

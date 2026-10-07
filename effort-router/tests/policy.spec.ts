@@ -605,7 +605,7 @@ describe('0.10: models, size, verdicts', () => {
     ])
     expect(['claude-haiku-4-5-20251001', 'claude-opus-4-8', 'claude-opus-5', 'claude-fable-5', 'gpt-x', undefined].map(m => supportedModel(m))).toEqual([undefined, undefined, undefined, undefined, undefined, undefined])
     expect(['claude-haiku-4-5-20251001', 'claude-opus-4-8', 'claude-opus-5-20260101', 'gpt-x', undefined].map(modelName)).toEqual(['Haiku 4.5', 'Opus 4.8', 'Opus 5', 'gpt-x', 'this model'])
-    expect(SUPPORTED_NAMES).toBe('Fable 5.1, Opus 5.5 and Sonnet 5.5')
+    expect(SUPPORTED_NAMES).toBe('Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5')
   })
 
   test('on an unsupported model the router stands aside: no level, no assessments, off in the footer and band', () => {
@@ -615,7 +615,7 @@ describe('0.10: models, size, verdicts', () => {
     expect(appliedLevel(away)).toBeUndefined()
     expect(wantsAssessment(onModel(freshState(), 'claude-opus-4-8'), 5)).toBe(false)
     expect(footerLabel(away, VIEW).text).toBe('⏸️ MEDIUM')
-    expect(bandHeadline(away, VIEW)).toBe('Effort router: off on Haiku 4.5. It works with Fable 5.1, Opus 5.5 and Sonnet 5.5.')
+    expect(bandHeadline(away, VIEW)).toBe('Effort router: off on Haiku 4.5. It works with Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5.')
     expect(bandActions(away, VIEW).map(a => a.label)).toEqual(['Hide'])
   })
 

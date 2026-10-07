@@ -2,6 +2,17 @@
 
 ## effort-router
 
+### 0.19.0 (2026-10-07)
+
+- **Haiku 5.5 is supported** (Claude Code 2.1.293 or later). It's the first Haiku with effort levels, and without the
+  router a Haiku subagent runs at its parent's level, so an Opus session on xhigh runs its Haiku helpers on xhigh too.
+  - A Haiku 5.5 subagent is judged by a call on Haiku that reads its brief alone, not a fork of the parent. Haiku jobs
+    are short and self-contained, and a fork on a bigger parent model could cost about what it saves.
+  - The router picks up to high on Haiku. Each level above that buys little there for many more steps.
+  - Its notes (`rules/models/haiku-5-5.md`) cover Anthropic's advice, how each level behaves, cost and steps against
+    medium, and the price step at 100,000 tokens.
+  - Haiku 4.5 is still left alone.
+
 ### 0.18.1 (2026-10-07)
 
 - **A subagent you ask for at a level keeps it.** Claude Code 2.1.292 lets Claude launch a subagent at a level you

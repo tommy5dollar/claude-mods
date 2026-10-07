@@ -52,6 +52,7 @@ import {
   parseLedger,
   parseRoute,
   parseSubagentReply,
+  rank,
   renderTranscript,
   restored,
   routeReport,
@@ -102,9 +103,10 @@ import {
  *
  * Subagents are routed apart: each spawn waits for one read, a fork of its
  * parent plus the subagent's brief, and its requests carry that level (forks,
- * and failed reads, take the parent's level). An agent whose definition sets
- * an effort is left to it, and so is one on a model the router doesn't
- * support (Haiku).
+ * and failed reads, take the parent's level). A Haiku 5.5 subagent is read by
+ * Haiku from its brief alone, and offered up to high. An agent whose definition
+ * sets an effort is left to it, and so is one on a model the router doesn't
+ * support.
  *
  * The session's state lives in its ledger (`~/.claude/effort-router/spend/
  * <session>.json`) beside its requests and assessments. Fail open everywhere:
@@ -206,7 +208,7 @@ const FALLBACK_RULES =
 
 const HUMAN_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
 /** Sent with each telemetry record, so a collector can tell versions apart. Keep in step with plugin.json. */
-const VERSION = '0.18.0'
+const VERSION = '0.19.0'
 const COMMANDS = ['effort-router', 'er']
 
 function settingsOf(options: PluginOptions): Settings {
@@ -307,8 +309,14 @@ const seenSetting = (session: Session): Level | undefined => (session.pickerSeen
 /** The level an assessment is judged against: the router's own, else your setting once seen. */
 const levelInForce = (session: Session): Level | undefined => appliedLevel(session.state) ?? seenSetting(session)
 
+/** The highest level the router picks on a model: the `highestLevel` option, or the model's own lower cap. */
+const highestOn = (settings: Settings, model: string | undefined): Level => {
+  const cap = supportedModel(model)?.highest
+  return cap && rank(cap) < rank(settings.highestLevel) ? cap : settings.highestLevel
+}
+
 /** The levels an assessment is offered. */
-const levelsFor = (settings: Settings, session: Session): readonly Level[] => offeredLevels(settings.highestLevel, shownSetting(session))
+const levelsFor = (settings: Settings, session: Session): readonly Level[] => offeredLevels(highestOn(settings, session.model), shownSetting(session))
 
 /** The last assessment, from the ledger, so the band survives a resume. */
 function lastOf(session: Session): LastAssessment | undefined {
@@ -924,8 +932,9 @@ async function routeSpawn($: EngineInterface, settings: Settings, session: Sessi
   if (e.fork) return fallback("it's a fork")
   const definition = definitionFor(e.subagentType, await definitionsOf($, session))
   if (definition?.effort !== undefined) return { level: definition.effort, reason: `from ${definition.source}`, byDefinition: true }
-  // The model it runs on: the Agent call's, else its definition's, else the parent's. Haiku, or any model the
-  // router doesn't support, is left alone.
+  // The model it runs on: the Agent call's, else its definition's, else the parent's. A model the router doesn't
+  // support is left alone. (An alias that resolves to an older model, such as haiku on a cloud provider, gets no
+  // effort at turn.step, which only rewrites a request that carries one.)
   const runsOn = e.model ?? definition?.model ?? e.parentModel
   const known = supportedModel(runsOn)
   if (!known) {
@@ -935,18 +944,24 @@ async function routeSpawn($: EngineInterface, settings: Settings, session: Sessi
   const rules = await loadRules($)
   const brief = { subagentType: e.subagentType, description: e.description, prompt: e.prompt }
   const notes = await modelNotes($, known.id)
-  const levels = levelsFor(settings, session)
-  const read = async () => {
-    // The parent knows the task and why it delegates this part: ask a fork of it (cached, a few seconds).
-    const forked = await $.model.fork({ prompt: subagentForkPrompt({ rules: rules.composed.text, brief, runsOn: known.name, model: notes, maxChars: MAX_CHARS, levels }) })
-    if (forked.isAnswered || forked.reason !== 'nothing-to-fork') return forked
-    return $.model.complete({
+  // Up to the parent's own setting at most, and never above this model's cap.
+  const levels = levelsFor(settings, session).filter(level => rank(level) <= rank(highestOn(settings, known.id)))
+  const alone = () =>
+    $.model.complete({
       model: known.id,
       system: subagentSystem(rules.composed.text, notes, levels),
       prompt: subagentPrompt(brief, MAX_CHARS),
       maxTokens: SESSION_CHECK_MAX_TOKENS,
       timeoutMs: TIMEOUT_MS,
     })
+  const read = async () => {
+    // A small model's subagents get short, self-contained briefs: judging one on the parent's model could cost what
+    // it saves, and slow the helper chosen for speed. Read the brief on the model itself.
+    if (known.checksOwnBrief) return alone()
+    // The parent knows the task and why it delegates this part: ask a fork of it (cached, a few seconds).
+    const forked = await $.model.fork({ prompt: subagentForkPrompt({ rules: rules.composed.text, brief, runsOn: known.name, model: notes, maxChars: MAX_CHARS, levels }) })
+    if (forked.isAnswered || forked.reason !== 'nothing-to-fork') return forked
+    return alone()
   }
   const result = await timed($, TIMEOUT_MS, read()).catch((error: unknown) => {
     $.ui.log(`effort-router: subagent read failed: ${String(error)}`, { to: 'debug' })

@@ -6,8 +6,9 @@ and cheapest, up or down. Then the level locks for the rest of the session. Each
 
 <img src="https://raw.githubusercontent.com/tommy5dollar/effort-router/main/docs/launch.gif" width="720" alt="Claude Code is overthinking your renames. Everyday prompts all run at high and usage drains fast. effort-router picks the effort for every prompt, easy ones drop to low, and usage lasts far longer. Up to 2x the usage, up to 3.5x faster, same results">
 
-It works with Fable 5.1, Opus 5.5 and Sonnet 5.5, in the terminal and in the Desktop app's Code tab. It requires
-Claude Code 2.1.287 or later in the terminal, or the Desktop app with Claude Code 2.1.286 or later.
+It works with Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5, in the terminal and in the Desktop app's Code tab. It
+requires Claude Code 2.1.287 or later in the terminal, or the Desktop app with Claude Code 2.1.286 or later. Haiku 5.5
+needs Claude Code 2.1.293 or later.
 
 In the Desktop app, first add the marketplace: go to Customize, then Plugins, Add marketplace, Add from a repository,
 and enter `tommy5dollar/effort-router`. The app then opens the new marketplace: click **Add** on effort-router (if you've left
@@ -221,7 +222,8 @@ Without the router every subagent runs at the session's level, unless its agent 
 
 - **Its parent decides.** When Claude launches a subagent, the launch waits for one fork of the parent's conversation, asked which level the subagent needs, with its brief. The parent knows the task and why it's delegating this part, which a brief alone often doesn't say. Then the subagent starts, and every request it makes carries that level. Measured on Opus 5.5: 2.3 to 3.3 seconds, the parent's conversation read from cache, about 2 cents. Before the parent's first reply there's nothing to fork, so it's a separate call that reads the brief alone.
 - **On its own model.** The assessment is told which model the subagent runs on (the Agent call's model, else its definition's, else the parent's) and gets that model's notes. Your rules and your organisation's apply here too.
-- **Haiku agents are left alone.** A subagent on Haiku (the built-in Explore agent runs there) or on another model the router doesn't support isn't assessed.
+- **Haiku 5.5 agents are judged on Haiku.** A subagent on Haiku 5.5 gets a separate call on Haiku that reads its brief alone, not a fork of the parent. Haiku jobs are short and self-contained, and a fork on a bigger parent model could cost about what it saves and slow down the helper chosen for speed. It's offered up to high, because each level above that buys little on Haiku for many more steps. Without the router, a Haiku subagent runs at its parent's level, so an Opus session on xhigh runs its Haiku helpers on xhigh too.
+- **Other models are left alone.** A subagent on Haiku 4.5, or on another model the router doesn't support, isn't assessed.
 - **A level you ask for wins.** If the Agent call sets an effort because you, a CLAUDE.md or a skill asked for one, the router leaves that subagent alone.
 - **An agent's own `effort:` wins.** If the agent's definition sets an effort, the router leaves its requests alone and the engine applies that level. The router finds the definition by its `name:` in the project's `.claude/agents/*.md`, then your `~/.claude/agents/*.md`, and in the `agents` key of policy, project and user settings. The first definition with that name decides, as it does for the engine.
 - **Forks and failures take the parent's level.** A fork shares its parent's context, so it isn't assessed. If an assessment fails, times out or gives no level, the subagent takes its parent's level too.
@@ -232,7 +234,9 @@ Set `routeSubagents` to `false` to leave subagents at the session's level.
 
 ## Models
 
-The router supports Fable 5.1, Opus 5.5 and Sonnet 5.5. Level names don't mean the same amount of thinking on each, and each responds to effort differently. In Claude Code, Opus 5.5 and Sonnet 5.5 default to medium and Fable 5.1 to high. Opus 5.5 gains most from low to medium and little above high, while Sonnet 5.5 gains a lot at every step. Routing one like another would be a mistake.
+The router supports Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5. Level names don't mean the same amount of thinking on each, and each responds to effort differently. In Claude Code, Opus 5.5, Sonnet 5.5 and Haiku 5.5 default to medium and Fable 5.1 to high. Opus 5.5 gains most from low to medium and little above high, while Sonnet 5.5 gains a lot at every step. Routing one like another would be a mistake.
+
+Haiku 5.5 is the first Haiku with effort levels, and in practice a subagent model. The router picks up to high on it, below the `highestLevel` option, unless your own setting in a Haiku session is higher. Its price goes up 5 times on every token of a request whose prompt passes 100,000 tokens, so its notes tell the check to step up only when the task clearly needs it.
 
 Each has a notes file in [`rules/models/`](rules/models/) on how its levels behave, in the same shape for every model: how effort pays on it, Anthropic's advice for it, then each level with its cost and time against medium and how it behaves. They are heuristics. Benchmark scores are left out, because a few points on a hard benchmark means a few more of the hardest tasks solved, not every task done better. Every assessment carries the notes for the model it's about, after the routing rules. Lines about max are left out unless max is on offer. `/er rules` prints them. The evidence behind each line, with sources, is in [`rules/models/research-2026-10.md`](rules/models/research-2026-10.md) and its [addendum](rules/models/research-2026-10-addendum.md). No eval results are in the notes, ours or anyone's. The router's routing eval ([eval/routing.ts](eval/routing.ts)) checks 87 prompts against an approved level for each, and any change to the prompt, rules or notes has to pass it.
 

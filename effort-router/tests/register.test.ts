@@ -708,8 +708,8 @@ describe('effort-router', () => {
       await submit($, 'fix the crash in the parser')
       expect(world.classifierCalls).toBe(0)
       expect((await footerOf(await mountFooter($))).shown).toBe('⏸️ MEDIUM')
-      expect(await route($, 'status')).toStartWith('Off on Haiku 4.5. It works with Fable 5.1, Opus 5.5 and Sonnet 5.5.')
-      expect(await route($, 'on')).toBe("The router doesn't support Haiku 4.5, so your effort setting applies. It works with Fable 5.1, Opus 5.5 and Sonnet 5.5.")
+      expect(await route($, 'status')).toStartWith('Off on Haiku 4.5. It works with Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5.')
+      expect(await route($, 'on')).toBe("The router doesn't support Haiku 4.5, so your effort setting applies. It works with Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5.")
     })
 
     test('a level set on a supported model is not applied after /model switches to another', async ($, on) => {
@@ -783,7 +783,7 @@ describe('effort-router', () => {
         event: 'api_request',
         attributes: {
           effort: 'high', model: 'claude-sonnet-5-5',
-          'effort_router.version': '0.18.0', 'effort_router.status': 'unlocked', 'effort_router.setting': 'medium', 'effort_router.level': 'high',
+          'effort_router.version': '0.19.0', 'effort_router.status': 'unlocked', 'effort_router.setting': 'medium', 'effort_router.level': 'high',
         },
       })
       // Other records go out untouched.
@@ -973,12 +973,12 @@ describe('effort-router', () => {
       expect(world.sent.at(-1)).toBe('low')
     })
 
-    test('a subagent on Haiku (the call\'s model, or its definition\'s) is left alone: no read, its requests untouched', async ($, on) => {
+    test('a subagent on Haiku 4.5 is left alone: no read, its requests untouched', async ($, on) => {
       const world = worldOf(on)
-      world.files['/repo/.claude/agents/scout.md'] = '---\nname: scout\nmodel: haiku\n---\nSearch things.'
+      world.files['/repo/.claude/agents/scout.md'] = '---\nname: scout\nmodel: claude-haiku-4-5-20251001\n---\nSearch things.'
       await $.session.start(STARTED)
       await atHigh($, world)
-      const asked = await $.agent.spawn({ tool_use_id: 't', prompt: 'search', description: 'd', subagentType: 'Explore', model: 'haiku', parentModel: 'claude-sonnet-5-5', background: true, fork: false } as never)
+      const asked = await $.agent.spawn({ tool_use_id: 't', prompt: 'search', description: 'd', subagentType: 'Explore', model: 'claude-haiku-4-5', parentModel: 'claude-sonnet-5-5', background: true, fork: false } as never)
       const defined = await spawn($, { prompt: 'search', subagentType: 'scout' })
       expect(world.subagentReads).toHaveLength(0)
       const stream = $.turn.step({ turnId: 't1', index: 0, model: 'claude-haiku-4-5-20251001', messageCount: 3, agentId: asked.agentId } as never)
@@ -986,8 +986,23 @@ describe('effort-router', () => {
         // drain
       }
       expect(world.sent).toEqual([undefined])
-      expect(world.debug.some(line => /subagent \(Explore: d\) runs on Haiku 4\.5, left alone|runs on haiku, left alone/i.test(line))).toBe(true)
+      expect(world.debug.some(line => /subagent \(Explore: d\) runs on Haiku 4\.5, left alone/i.test(line))).toBe(true)
       expect(defined).toBeDefined()
+    })
+
+    test('a subagent on Haiku 5.5 is read by Haiku from its brief (no fork) and offered up to high', async ($, on) => {
+      const world = worldOf(on)
+      world.files['/repo/.claude/agents/scout.md'] = '---\nname: scout\nmodel: haiku\n---\nSearch things.'
+      await $.session.start(STARTED)
+      await atHigh($, world)
+      world.subagentReply = '{"decision":"lock","level":"xhigh","reason":"long hunt"}'
+      const id = await spawn($, { prompt: 'search every module for X', subagentType: 'scout' })
+      expect(world.subagentReads).toHaveLength(1)
+      const read = world.subagentReads[0] ?? { system: '', prompt: '' }
+      expect(read.system).not.toBe('') // a separate call with the brief, not a fork of the parent
+      expect(read.system).toContain('lowest to highest: low, medium, high.')
+      await step($, 0, id, 'xhigh', 'claude-haiku-5-5')
+      expect(world.sent).toEqual(['high']) // xhigh asked for, capped at high
     })
 
     test('a denied spawn is not kept', async ($, on) => {
@@ -1017,7 +1032,7 @@ describe('effort-router', () => {
       expect(world.sent).toEqual(['medium', 'high']) // untouched (the engine applies low); the main thread keeps high
       const status = await route($, 'status')
       expect(status).toContain('- low: Probe (set by its agent definition)')
-      expect(world.debug.some(line => /subagent agent-1 \(effort-probe-low: Probe\) -> low set by its definition, left alone/.test(line))).toBe(true)
+      expect(world.debug.some(line => /subagent agent-1 \(effort-probe-low: Probe\) -> low, left alone \(from /.test(line))).toBe(true)
     })
 
     test('a project definition wins over a user one, with or without an effort', async ($, on) => {
