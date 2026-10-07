@@ -1,0 +1,634 @@
+{
+  "session:greeting": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "The user has only said hi and no task has been stated yet, so the effort level stays undecided."
+  },
+  "session:install and run (housekeeping)": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Installing dependencies and starting a dev server is a short, mechanical tool task, which low handles well on Haiku 5.5 at about half the cost of medium."
+  },
+  "session:pull latest": {
+    "right": [
+      "undecided"
+    ],
+    "best": "undecided",
+    "why": "Pulling the latest code is setup and no real task has been stated yet, so the level should stay undecided until the user says what work they want."
+  },
+  "session:repo question before work": {
+    "right": [
+      "undecided",
+      "low"
+    ],
+    "best": "undecided",
+    "why": "Asking what's in the repo is an orientation question before any real task is set, so undecided fits best; if a level must be picked, the read-and-summarise lookup needs only low."
+  },
+  "session:finance build after filler (the live miss)": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "high",
+    "why": "This is a large, loosely specified build with many integrations and plenty of hidden edge cases (auth, pagination, normalising data across platforms), the kind of long agent task where Haiku at medium may stop early or skip checks, so high is worth its cost, though medium is still acceptable."
+  },
+  "session:pull, then what does it do": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Explaining the billing module is a short read-and-summarise task on Haiku 5.5, and low effort handles that well at about half the cost of medium."
+  },
+  "session:ordinary feature": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding a dark mode toggle is a normal agentic coding task: find the settings page and theme handling, wire up the toggle, and persist the choice. Medium handles this well, low risks skipping searches or checks across several files, and high would cost more with no clear gain."
+  },
+  "session:vague feature": {
+    "right": [
+      "undecided",
+      "low"
+    ],
+    "best": "undecided",
+    "why": "The user has only floated a vague idea without defining any concrete work, so the next turn is clarifying discussion; that makes undecided the best fit, with low acceptable as a cheap chat level."
+  },
+  "session:brownfield bug fix": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "medium",
+    "why": "This is a scoped bug fix in existing checkout code, which medium handles well on Haiku, though the mid-session expiry timing has enough edge cases (revalidation, recomputing totals, display versus charge) that high is defensible."
+  },
+  "session:mechanical rename": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "A repo-wide rename is mechanical but needs a thorough search: it must catch every call site, import and test, and must not touch lookalikes such as getUserProfile, so medium handles it reliably while low risks skipping a search or stopping early, and high adds cost for no gain."
+  },
+  "session:edge-case tests": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "medium",
+    "why": "The user named the edge cases to test (leap years, DST, bad input), so this is scoped agentic test-writing where medium does the job on Haiku; high is acceptable because DST cases like nonexistent and ambiguous times hide subtleties, but it is usually not needed."
+  },
+  "session:storage engine concurrency": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "A lock-free WAL ring buffer has many hidden edge cases that a smaller model at medium is likely to miss, such as memory ordering, wraparound, ABA, producer/consumer races and durability ordering, and those bugs cause costly rework in a storage engine, so the extra searching and checking at high is worth it."
+  },
+  "session:autonomous vulnerability hunt": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "An unattended, open-ended security audit that also fixes existing auth code needs high, because it searches and checks more and the subtle edge cases make it a long agent task, while medium and low risk missing vulnerabilities, skipping verification or stopping early with no one around to catch it."
+  },
+  "session:autonomous end-to-end build": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "This is a long, unattended agent task to build an app end to end with required verification and no chance to ask questions, and on Haiku the lower levels tend to stop early or claim the work is done without running checks, so high is worth its extra cost."
+  },
+  "session:held out: morning + git status": {
+    "right": [
+      "undecided",
+      "low"
+    ],
+    "best": "undecided",
+    "why": "Running git status is a setup step like pulling code, so no real task has been stated yet, and low would also handle this trivial command fine."
+  },
+  "session:research on current tools": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "high",
+    "why": "This is research across many products that has to be checked against current docs, the kind of knowledge work where Haiku at medium tends to skip searches or lean on stale knowledge, so high's extra searching and checking is worth its cost, though medium could still get it right."
+  },
+  "session:held out: pagination": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding pagination is routine agentic coding on Haiku 5.5, and medium handles it well. It still needs care with query-param validation, the response shape, existing callers and tests, which low might skip. High would add cost without clear need."
+  },
+  "session:held out: payout reconciliation webhook": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Reconciling Stripe payouts against a ledger is a longer agentic build with financial-correctness risks, such as signature verification, idempotent handling of duplicate or out-of-order events, failed or reversed payouts and paging through balance transactions, which Haiku at medium or low is likely to miss and leave for rework."
+  },
+  "session:held out: bank statement importer, vague": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "A task now exists, so undecided no longer applies, but with details still to be decided the next step is a short conversation about the banks, statement formats and destination, which low handles as well as medium at about half the cost."
+  },
+  "session:held out: \"b\" after a lettered question": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding one status column to the orders table is a small, scoped agentic coding change, but it still means finding the project's migration conventions and setting defaults or nullability safely, which medium handles and low might skip, while high would add cost without any gain."
+  },
+  "session:\"2, keep it simple\" after a numbered question": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Moving one backoff constant into config is a small mechanical edit that low handles, and the user asked to keep it simple."
+  },
+  "session:scope narrowed by a later clarification": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "The task has narrowed to fixing a single typo in a login error message, which is a trivial mechanical edit that low effort handles well on Haiku 5.5."
+  },
+  "session:pay: README typo": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "A one-word typo fix in the README is trivial mechanical work that low handles fully at the lowest cost."
+  },
+  "session:AskUserQuestion answers refine the task": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Building a nightly Xero and QuickBooks invoice sync is standard agentic coding that medium handles well on Haiku, and high would add cost and steps on a long task that could push requests past the 100k-token price jump."
+  },
+  "session:pay: what does this repo do": {
+    "right": [
+      "undecided",
+      "low"
+    ],
+    "best": "undecided",
+    "why": "Asking what the repo does is an orientation question before any real work, so the level can stay undecided; if one is chosen now, low is enough to read and summarise the repo."
+  },
+  "session:pay: rename and run tests": {
+    "right": [
+      "low",
+      "medium"
+    ],
+    "best": "low",
+    "why": "Renaming a function everywhere and running the tests is short mechanical work that low handles well on Haiku. Medium is acceptable if low skips the test run, and high would only add cost."
+  },
+  "session:pay: explain fees, no changes": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Explaining how monthly fees are calculated is read-only, but it means tracing the logic across the codebase, and low may skip a search and give an incomplete account, while high would add cost the task doesn't need."
+  },
+  "session:pay: --json flag": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding a --json flag is a small, scoped coding change, but it means finding the CLI code and serializing balance data that may include types like decimals or dates, so medium is the cheapest level that reliably avoids skipped searches or broken output."
+  },
+  "session:pay: CSV exporter": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding a CSV exporter alongside the JSON one is ordinary scoped coding: it means reading the existing exporter, mirroring its fields and handling CSV escaping and flattening, which medium does well; low risks skipping a check, and high would cost more without being needed."
+  },
+  "session:pay: date edge-case tests": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Writing scoped unit tests for date edge cases in one file is standard agentic coding that medium handles well on Haiku 5.5, and the edge cases are named explicitly, so high's extra cost isn't needed."
+  },
+  "session:pay: sketch designs, no code": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Sketching three design options for multi-currency accounts is a scoped design task with no code changes, so medium handles it well; high would add cost without clear benefit, and low risks skipping the codebase context needed to tailor the options."
+  },
+  "session:pay: concurrency-safe billing": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Making a billing job safe to run concurrently on two servers without a unique key has many hidden race conditions and double-charge risks, which is exactly where this smaller model's medium level is likely to miss cases and cause costly rework."
+  },
+  "session:pay: double debit bug": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "high",
+    "why": "Tracing a duplicate payout debit means digging into idempotency, retries and race conditions in payment code, where a missed edge case causes real financial harm. High's extra searching and checking on Haiku is worth the cost, though medium could plausibly manage it."
+  },
+  "session:pay: security review": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "A security review for cross-account access to money is knowledge work full of hidden authorization edge cases across several components. On Haiku, medium is likely to skip searches or checks and miss these, so high's more thorough checking is worth the cost."
+  },
+  "session:cheap: fix a lint error": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Removing one unused import so lint passes is a small mechanical fix, and low effort handles it well at the least cost."
+  },
+  "session:pay: unattended bigint migration": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "This is a long, unattended codebase-wide number-to-bigint migration with many hidden pitfalls (JSON serialization, mixed-type arithmetic errors, division truncation, Math and formatting calls) and a strict instruction to keep going until every test passes, so high's extra checking is worth its cost to avoid lower levels stopping early or claiming success unverified."
+  },
+  "session:pay: fees from a spec": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "medium",
+    "why": "Implementing a documented fee feature is ordinary agentic coding, where medium is Haiku's recommended level; high is also acceptable because money and date logic, such as proration, rounding and month boundaries, can hide edge cases and the spec must be followed closely."
+  },
+  "session:cheap: add a log line": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Adding one debug log line in a named function is a small, mechanical edit well within Haiku 5.5's reach, so low does it fine."
+  },
+  "session:cheap: document a flag": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "This is a small, scoped doc edit: find what --json does and copy the README's existing flag format, so low effort handles it well on Haiku 5.5 and anything higher only adds cost."
+  },
+  "session:cheap: bump a dependency": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Bumping zod within 3.x is mostly mechanical, but the build still has to be run and any type errors fixed, and low tends to skip checks, while high's extra cost buys nothing here."
+  },
+  "session:cheap: commit message": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Writing a commit message for staged changes and committing is a short, mechanical tool task that low handles well on Haiku 5.5."
+  },
+  "session:cheap: explain an error": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Explaining a common undefined-property TypeError, and perhaps glancing at line 12 of format.ts, is a short lookup that low handles well, so a higher level would add cost without adding anything."
+  },
+  "session:cheap: add a field following the pattern": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Mirroring the description field is a mechanical change, but it touches the type, parser, JSON output and tests across several files, so medium is the cheapest level that reliably covers every spot and checks the tests, while low risks skipping a place or a test run."
+  },
+  "session:cheap: update snapshots": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Updating snapshots is mostly mechanical, but the user also asked for a check that nothing else broke, and low risks skipping that run, while high adds cost for no real gain."
+  },
+  "session:cheap: change a default": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Changing a single default value is a small mechanical edit, and low effort handles it reliably at the lowest cost."
+  },
+  "session:cheap: convert config": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is a small conversion, but it changes existing loader code and may need a YAML dependency plus a search for other references to settings.json, which low might skip, while high would add cost for no real gain."
+  },
+  "session:cheap: delete dead code": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Removing a dead exporter and its exclusive dependencies is scoped agentic coding that needs reliable reference searches, which low may skip, but it isn't complex enough to justify high's extra cost on Haiku."
+  },
+  "session:cheap: small UI tweak": {
+    "right": [
+      "low",
+      "medium"
+    ],
+    "best": "low",
+    "why": "This is a small, scoped UI edit (bold the header and reorder the currency code), so low should handle it, and medium is only a safe fallback in case the currency formatting turns out to come from a shared helper."
+  },
+  "session:cheap: follow-up, same again": {
+    "right": [
+      "low",
+      "medium"
+    ],
+    "best": "low",
+    "why": "Repeating an established pattern on a second command is mechanical, well-scoped work that low effort handles on Haiku, with medium also acceptable to make sure the tests get run."
+  },
+  "session:cheap: ordinary feature with tests": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding a command with a test is ordinary agentic coding that needs a look through the codebase and a test run, so medium suits it; low risks skipping checks or stopping early, and high would add cost without a clear need."
+  },
+  "session:cheap: follow-up, run and fix the tests": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Running the tests and fixing fallout from a rename is scoped agentic coding, but it can involve missed references such as string or serialized names that low might not search for, and nothing here needs high's extra cost."
+  },
+  "session:blind: change empty-state copy": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Changing a single string is a simple mechanical edit that low effort can handle."
+  },
+  "session:blind: DSN from an env var": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Swapping a hard-coded Sentry DSN for an env var in one file is a small mechanical change that low does well, so any higher level only adds cost."
+  },
+  "session:cheap: ordinary bug with a clear cause": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is a small bug fix plus a test, but it means finding the formatter in an unfamiliar codebase, covering edge cases such as zero and negative amounts, and running the test, which is medium's default agentic-coding territory, while low risks skipping the search or the check."
+  },
+  "session:blind: bump Node in the Dockerfile": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Bumping the Node version is a small mechanical edit, but the user explicitly asked for a build check, which low may skip, and medium can also handle any build breakage without the extra cost of high."
+  },
+  "session:blind: sortable members table": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Adding name and join-date sorting to an existing table is a routine agentic coding task that medium handles well, while low risks skipping the search and checks needed to wire it into the existing code."
+  },
+  "session:blind: add an index": {
+    "right": [
+      "low",
+      "medium"
+    ],
+    "best": "low",
+    "why": "Adding an index on events.user_id in a new migration is a short, mechanical change that follows the existing migration conventions, so low should do it well and medium is the safe ceiling."
+  },
+  "session:blind: CSV user import": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is ordinary agentic feature work (an upload page, CSV parsing, admin-only access, and skipping existing users) that medium handles well on Haiku. Its edge cases are standard rather than hidden, so high would add cost and risk crossing the 100k-token price jump without a likely gain."
+  },
+  "session:blind: morning, check CI": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Checking whether CI is green on main is a simple lookup, which is mechanical tool work that low handles well at the lowest cost."
+  },
+  "session:blind: stale permission cache": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "high",
+    "why": "An intermittent stale-permission cache bug is security-sensitive and likely involves races or missed invalidation paths, so on Haiku the extra searching and checking at high is worth it, though medium could plausibly manage."
+  },
+  "session:blind: codebase tour first": {
+    "right": [
+      "undecided",
+      "low"
+    ],
+    "best": "undecided",
+    "why": "The user is asking an orientation question before stating any task. That makes undecided right, and if a level must be set, low is enough for reading and summarising how a request flows through the code."
+  },
+  "session:blind: class components to hooks": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "medium",
+    "why": "Converting three class components to hooks is ordinary agentic refactoring that medium handles well, though lifecycle-to-effect pitfalls such as stale closures, effect dependencies and setState callbacks make high defensible for strict behaviour preservation."
+  },
+  "session:blind: flaky test": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "high",
+    "why": "An intermittent CI failure usually comes from a hidden race, timing or shared-state issue that needs careful investigation and checking, so high's extra searching and checks are worth it on Haiku. Medium is more likely to settle on a surface fix and report it done without proving the flakiness is gone."
+  },
+  "session:blind: cross-tenant data audit": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "Auditing every API route for cross-organisation data leaks is a long security task with many hidden edge cases, and lower levels on Haiku tend to skip searches or checks and miss some of them."
+  },
+  "session:blind: overnight framework upgrade": {
+    "right": [
+      "high"
+    ],
+    "best": "high"
+  },
+  "session:blind: follow-up, move the toggle": {
+    "right": [
+      "low",
+      "medium"
+    ],
+    "best": "low",
+    "why": "Moving an existing toggle from the settings menu into the header next to the avatar is a small, mechanical UI relocation that low effort handles fine on Haiku 5.5."
+  },
+  "session:blind: user asks for care": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "The user explicitly asked to take time and be really careful, which maps to the highest level on offer, and soft delete touches many queries where missed edge cases would cause rework."
+  },
+  "session:ask: think hard on a small task": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "The user explicitly asked for very hard, deep thinking with way more inference, so the highest offered level (high) matches their words even though the task itself is simple."
+  },
+  "session:ask: low effort on a spec": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "The user explicitly asked for low effort, so low is the right level whatever the task."
+  },
+  "session:ask: xhigh on a typo": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "The user explicitly asked for xhigh, which isn't offered on Haiku 5.5, so the nearest available level, high, is the right one even though the typo fix itself is trivial."
+  },
+  "session:ask: quick one on a money bug": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "The user explicitly asked for speed over thoroughness ('no need to be thorough, just get a fix in fast'), so the matching level is low regardless of the double-debit bug's risk."
+  },
+  "session:ask: max on a rename": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "The user asked for max effort, which isn't offered on this session, so the nearest available level, high, matches their request."
+  },
+  "subagent:web research, tabulate lender criteria": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is scoped web lookup work: twelve data points across four lenders' criteria pages, which medium handles reliably, while low risks skipping searches on a multi-source task and high's extra cost and steps aren't justified."
+  },
+  "subagent:run the tests and report, no fixing": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "This is a mechanical job: run one test command and report the failures without editing anything, so low is enough on Haiku 5.5."
+  },
+  "subagent:summarise a given doc": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "Reading one file and summarising it into 10 bullets with quoted section headings is short, scoped reading and summarising work that low handles well on Haiku 5.5, so higher levels would only add cost."
+  },
+  "subagent:Explore: where is the token refreshed": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "This is a read-only search, but finding every hook and component that triggers the refresh means following call chains across files at medium breadth, where low tends to skip a search or stop early, and high's extra cost isn't needed for scoped exploration."
+  },
+  "session:ask: medium on a security review": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "The user explicitly asked for medium effort, so medium is the right level even though a security review might otherwise warrant more."
+  },
+  "subagent:list npm scripts across the monorepo": {
+    "right": [
+      "low",
+      "medium"
+    ],
+    "best": "low",
+    "why": "Globbing for package.json files (excluding node_modules) and tabulating their scripts is a mechanical lookup that low handles well, with medium as an acceptable margin for thoroughness."
+  },
+  "subagent:add translation keys in the existing format": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "This is a small mechanical edit, adding one known key to two JSON files while keeping the existing nesting, and low handles it well on Haiku 5.5."
+  },
+  "subagent:extract action items from given text": {
+    "right": [
+      "low"
+    ],
+    "best": "low",
+    "why": "This is a short, simple extraction of three action items into a table, so low does it well and is cheapest."
+  },
+  "subagent:debug a failing test after a merge": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "medium",
+    "why": "Finding the root cause of one failing test after a known merge is scoped agentic debugging, which medium handles on Haiku; high is acceptable because currency rounding and refund logic hide edge cases and the fix must be checked, but low would likely skip that check."
+  },
+  "subagent:implement rate limiting from a spec, with tests": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "high",
+    "why": "This is a longer multi-part coding task with a strict spec (atomic Redis token bucket, burst maths, the Retry-After value, env config, exempt internal keys, and both unit and integration tests), and on Haiku high follows strict instructions and runs checks more reliably, though medium could likely manage it."
+  },
+  "subagent:Plan: design proposal for event-driven reconciliation": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "high",
+    "why": "This is a substantial design task for financial reconciliation, with subtle risks around event ordering, idempotency, late settlements and month-end cutoffs, and on Haiku high is the advised level for this kind of knowledge work, though medium would likely produce an acceptable proposal."
+  },
+  "subagent:review a PR for correctness": {
+    "right": [
+      "medium",
+      "high"
+    ],
+    "best": "high",
+    "why": "Reviewing retry middleware means hunting for subtle edge cases (non-idempotent retries, timeout budgets, backoff and jitter, retry storms) that a small model at medium may miss, so high's extra searching and checking is worth its cost on this scoped, read-only review."
+  },
+  "subagent:autonomous port with property tests": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "This is a long, autonomous job: an exact-behaviour port of a payment state machine with property-based tests to iterate until they pass, which is full of hidden edge cases (C# decimal, null and enum semantics) that a small model at medium or low is likely to miss or skip checks on, so high's extra searching, checking and instruction-following is worth its cost."
+  },
+  "subagent:vague: \"same for the invoices table\"": {
+    "right": [
+      "medium"
+    ],
+    "best": "medium",
+    "why": "Applying an earlier change to the invoices table is likely mechanical, but the brief gives no context, so the subagent must work out what \"the same\" means (for example from git history) without stopping early, which low risks and high doesn't need."
+  },
+  "subagent:security review of a branch": {
+    "right": [
+      "high"
+    ],
+    "best": "high",
+    "why": "A security review of an OAuth callback and cookie settings on Haiku is careful knowledge work full of subtle edge cases, such as state/CSRF handling, redirect validation and token leakage, where medium is likely to skip checks and miss findings."
+  }
+}
