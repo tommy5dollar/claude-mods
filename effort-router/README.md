@@ -48,7 +48,8 @@ less to step down from, so it mostly picks off the small tasks. It still steps u
 because a hard task done right first time costs less than the rework, in tokens and in your own time.
 `/er report` shows what ran at each level, so you can see what it did to your own work.
 
-**What routing costs.** Each of the first five prompts waits about 1.5 seconds for an assessment. The first is a
+**What routing costs.** Assessments run on your own login, so they come out of your normal usage, with nothing extra
+to pay or sign up for. The figures here are at API prices. Each of the first five prompts waits about 1.5 seconds for an assessment. The first is a
 separate call that can't use the prompt cache: about 5 cents on Opus 5.5 or 13 cents on Fable 5.1. The other four read
 your conversation from the session's cache, about 3 cents each on Opus. So a session costs about 20 cents to route on
 Opus, then nothing more. A subagent's assessment is about 2 cents.

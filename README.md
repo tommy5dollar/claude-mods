@@ -77,8 +77,9 @@ because reading the conversation costs the same at every level. Over a long sess
 more turns and reads more, and every later request pays to re-read all of it. In a 20-prompt session on Opus at high, the router finished 2:18 sooner and 63 cents cheaper.
 
 On Opus 5.5's default of medium there's less to step down from, so it mostly picks off the small tasks. It still steps
-up when the work clearly needs it, because a hard task done right first time costs less than the rework. Routing costs
-about 20 cents a session on Opus 5.5, and each of the first five prompts waits a second or two for its assessment.
+up when the work clearly needs it, because a hard task done right first time costs less than the rework. Routing comes
+out of your normal usage, with nothing extra to pay or sign up for: about 20 cents' worth a session on Opus 5.5 at API
+prices. Each of the first five prompts waits a second or two for its assessment.
 
 ## What it reads, sends and stores
 
