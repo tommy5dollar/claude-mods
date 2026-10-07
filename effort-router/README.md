@@ -28,7 +28,7 @@ Then start a new session. In the Desktop app the footer appears once you've sent
 - **Using it:** [The footer](#the-footer) · [The band](#the-band) · [Commands](#commands) · [Messages in the conversation](#messages-in-the-conversation) · [Changing the level yourself](#changing-the-level-yourself)
 - **How it decides:** [How it assesses](#how-it-assesses) · [Sessions that started before the router](#sessions-that-started-before-the-router) · [Subagents](#subagents) · [Models](#models) · [Where the effort went](#where-the-effort-went)
 - **Setting it up:** [Options](#options) · [Customising the rules](#customising-the-rules) · [For organisations](#for-organisations) · [Telemetry for organisations](#telemetry-for-organisations) · [Turning it off and uninstalling](#turning-it-off-and-uninstalling)
-- **Reference:** [Known limits](#known-limits) · [Development](#development)
+- **Reference:** [Known limits](#known-limits) · [What each hook does](#what-each-hook-does) · [Development](#development)
 
 ## Why
 
@@ -365,6 +365,30 @@ and a general-purpose subagent was `agent:builtin:general-purpose`. Check the va
 - **The spend report** leaves out a request with no reported usage. Days are UTC.
 - **In the Desktop app a new session loads plugins with its first message.** Until you send something there is no footer and `/er` isn't available. That first message is assessed like any other.
 - **The footer and band draw in the terminal and the Desktop app.** VS Code and `-p` run the router without them, and `/er` is the control there.
+
+## What each hook does
+
+Only `turn.step` changes anything Claude Code does, and it changes one thing: the effort on a request. The rest
+watch, draw or answer `/er`.
+
+| Hook | What it does |
+| --- | --- |
+| `session.start` | Registers `/effort-router` and `/er`, and loads the session's saved status. |
+| `session.end` | After a resume or `/clear`, redraws the footer for the session you moved to. |
+| `command.run` | Answers `/effort-router` and `/er`. |
+| `prompt.context` | Keeps a copy of the CLAUDE.md, rules and memory block for the first assessment. Passes it on unchanged. |
+| `prompt.submit` | Assesses each of the first five prompts before the turn runs. The prompt goes on unchanged. |
+| `tool.call` (AskUserQuestion) | Assesses again once you've answered Claude's questions. The answer goes on unchanged. |
+| `tool.call` (Agent) | Notes an effort the Agent call asked for, so that subagent is left alone. The call goes on unchanged. |
+| `agent.spawn` | Picks a subagent's level before it starts. The spawn goes on unchanged. |
+| `turn.step` | Sets the effort on each model request, and counts the request's tokens for `/er report`. |
+| `turn.complete` | Saves the session's ledger if it changed. |
+| `telemetry.log` | Only when your organisation has set up Claude Code's OpenTelemetry: adds the `effort_router.*` attributes in [Telemetry for organisations](#telemetry-for-organisations) to `api_request` records. It reads nothing else in them and sends nothing anywhere new. |
+| `ui.render` | Draws the footer (`SessionMode`) and the band (`AbovePrompt`). |
+
+**The one file it writes** is the ledger, `~/.claude/effort-router/spend/<session id>.json`. Its path is built from
+your home folder and the session's id, so it isn't fixed text. In it, `caller` says whether a request came from the
+main conversation (`main`) or a subagent (`subagent`).
 
 ## Development
 
