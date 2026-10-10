@@ -2,6 +2,12 @@
 
 ## effort-router
 
+### 0.19.1 (2026-10-10)
+
+- **The band closes itself after Lock, Unlock, Turn off and Turn on.** The change is printed and the footer shows the
+  new state, so there's nothing left to read. Assess keeps it open to show the result, and so does a greyed button or
+  a refusal, whose reason shows in the band.
+
 ### 0.19.0 (2026-10-07)
 
 - **Haiku 5.5 is supported** (Claude Code 2.1.293 or later). It's the first Haiku with effort levels, and without the

@@ -208,7 +208,7 @@ const FALLBACK_RULES =
 
 const HUMAN_ORIGINS = new Set(['composer', 'bridge', 'sdk'])
 /** Sent with each telemetry record, so a collector can tell versions apart. Keep in step with plugin.json. */
-const VERSION = '0.19.0'
+const VERSION = '0.19.1'
 const COMMANDS = ['effort-router', 'er']
 
 function settingsOf(options: PluginOptions): Settings {
@@ -769,7 +769,11 @@ function toggleBand($: EngineInterface, session: Session): void {
   }
 }
 
-/** A band slot: runs its action and keeps the band open on the new state (Hide closes it). */
+/**
+ * A band slot: runs its action. Lock, unlock, off and on close the band once they've printed what changed, since the
+ * footer shows the new state. Assess keeps it open to show the result, and so does a greyed slot or a refusal, whose
+ * note is in the band. Hide closes it.
+ */
 async function bandAction($: EngineInterface, id: string, session: Session, settings: Settings, action: BandAction): Promise<void> {
   if (action.value === 'hide') return closeBand($, session)
   if (action.disabled) {
@@ -786,8 +790,11 @@ async function bandAction($: EngineInterface, id: string, session: Session, sett
       : action.value === 'on-unlocked' ? await doTurnOn($, session)
       : action.value === 'on-locked' ? await doTurnOnLocked($, session)
       : await doAssess($, id, session, settings, undefined)
-    if (done.said) say($, done.said)
-    else if (done.reply && action.value !== 'assess' && action.value !== 'on-assess') session.note = done.reply
+    const assessing = action.value === 'assess' || action.value === 'on-assess'
+    if (done.said) {
+      say($, done.said)
+      if (!assessing) return closeBand($, session)
+    } else if (done.reply && !assessing) session.note = done.reply
   } catch (error) {
     $.ui.log(`effort-router: band action ${action.value} failed: ${String(error)}`, { to: 'debug' })
     session.note = 'That failed. Nothing changed.'

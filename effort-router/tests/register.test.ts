@@ -520,6 +520,8 @@ describe('effort-router', () => {
       await er($)
       await band.press({ key: 'lock' })
       expect(world.lines.at(-1)).toBe('You locked it at high.')
+      expect((await bandOf(band)).headline).toBeUndefined() // a state change closes the band
+      await er($)
       expect(await bandOf(band)).toMatchObject({
         headline: 'Effort router: locked. High (locked by you after 1 prompt).',
         buttons: ['Hide', 'Unlock', 'Turn off', 'Assess'],
@@ -529,6 +531,8 @@ describe('effort-router', () => {
       expect(world.classifierCalls).toBe(1) // locked: not assessed
       await band.press({ key: 'unlock' })
       expect(world.lines.at(-1)).toBe('Unlocked. Assessing again from your next prompt.')
+      expect((await bandOf(band)).headline).toBeUndefined()
+      await er($)
       expect((await bandOf(band)).headline).toStartWith('Effort router: unlocked. High (chosen by the router)')
       expect((await bandOf(band)).headline).toEndWith('Locks after 5 more prompts.')
       await step($, 0)
@@ -560,6 +564,8 @@ describe('effort-router', () => {
       await er($)
       await band.press({ key: 'off' })
       expect(world.lines.at(-1)).toBe('Off. Your effort (medium) applies.')
+      expect((await bandOf(band)).headline).toBeUndefined()
+      await er($)
       expect(await bandOf(band)).toMatchObject({
         headline: 'Effort router: off. Medium (your effort setting).',
         buttons: ['Hide', 'Turn on, locked at high', 'Turn on, unlocked', 'Turn on and assess'],
@@ -576,7 +582,9 @@ describe('effort-router', () => {
       expect(world.sent.at(-1)).toBe('high')
       await done($)
 
+      await er($)
       await band.press({ key: 'off' })
+      await er($)
       await band.press({ key: 'on-unlocked' })
       expect(world.lines.at(-1)).toBe('On, unlocked.')
       expect((await footerOf(footer)).shown).toBe('🔓 MEDIUM ○') // a fresh window from your setting
@@ -783,7 +791,7 @@ describe('effort-router', () => {
         event: 'api_request',
         attributes: {
           effort: 'high', model: 'claude-sonnet-5-5',
-          'effort_router.version': '0.19.0', 'effort_router.status': 'unlocked', 'effort_router.setting': 'medium', 'effort_router.level': 'high',
+          'effort_router.version': '0.19.1', 'effort_router.status': 'unlocked', 'effort_router.setting': 'medium', 'effort_router.level': 'high',
         },
       })
       // Other records go out untouched.

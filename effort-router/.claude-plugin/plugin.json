@@ -1,6 +1,6 @@
 {
   "name": "effort-router",
-  "version": "0.19.0",
+  "version": "0.19.1",
   "description": "Make your Claude Code usage go up to twice as far. Picks the right reasoning effort for every prompt and every subagent, so easy work stops burning your limits and answers come back sooner.",
   "author": {
     "name": "Tommy Long",
